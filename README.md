@@ -30,7 +30,8 @@ Requires a stable Rust toolchain for the `native/` crate.
 ## Building
 
 ```bash
-npm run dist:win    # Windows installer (.exe)
+npm run dist:win    # Windows installer
 npm run dist:mac    # macOS dmg
 npm run dist:linux  # Linux AppImage
 ```
+
