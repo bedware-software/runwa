@@ -1,7 +1,11 @@
-import { BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import path from 'path'
 import { settingsStore } from './settings-store'
 import type { Settings, Theme } from '@shared/types'
+
+const iconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(app.getAppPath(), 'resources', 'icon.png')
 
 const isMac = process.platform === 'darwin'
 
@@ -43,6 +47,7 @@ class SettingsWindow {
       minWidth: 720,
       minHeight: 480,
       show: false,
+      icon: iconPath,
       title: 'runwa — Settings',
       backgroundColor: colors.bg,
       titleBarStyle: isMac ? 'hiddenInset' : 'hidden',

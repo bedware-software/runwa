@@ -1,5 +1,6 @@
 appId: dev.dmitr.runwa
 productName: runwa
+icon: resources/icon.png
 directories:
   output: release
   buildResources: build
@@ -16,6 +17,8 @@ extraResources:
       - index.js
       - index.d.ts
       - package.json
+  - from: resources/icon.png
+    to: icon.png
 asarUnpack:
   - "**/*.node"
   - native/**
