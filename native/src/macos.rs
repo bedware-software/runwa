@@ -160,8 +160,9 @@ unsafe fn cfstring_to_rust(s: CFStringRef) -> Option<String> {
     return Some(String::new());
   }
   let mut buf = vec![0i8; max as usize];
+  // CFStringGetCString returns Boolean (c_uchar), not Rust bool — compare to 0.
   let ok = CFStringGetCString(s, buf.as_mut_ptr(), max, kCFStringEncodingUTF8);
-  if !ok {
+  if ok == 0 {
     return None;
   }
   let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
