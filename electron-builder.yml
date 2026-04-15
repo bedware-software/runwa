@@ -1,0 +1,42 @@
+appId: dev.dmitr.runwa
+productName: runwa
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+extraResources:
+  - from: native
+    to: native
+    filter:
+      - "*.node"
+      - index.js
+      - index.d.ts
+      - package.json
+asarUnpack:
+  - "**/*.node"
+  - native/**
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.utilities
+linux:
+  target:
+    - AppImage
+  category: Utility

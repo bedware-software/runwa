@@ -1,0 +1,37 @@
+[package]
+name = "runwa-native"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned to avoid MSRV bumps in newer 2.x releases. These are the latest
+# versions that build with rustc 1.87. Bump when `rustup update` lands.
+napi = { version = "=2.16.17", default-features = false, features = ["napi4"] }
+napi-derive = "=2.16.13"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+core-graphics = "0.24"
+
+[build-dependencies]
+napi-build = "=2.1.6"
+
+[profile.release]
+lto = true
+strip = "symbols"

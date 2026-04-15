@@ -1,0 +1,25 @@
+{
+  "name": "runwa-native",
+  "version": "0.1.0",
+  "description": "Native window enumeration and focus for runwa",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "runwa-native",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "license": "MIT",
+  "private": true
+}

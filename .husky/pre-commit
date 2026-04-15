@@ -1,0 +1,17 @@
+# Auto-bump patch version in package.json on every commit.
+# Skips during merges/rebases to avoid double-bumping.
+
+GIT_DIR=$(git rev-parse --git-dir)
+if [ -f "$GIT_DIR/MERGE_HEAD" ] || \
+   [ -d "$GIT_DIR/rebase-merge" ] || \
+   [ -d "$GIT_DIR/rebase-apply" ]; then
+  exit 0
+fi
+
+if ! npm version patch --no-git-tag-version >/dev/null; then
+  echo "pre-commit: npm version patch failed — aborting commit" >&2
+  exit 1
+fi
+
+git add package.json
+[ -f package-lock.json ] && git add package-lock.json
