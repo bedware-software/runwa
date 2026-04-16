@@ -42,6 +42,11 @@ const api: ElectronAPI = {
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),
   openSettings: (): Promise<void> => ipcRenderer.invoke('palette:openSettings'),
 
+  // Signal main that the renderer has fresh results and is ready to be shown.
+  paletteReady: (): void => {
+    ipcRenderer.send('palette:ready')
+  },
+
   // Palette drag-to-move — fire-and-forget so a 60Hz pointermove stream
   // doesn't pile up on an awaited IPC queue.
   paletteStartMove: (): void => {

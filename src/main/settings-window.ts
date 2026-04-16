@@ -17,8 +17,8 @@ const isMac = process.platform === 'darwin'
  * A 1–2 pixel delta gets absorbed by the `border-b` under the toolbar.
  */
 const CHROME_COLORS: Record<'light' | 'dark', { bg: string; fg: string }> = {
-  dark: { bg: '#1a1a1a', fg: '#d7d7d7' },
-  light: { bg: '#e8e7ed', fg: '#4c4855' }
+  dark: { bg: '#0f0f0f', fg: '#d7d7d7' },
+  light: { bg: '#fcfcfc', fg: '#1b1b1b' }
 }
 
 function resolveTheme(theme: Theme): 'light' | 'dark' {
@@ -58,7 +58,7 @@ class SettingsWindow {
             titleBarOverlay: {
               color: colors.bg,
               symbolColor: colors.fg,
-              height: 47
+              height: 46
             }
           }),
       webPreferences: {

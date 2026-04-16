@@ -122,9 +122,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  activationHotkey: 'Super+Alt+Space', // Win+Alt+Space on Windows, Cmd+Option+Space on macOS
+  activationHotkey: 'Ctrl+Alt+S',
   openSettingsHotkey: 'Ctrl+,',
-  theme: 'dark',
+  theme: 'system',
   modules: {}
 }
 
@@ -159,6 +159,9 @@ export interface ElectronAPI {
   // Palette window control
   paletteHide: () => Promise<void>
   openSettings: () => Promise<void>
+
+  // Signal that the renderer has fresh results — main waits before showing.
+  paletteReady: () => void
 
   // Palette drag-to-move (fire-and-forget for 60Hz pointermove streams)
   paletteStartMove: () => void

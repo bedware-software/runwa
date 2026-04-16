@@ -1,7 +1,11 @@
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'path'
 import type { ModuleId, PaletteShowPayload } from '@shared/types'
 import { settingsStore } from './settings-store'
+import {
+  focusWindow as nativeFocus,
+  getForegroundWindow
+} from './modules/window-switcher/native'
 
 const DEFAULT_WIDTH = 720
 const DEFAULT_HEIGHT = 520
@@ -17,6 +21,9 @@ class PaletteWindow {
    * (and even `setBounds` if you re-read width/height via `getSize()`)
    * silently grows the window 1–3 px per call. Capturing ONCE at drag
    * start and never re-reading during the gesture pins the size. */
+  /** HWND of the window that was focused before the palette was shown.
+   * Used to restore focus when the user dismisses with Escape. */
+  private previousWindowId: string | null = null
   private moveStart: {
     x: number
     y: number
@@ -100,6 +107,13 @@ class PaletteWindow {
     if (!this.window || this.window.isDestroyed()) this.create()
     const win = this.window!
 
+    // Remember which window had focus so we can restore it on dismiss.
+    try {
+      this.previousWindowId = getForegroundWindow() || null
+    } catch {
+      this.previousWindowId = null
+    }
+
     // Respect the persisted size if the user has resized before.
     const saved = settingsStore.get().paletteSize
     const width = Math.max(saved?.width ?? DEFAULT_WIDTH, MIN_WIDTH)
@@ -113,17 +127,48 @@ class PaletteWindow {
     const y = Math.round(dy + dh * 0.28) // upper third, feels natural for launchers
     win.setBounds({ x, y, width, height })
 
+    // Show the window fully transparent so the compositor starts producing
+    // fresh frames.  Hidden windows keep a stale compositor cache, causing
+    // a one-frame flash of old content when later revealed.  By showing at
+    // opacity 0, the window is invisible to the user but the compositor is
+    // active and will paint the fresh content produced by the search below.
+    win.setOpacity(0)
     win.show()
     win.focus()
 
+    // Tell the renderer to reset & search.
     const payload: PaletteShowPayload = { initialModuleId: moduleId }
     win.webContents.send('palette:show', payload)
+
+    const reveal = (): void => {
+      if (win.isDestroyed()) return
+      // Guard: if the window was hidden (e.g. blur) during the search,
+      // don't re-reveal it.
+      if (!win.isVisible()) return
+      win.setOpacity(1)
+    }
+
+    // Wait for the renderer to signal it has fresh results.
+    // Timeout ensures the window still shows if something goes wrong.
+    const timeout = setTimeout(reveal, 400)
+    ipcMain.once('palette:ready', () => {
+      clearTimeout(timeout)
+      reveal()
+    })
   }
 
-  hide(): void {
+  hide(restoreFocus = false): void {
     if (this.window && !this.window.isDestroyed() && this.window.isVisible()) {
       this.window.hide()
+      if (restoreFocus && this.previousWindowId) {
+        try {
+          nativeFocus(this.previousWindowId)
+        } catch {
+          // Window may no longer exist — ignore.
+        }
+      }
     }
+    this.previousWindowId = null
   }
 
   toggle(moduleId?: ModuleId): void {

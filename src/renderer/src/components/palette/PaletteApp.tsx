@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
-import { Settings as SettingsIcon } from 'lucide-react'
+import { ArrowUpDown, CornerDownLeft, Settings as SettingsIcon } from 'lucide-react'
 import { usePaletteStore } from '@/store/palette-store'
 import { useSettingsStore } from '@/store/settings-store'
 import { keyEventToAccelerator } from '@/lib/hotkey'
@@ -22,7 +22,7 @@ export function PaletteApp() {
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const modules = useSettingsStore((s) => s.modules)
-  const theme = useSettingsStore((s) => s.settings?.theme ?? 'dark')
+  const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const openSettingsHotkey = useSettingsStore(
     (s) => s.settings?.openSettingsHotkey ?? ''
   )
@@ -107,8 +107,7 @@ export function PaletteApp() {
       className="h-full bg-popover text-popover-foreground flex flex-col rounded-md border border-border overflow-hidden"
       onKeyDown={onKeyDown}
     >
-      <div className="p-3 border-b border-border flex items-center gap-2 [-webkit-app-region:drag]">
-        {activeMod && <ModeBadge name={activeMod.name} />}
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2 [-webkit-app-region:drag]">
         <SearchInput
           ref={inputRef}
           value={query}
@@ -119,20 +118,21 @@ export function PaletteApp() {
               : 'Type a command or search…'
           }
         />
+        {activeMod && <ModeBadge name={activeMod.name} />}
       </div>
 
       <ResultsList items={items} selectedIndex={selectedIndex} />
 
-      <div className="h-8 px-3 flex items-center justify-between border-t border-border text-xs text-muted-foreground shrink-0">
+      <div className="h-10 px-3 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
         <div className="flex items-center gap-3">
-          <span>
-            <kbd className="font-mono">↑↓</kbd> navigate
+          <span className="flex items-center gap-1">
+            Navigate <kbd><ArrowUpDown size={11} strokeWidth={2.5} /></kbd>
           </span>
-          <span>
-            <kbd className="font-mono">↵</kbd> select
+          <span className="flex items-center gap-1">
+            Select <kbd><CornerDownLeft size={11} strokeWidth={2.5} /></kbd>
           </span>
-          <span>
-            <kbd className="font-mono">Esc</kbd> dismiss
+          <span className="flex items-center gap-1">
+            Dismiss <kbd>Esc</kbd>
           </span>
         </div>
         <button
@@ -140,8 +140,12 @@ export function PaletteApp() {
           className="flex items-center gap-1 hover:text-foreground transition-colors"
           onClick={() => void window.electronAPI.openSettings()}
         >
-          <SettingsIcon size={12} />
+          <SettingsIcon size={11} />
           Settings
+          {openSettingsHotkey &&
+            openSettingsHotkey.split('+').map((key) => (
+              <kbd key={key}>{key}</kbd>
+            ))}
         </button>
       </div>
     </div>

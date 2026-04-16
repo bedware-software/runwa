@@ -15,7 +15,7 @@ window.electronAPI
     document.documentElement.setAttribute('data-theme', s.theme)
   })
   .catch(() => {
-    // fall back to the `data-theme="dark"` default already on <html>
+    // fall back to the `data-theme="system"` default already on <html>
   })
 
 const container = document.getElementById('root')

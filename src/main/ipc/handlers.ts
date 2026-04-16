@@ -56,7 +56,7 @@ export function registerIpcHandlers(): void {
 
   // Palette / settings window control
   ipcMain.handle('palette:hide', async () => {
-    paletteWindow.hide()
+    paletteWindow.hide(true)
   })
 
   ipcMain.handle('palette:openSettings', async () => {

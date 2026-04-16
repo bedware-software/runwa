@@ -14,7 +14,7 @@ export function SearchInput({ value, onChange, placeholder, ref }: Props) {
   const { onPointerDown } = useWindowDrag()
 
   return (
-    <div className="flex-[5] min-w-0 flex items-center h-8 rounded-md bg-secondary hover:bg-muted focus-within:bg-background [-webkit-app-region:no-drag]">
+    <div className="flex-[5] min-w-0 flex items-center h-8 [-webkit-app-region:no-drag]">
       <input
         ref={ref}
         type="text"
@@ -24,7 +24,7 @@ export function SearchInput({ value, onChange, placeholder, ref }: Props) {
         placeholder={placeholder}
         autoFocus
         spellCheck={false}
-        className="flex-1 h-full px-2.5 bg-transparent border-none text-sm text-foreground outline-none"
+        className="flex-1 h-full bg-transparent border-none text-sm text-foreground outline-none"
       />
     </div>
   )

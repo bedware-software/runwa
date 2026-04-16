@@ -3,13 +3,13 @@ import { useSettingsStore } from '@/store/settings-store'
 import { Sidebar, type SettingsTab } from './Sidebar'
 import { SettingsTitleBar } from './SettingsTitleBar'
 import { GeneralPanel } from './GeneralPanel'
-import { ModulesPanel } from './ModulesPanel'
+import { ModulePanel } from './ModulesPanel'
 
 export function SettingsApp() {
   const [tab, setTab] = useState<SettingsTab>('general')
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
-  const theme = useSettingsStore((s) => s.settings?.theme ?? 'dark')
+  const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const isHydrated = useSettingsStore((s) => s.isHydrated)
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export function SettingsApp() {
 
   if (!isHydrated) {
     return (
-      <div className="h-full bg-background text-muted-foreground flex flex-col">
+      <div className="h-full bg-card text-muted-foreground flex flex-col">
         <SettingsTitleBar />
         <div className="flex-1 flex items-center justify-center text-sm">Loading…</div>
       </div>
@@ -37,13 +37,15 @@ export function SettingsApp() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-background text-foreground">
+    <div className="h-full flex flex-col bg-card text-foreground">
       <SettingsTitleBar />
       <div className="flex-1 flex overflow-hidden">
         <Sidebar current={tab} onChange={setTab} />
         <main className="flex-1 p-6 overflow-y-auto">
           {tab === 'general' && <GeneralPanel />}
-          {tab === 'modules' && <ModulesPanel />}
+          {tab.startsWith('module:') && (
+            <ModulePanel moduleId={tab.slice(7)} />
+          )}
         </main>
       </div>
     </div>

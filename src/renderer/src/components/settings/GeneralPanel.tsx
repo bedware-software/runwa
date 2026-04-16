@@ -1,16 +1,16 @@
 import { useSettingsStore } from '@/store/settings-store'
-import type { Theme } from '@shared/types'
+import { DEFAULT_SETTINGS, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { HotkeyRecorder } from './HotkeyRecorder'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
+  { value: 'system', label: 'System' },
   { value: 'dark', label: 'Dark' },
-  { value: 'light', label: 'Light' },
-  { value: 'system', label: 'System' }
+  { value: 'light', label: 'Light' }
 ]
 
 export function GeneralPanel() {
-  const theme = useSettingsStore((s) => s.settings?.theme ?? 'dark')
+  const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const setTheme = useSettingsStore((s) => s.setTheme)
   const activationHotkey = useSettingsStore(
     (s) => s.settings?.activationHotkey ?? ''
@@ -60,6 +60,7 @@ export function GeneralPanel() {
             scope="Global"
             description="Toggles the command palette from anywhere."
             value={activationHotkey}
+            defaultValue={DEFAULT_SETTINGS.activationHotkey}
             onChange={(v) => void setActivationHotkey(v)}
           />
           <HotkeyRow
@@ -67,6 +68,7 @@ export function GeneralPanel() {
             scope="Window-local"
             description="Only works when a runwa window is focused."
             value={openSettingsHotkey}
+            defaultValue={DEFAULT_SETTINGS.openSettingsHotkey}
             onChange={(v) => void setOpenSettingsHotkey(v)}
           />
         </div>
@@ -80,10 +82,11 @@ interface HotkeyRowProps {
   scope: 'Global' | 'Window-local'
   description: string
   value: string
+  defaultValue?: string
   onChange: (v: string) => void
 }
 
-function HotkeyRow({ title, scope, description, value, onChange }: HotkeyRowProps) {
+function HotkeyRow({ title, scope, description, value, defaultValue, onChange }: HotkeyRowProps) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <div className="flex-1 min-w-0">
@@ -102,7 +105,7 @@ function HotkeyRow({ title, scope, description, value, onChange }: HotkeyRowProp
         </div>
         <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
       </div>
-      <HotkeyRecorder value={value} onChange={onChange} />
+      <HotkeyRecorder value={value} defaultValue={defaultValue} onChange={onChange} />
     </div>
   )
 }

@@ -36,6 +36,7 @@ interface PaletteState {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let pendingReadySignal = false
 
 export const usePaletteStore = create<PaletteState>()(
   immer((set, get) => ({
@@ -106,17 +107,26 @@ export const usePaletteStore = create<PaletteState>()(
     },
 
     onPaletteShow: (initialModuleId?: ModuleId) => {
+      // Cancel any pending debounced search from a previous session.
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer)
+        debounceTimer = null
+      }
+
       set((s) => {
         s.items = []
         s.selectedIndex = 0
         s.resolvedModuleId = undefined
         s.strippedQuery = undefined
         s.activeModuleId = initialModuleId
-        s.isLoading = false
+        s.isLoading = true
         s.query = ''
       })
-      // Kick off an initial empty search so the list populates.
-      get().setQuery('')
+
+      // Run the initial search immediately (no debounce) and signal main
+      // when results are ready so it can reveal the window.
+      pendingReadySignal = true
+      void runSearch('', get, set)
     }
   }))
 )
@@ -157,10 +167,19 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
       s.selectedIndex = 0
       s.isLoading = false
     })
+
+    if (pendingReadySignal) {
+      pendingReadySignal = false
+      window.electronAPI.paletteReady()
+    }
   } catch (err) {
     console.warn('[palette] search failed', err)
     set((s) => {
       s.isLoading = false
     })
+    if (pendingReadySignal) {
+      pendingReadySignal = false
+      window.electronAPI.paletteReady()
+    }
   }
 }

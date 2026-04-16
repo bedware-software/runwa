@@ -6,6 +6,7 @@ import { paletteWindow } from './palette-window'
 import { settingsWindow } from './settings-window'
 import { hotkeyManager } from './hotkey-manager'
 import { registerIpcHandlers, wireSettingsBroadcast } from './ipc/handlers'
+import { trayManager } from './tray'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -40,16 +41,19 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   wireSettingsBroadcast()
 
-  // 6. Global shortcuts — must come after settings is ready
+  // 6. System tray
+  trayManager.init()
+
+  // 7. Global shortcuts — must come after settings is ready
   hotkeyManager.init()
 
-  // 7. Fallback: if the activation hotkey couldn't be registered (another
+  // 8. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
   //    settings window so the user can pick a working chord. Without this
   //    it's impossible to reach settings on first launch.
   if (!hotkeyManager.isActivationRegistered()) {
     console.warn(
-      '[main] activation hotkey not registered — opening settings so you can rebind it'
+      '[main] activation hotkey not registered - opening settings so you can rebind it'
     )
     settingsWindow.open()
   }

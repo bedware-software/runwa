@@ -15,92 +15,76 @@ function iconFromHint(hint: string | undefined): LucideIcon {
   return lookup[name] ?? Icons.Package
 }
 
-export function ModulesPanel() {
-  const modules = useSettingsStore((s) => s.modules)
+interface Props {
+  moduleId: string
+}
+
+export function ModulePanel({ moduleId }: Props) {
+  const module = useSettingsStore((s) => s.modules.find((m) => m.id === moduleId))
   const setEnabled = useSettingsStore((s) => s.setModuleEnabled)
   const setHotkey = useSettingsStore((s) => s.setModuleHotkey)
   const setConfig = useSettingsStore((s) => s.setModuleConfig)
 
+  if (!module) return null
+
+  const Icon = iconFromHint(module.icon)
+
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground mb-1">Modules</h2>
-        <p className="text-xs text-muted-foreground">
-          Toggle modules on/off and assign a hotkey to jump straight into one.
-          Each enabled module contributes results when you search the palette.
-        </p>
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-md bg-accent text-accent-foreground flex items-center justify-center shrink-0">
+          <Icon size={20} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              {module.name}
+            </h2>
+            <Toggle
+              checked={module.enabled}
+              onChange={(v) => void setEnabled(module.id, v)}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {module.description}
+          </p>
+          {module.prefix && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Prefix:{' '}
+              <code className="bg-secondary text-foreground font-mono px-1 py-0.5 rounded">
+                {module.prefix}
+              </code>
+            </div>
+          )}
+        </div>
       </div>
 
-      {modules.length === 0 && (
-        <div className="text-sm text-muted-foreground">
-          No modules registered yet.
+      {module.enabled && module.configFields && module.configFields.length > 0 && (
+        <div className="pt-3 border-t border-border flex flex-col gap-3">
+          {module.configFields.map((field) => (
+            <ConfigField
+              key={field.key}
+              field={field}
+              value={module.config[field.key]}
+              onChange={(value) =>
+                void setConfig(module.id, { [field.key]: value })
+              }
+            />
+          ))}
         </div>
       )}
 
-      {modules.map((m) => {
-        const Icon = iconFromHint(m.icon)
-        return (
-          <div
-            key={m.id}
-            className="bg-card text-card-foreground rounded-md border border-border p-4 flex flex-col gap-3"
-          >
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-md bg-accent text-accent-foreground flex items-center justify-center shrink-0">
-                <Icon size={20} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-medium text-foreground">
-                    {m.name}
-                  </div>
-                  <Toggle
-                    checked={m.enabled}
-                    onChange={(v) => void setEnabled(m.id, v)}
-                  />
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {m.description}
-                </div>
-                {m.prefix && (
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Prefix:{' '}
-                    <code className="bg-secondary text-foreground font-mono px-1 py-0.5 rounded">
-                      {m.prefix}
-                    </code>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {m.enabled && m.configFields && m.configFields.length > 0 && (
-              <div className="pt-3 border-t border-border flex flex-col gap-3">
-                {m.configFields.map((field) => (
-                  <ConfigField
-                    key={field.key}
-                    field={field}
-                    value={m.config[field.key]}
-                    onChange={(value) =>
-                      void setConfig(m.id, { [field.key]: value })
-                    }
-                  />
-                ))}
-              </div>
-            )}
-
-            {m.supportsDirectLaunch && m.enabled && (
-              <div className="flex items-center gap-3 pt-3 border-t border-border">
-                <div className="text-xs text-muted-foreground flex-1">
-                  Direct-launch hotkey
-                </div>
-                <HotkeyRecorder
-                  value={m.directLaunchHotkey ?? ''}
-                  onChange={(v) => void setHotkey(m.id, v || undefined)}
-                />
-              </div>
-            )}
+      {module.supportsDirectLaunch && module.enabled && (
+        <div className="flex items-center gap-3 pt-3 border-t border-border">
+          <div className="text-xs text-muted-foreground flex-1">
+            Direct-launch hotkey
           </div>
-        )
-      })}
+          <HotkeyRecorder
+            value={module.directLaunchHotkey ?? ''}
+            onChange={(v) => void setHotkey(module.id, v || undefined)}
+          />
+        </div>
+      )}
     </div>
   )
 }

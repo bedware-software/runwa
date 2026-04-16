@@ -61,7 +61,7 @@ class HotkeyManager {
         return true
       }
       console.warn(
-        `[hotkey] ${label}: registration returned false for "${accelerator}" — another app may own this chord`
+        `[hotkey] ${label}: registration returned false for "${accelerator}" - another app may own this chord`
       )
       return false
     } catch (err) {

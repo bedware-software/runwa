@@ -14,9 +14,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
 use windows::Win32::UI::WindowsAndMessaging::{
-  EnumWindows, GetWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-  GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow, GWL_EXSTYLE,
-  GW_OWNER, SW_RESTORE, WS_EX_TOOLWINDOW,
+  EnumWindows, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowTextLengthW,
+  GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
+  ShowWindow, GWL_EXSTYLE, GW_OWNER, SW_RESTORE, WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
@@ -224,10 +224,20 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
   let hwnd = HWND(hwnd_val as *mut _);
 
   unsafe {
-    // Un-minimize if needed
-    let _ = ShowWindow(hwnd, SW_RESTORE);
+    // Only restore if the window is minimized. SW_RESTORE also de-maximizes
+    // maximized windows, which the user does not expect.
+    if IsIconic(hwnd).as_bool() {
+      let _ = ShowWindow(hwnd, SW_RESTORE);
+    }
     // Bring to foreground. Returns false if the foreground-lock prevents it —
     // the caller treats false as "window gone" / "refresh listing".
     Ok(SetForegroundWindow(hwnd).as_bool())
+  }
+}
+
+pub fn get_foreground_window() -> napi::Result<String> {
+  unsafe {
+    let hwnd = GetForegroundWindow();
+    Ok((hwnd.0 as isize).to_string())
   }
 }

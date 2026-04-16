@@ -3,7 +3,11 @@
     "allow": [
       "Bash(cargo --version)",
       "Bash(npm --version)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e ':*)",
+      "Bash(npx electron-vite:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

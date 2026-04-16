@@ -57,3 +57,15 @@ pub fn focus_window(id: String) -> napi::Result<bool> {
     Ok(false)
   }
 }
+
+#[napi]
+pub fn get_foreground_window() -> napi::Result<String> {
+  #[cfg(target_os = "windows")]
+  {
+    return windows_impl::get_foreground_window();
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    Ok(String::new())
+  }
+}

@@ -26,6 +26,7 @@ export interface NativeWindow {
 interface NativeAddon {
   listWindows(currentDesktopOnly: boolean, hideSystemWindows: boolean): NativeWindow[]
   focusWindow(id: string): boolean
+  getForegroundWindow(): string
 }
 
 let addon: NativeAddon | null = null
@@ -85,6 +86,10 @@ export function listWindowsCached(
 
 export function focusWindow(id: string): boolean {
   return loadAddon().focusWindow(id)
+}
+
+export function getForegroundWindow(): string {
+  return loadAddon().getForegroundWindow()
 }
 
 export function invalidateCache(): void {
