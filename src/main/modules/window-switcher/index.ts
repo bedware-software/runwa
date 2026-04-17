@@ -86,6 +86,10 @@ export function createWindowSwitcherModule(): PaletteModule {
     manifest: MANIFEST,
 
     async search(query, signal, context) {
+      const tSearch = Date.now()
+      const dtS = (): string => `+${Date.now() - tSearch}ms`
+      const isInitial = query === ''
+      if (isInitial) console.log(`[perf] win-switcher search start`)
       if (signal.aborted) return []
 
       // Default to true on fresh installs where the stored values are missing.
@@ -96,9 +100,28 @@ export function createWindowSwitcherModule(): PaletteModule {
       // the list reflects the current state of the desktop.
       if (query === '') invalidateCache()
 
-      const all = listWindowsCached(currentDesktopOnly, hideSystemWindows).filter(
-        (w) => w.pid !== ownPid && w.title.trim().length > 0
-      )
+      // Title fallback: on macOS CGWindowList hands back blank `title` when
+      // Screen Recording permission isn't granted (common for dev builds
+      // whose ad-hoc TCC grant gets invalidated on every `npm install`).
+      // Fall back to the process name so the list isn't empty, then dedupe
+      // by (pid, effective title) — collapses N untitled windows of the
+      // same app to a single app-level row, while keeping distinct rows
+      // for apps that DO expose real per-window titles.
+      const seen = new Set<string>()
+      const all = listWindowsCached(currentDesktopOnly, hideSystemWindows)
+        .filter((w) => w.pid !== ownPid)
+        .map((w) => {
+          const effective = w.title.trim() || w.processName
+          return { ...w, title: effective }
+        })
+        .filter((w) => {
+          if (w.title.length === 0) return false
+          const key = `${w.pid}\x00${w.title}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+      if (isInitial) console.log(`[perf] win-switcher ${dtS()} listWindows returned ${all.length}`)
 
       if (signal.aborted) return []
 
@@ -113,7 +136,9 @@ export function createWindowSwitcherModule(): PaletteModule {
           exePathsNeedingIcon.push(w.executablePath)
         }
       }
+      if (isInitial) console.log(`[perf] win-switcher ${dtS()} about to warmIconCache (${exePathsNeedingIcon.length} paths)`)
       await warmIconCache(exePathsNeedingIcon)
+      if (isInitial) console.log(`[perf] win-switcher ${dtS()} warmIconCache done`)
 
       if (signal.aborted) return []
 

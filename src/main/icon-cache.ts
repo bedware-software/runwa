@@ -66,12 +66,23 @@ export function getWindowIconDataUrl(hwndId: string): string | null {
 
 // ─── Executable-path icon cache ────────────────────────────────────────────
 //
-// On Windows, size 'normal' returns a 32×32 icon — matches the 32 px result
-// row container (ResultRow.tsx). Bump to 'large' (48×48) if high-DPI displays
-// start looking soft.
+// Platform split:
+//  - Windows: `app.getFileIcon(exe, { size: 'normal' })` → 32×32, matches the
+//    result row's 32 px tile (ResultRow.tsx).
+//  - macOS: `app.getFileIcon` returns a generic placeholder for `.app`
+//    bundles (same 1.6 KB PNG for every app). `nativeImage.createThumbnailFromPath`
+//    routes through QuickLook and returns the real icon — we request 64×64
+//    so it stays crisp on retina when rendered in the 32 px tile.
 
 const cache = new Map<string, string | null>()
 const inflight = new Map<string, Promise<string | null>>()
+
+async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> {
+  if (process.platform === 'darwin') {
+    return nativeImage.createThumbnailFromPath(exePath, { width: 64, height: 64 })
+  }
+  return app.getFileIcon(exePath, { size: 'normal' })
+}
 
 export async function getIconDataUrl(exePath: string | undefined): Promise<string | null> {
   if (!exePath) return null
@@ -82,7 +93,7 @@ export async function getIconDataUrl(exePath: string | undefined): Promise<strin
 
   const p = (async () => {
     try {
-      const img = await app.getFileIcon(exePath, { size: 'normal' })
+      const img = await resolveIconImage(exePath)
       if (img.isEmpty()) {
         cache.set(exePath, null)
         return null

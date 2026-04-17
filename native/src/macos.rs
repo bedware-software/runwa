@@ -32,7 +32,53 @@ use core_graphics::window::{
   kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
   CGWindowListCopyWindowInfo,
 };
+use std::collections::HashMap;
+use std::os::raw::{c_int, c_void};
 use std::process::Command;
+
+// libproc is part of the macOS system library and links automatically.
+// `proc_pidpath` writes the on-disk path of a running process's executable
+// into a caller-supplied buffer — our only route from a CGWindowList PID
+// back to a filesystem path Electron's `app.getFileIcon` can resolve.
+extern "C" {
+  fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
+}
+
+/// Resolve a PID to the enclosing `.app` bundle (e.g.
+/// `/Applications/Finder.app`), falling back to the raw executable path when
+/// the process isn't inside a bundle. Returns `None` when `proc_pidpath`
+/// refuses (EPERM for some Apple internals, or the process has exited).
+///
+/// We walk up to the `.app` ancestor because Electron's `app.getFileIcon`
+/// returns the Finder-style app icon for `Foo.app` but only the generic
+/// binary icon for `Foo.app/Contents/MacOS/Foo`.
+fn pid_to_bundle_path(pid: u32) -> Option<String> {
+  const MAX_PATH: usize = 4096; // PROC_PIDPATHINFO_MAXSIZE
+  let mut buf = vec![0u8; MAX_PATH];
+  let ret = unsafe {
+    proc_pidpath(
+      pid as c_int,
+      buf.as_mut_ptr() as *mut c_void,
+      MAX_PATH as u32,
+    )
+  };
+  if ret <= 0 {
+    return None;
+  }
+  let exe_path = std::str::from_utf8(&buf[..ret as usize]).ok()?.to_string();
+  Some(truncate_to_app_bundle(&exe_path))
+}
+
+fn truncate_to_app_bundle(exe_path: &str) -> String {
+  // `rfind` picks the innermost `.app` ancestor, which is what we want when
+  // an app embeds helper bundles (e.g. Electron's `Foo Helper.app` nested
+  // under `Foo.app`). The helper's own icon is the right one for its windows.
+  if let Some(idx) = exe_path.rfind(".app/") {
+    let end = idx + ".app".len();
+    return exe_path[..end].to_string();
+  }
+  exe_path.to_string()
+}
 
 pub fn list_windows(
   current_desktop_only: bool,
@@ -73,6 +119,10 @@ fn list_windows_current_space() -> Vec<NativeWindow> {
     let key_owner_name = CFString::from_static_string("kCGWindowOwnerName");
 
     let mut result = Vec::with_capacity(count as usize);
+    // Multiple windows of the same app share a PID — cache per call so we
+    // don't pay the proc_pidpath cost once per window (Finder alone can
+    // emit 10+ rows on a busy desktop).
+    let mut pid_path_cache: HashMap<u32, Option<String>> = HashMap::new();
 
     for i in 0..count {
       let dict_ptr = CFArrayGetValueAtIndex(array_ref, i) as CFDictionaryRef;
@@ -86,11 +136,15 @@ fn list_windows_current_space() -> Vec<NativeWindow> {
         continue;
       }
 
+      // CGWindowListCopyWindowInfo only populates `kCGWindowName` when the
+      // caller has Screen Recording permission. TCC grants to ad-hoc-signed
+      // binaries (Electron.app under node_modules, electron-builder output
+      // without a Developer ID signature) are brittle and silently ignored
+      // more often than not. Rather than dropping every window to an empty
+      // result list, let untitled windows through — the TS side falls back
+      // to the process name so the user still gets app-level switching.
       let title = cf_dict_get_string(dict_ptr, key_name.as_concrete_TypeRef())
         .unwrap_or_default();
-      if title.trim().is_empty() {
-        continue;
-      }
 
       let pid = match cf_dict_get_i64(dict_ptr, key_owner_pid.as_concrete_TypeRef()) {
         Some(p) if p > 0 => p as u32,
@@ -101,12 +155,17 @@ fn list_windows_current_space() -> Vec<NativeWindow> {
         .unwrap_or_default();
       let win_id = cf_dict_get_i64(dict_ptr, key_number.as_concrete_TypeRef()).unwrap_or(0);
 
+      let executable_path = pid_path_cache
+        .entry(pid)
+        .or_insert_with(|| pid_to_bundle_path(pid))
+        .clone();
+
       result.push(NativeWindow {
         id: format!("{}:{}", pid, win_id),
         pid,
         title,
         process_name: owner,
-        executable_path: None,
+        executable_path,
         bundle_id: None,
       });
     }
@@ -213,6 +272,7 @@ fn list_windows_all_spaces() -> napi::Result<Vec<NativeWindow>> {
 
   let text = String::from_utf8_lossy(&output.stdout);
   let mut windows = Vec::new();
+  let mut pid_path_cache: HashMap<u32, Option<String>> = HashMap::new();
 
   for line in text.lines() {
     let line = line.trim_end_matches('\r');
@@ -231,12 +291,17 @@ fn list_windows_all_spaces() -> napi::Result<Vec<NativeWindow>> {
     let window_id = parts[2].to_string();
     let title = parts[3].to_string();
 
+    let executable_path = pid_path_cache
+      .entry(pid)
+      .or_insert_with(|| pid_to_bundle_path(pid))
+      .clone();
+
     windows.push(NativeWindow {
       id: format!("{}:{}", pid, window_id),
       pid,
       title,
       process_name,
-      executable_path: None,
+      executable_path,
       bundle_id: None,
     });
   }

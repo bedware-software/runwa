@@ -97,9 +97,17 @@ export function listWindowsCached(
   const key = `${currentDesktopOnly}:${hideSystemWindows}`
   const entry = cache.get(key)
   if (entry && now - entry.t < CACHE_TTL_MS) {
+    console.log(`[perf] listWindowsCached: cache hit`)
     return entry.windows
   }
-  const windows = loadAddon().listWindows(currentDesktopOnly, hideSystemWindows)
+  const tLoad = Date.now()
+  const mod = loadAddon()
+  const tCall = Date.now()
+  const windows = mod.listWindows(currentDesktopOnly, hideSystemWindows)
+  const tDone = Date.now()
+  console.log(
+    `[perf] listWindowsCached: loadAddon=${tCall - tLoad}ms nativeListWindows=${tDone - tCall}ms count=${windows.length} (currentDesktopOnly=${currentDesktopOnly})`
+  )
   cache.set(key, { t: now, windows })
   return windows
 }
