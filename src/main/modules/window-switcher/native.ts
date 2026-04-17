@@ -23,10 +23,30 @@ export interface NativeWindow {
   bundleId?: string
 }
 
+export interface FocusTopmostResult {
+  ok: boolean
+  pickedHwnd?: string
+  log: string[]
+}
+
+/** Raw window icon pixels as handed back by the native addon. `bgra` is a
+ * Node `Buffer` of `width * height * 4` bytes, BGRA-ordered — the format
+ * Electron's `nativeImage.createFromBitmap` expects. */
+export interface NativeWindowIcon {
+  width: number
+  height: number
+  bgra: Buffer
+}
+
 interface NativeAddon {
   listWindows(currentDesktopOnly: boolean, hideSystemWindows: boolean): NativeWindow[]
   focusWindow(id: string): boolean
   getForegroundWindow(): string
+  forceForegroundWindow(id: string): boolean
+  isWindowOnCurrentDesktop(id: string): boolean
+  focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
+  describeWindow(id: string): NativeWindow | null
+  getWindowIcon(id: string): NativeWindowIcon | null
 }
 
 let addon: NativeAddon | null = null
@@ -90,6 +110,32 @@ export function focusWindow(id: string): boolean {
 
 export function getForegroundWindow(): string {
   return loadAddon().getForegroundWindow()
+}
+
+export function forceForegroundWindow(id: string): boolean {
+  return loadAddon().forceForegroundWindow(id)
+}
+
+export function isWindowOnCurrentDesktop(id: string): boolean {
+  return loadAddon().isWindowOnCurrentDesktop(id)
+}
+
+export function focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult {
+  return loadAddon().focusTopmostOnCurrentDesktop(excludeId)
+}
+
+export function describeWindow(id: string): NativeWindow | null {
+  return loadAddon().describeWindow(id)
+}
+
+/**
+ * Fetch the window's own icon (from WM_GETICON / class icon), not the icon
+ * of its executable. Returns `null` on non-Windows platforms or when the
+ * window doesn't expose an icon — callers should fall back to the exe-based
+ * icon resolver.
+ */
+export function getWindowIcon(id: string): NativeWindowIcon | null {
+  return loadAddon().getWindowIcon(id)
 }
 
 export function invalidateCache(): void {

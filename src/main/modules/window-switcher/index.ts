@@ -7,7 +7,11 @@ import {
   invalidateCache,
   type NativeWindow
 } from './native'
-import { getIconDataUrlSync, warmIconCache } from '../../icon-cache'
+import {
+  getIconDataUrlSync,
+  getWindowIconDataUrl,
+  warmIconCache
+} from '../../icon-cache'
 
 const MANIFEST: ModuleManifest = {
   id: 'window-switcher',
@@ -60,10 +64,19 @@ export function createWindowSwitcherModule(): PaletteModule {
     id: `win:${w.id}`,
     title: w.title,
     subtitle: w.processName,
-    // Prefer a real app icon (PNG data URL) when the icon cache has one.
-    // Falls back to the Lucide 'app-window' glyph for windows whose exe we
-    // couldn't resolve (macOS today, or Windows access-denied edge cases).
-    iconHint: getIconDataUrlSync(w.executablePath) ?? 'app-window',
+    // Icon precedence:
+    //  1. HWND icon — the one Windows shows in the taskbar. Wins for UWP
+    //     apps (all running under ApplicationFrameHost.exe), Edge PWAs
+    //     (all msedge.exe), and Electron apps launched via a shared
+    //     electron.exe — cases where the exe icon is a generic host glyph.
+    //  2. Executable icon — `app.getFileIcon(exePath)`. Fast path for
+    //     native Win32 apps whose HWND doesn't expose an icon but whose
+    //     exe has a proper embedded one.
+    //  3. Lucide `app-window` glyph — final fallback.
+    iconHint:
+      getWindowIconDataUrl(w.id) ??
+      getIconDataUrlSync(w.executablePath) ??
+      'app-window',
     actionKind: 'focus-window',
     action: { nativeId: w.id } satisfies FocusAction,
     score
@@ -89,10 +102,18 @@ export function createWindowSwitcherModule(): PaletteModule {
 
       if (signal.aborted) return []
 
-      // Warm the icon cache for any exe paths we haven't seen yet. First
-      // search after the palette opens pays this cost once; subsequent
-      // keystrokes hit the cache synchronously via getIconDataUrlSync.
-      await warmIconCache(all.map((w) => w.executablePath))
+      // Prime the HWND icon cache for every window — the call is sync but
+      // fast (~1-2 ms per window, then cache-hit). Collecting only the
+      // exe paths for windows whose HWND has no icon lets us skip the
+      // async `app.getFileIcon` round-trip for the majority that already
+      // resolved via HWND.
+      const exePathsNeedingIcon: Array<string | undefined> = []
+      for (const w of all) {
+        if (getWindowIconDataUrl(w.id) === null) {
+          exePathsNeedingIcon.push(w.executablePath)
+        }
+      }
+      await warmIconCache(exePathsNeedingIcon)
 
       if (signal.aborted) return []
 
