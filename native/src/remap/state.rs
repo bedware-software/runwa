@@ -28,6 +28,7 @@ pub enum LogicalKey {
     /// the layer), so they always forward and leave state untouched.
     /// Example: Space-down → Shift-down → ","-down should still fire the
     /// Space+"," override with Shift naturally held.
+    #[allow(dead_code)] // constructed in windows.rs only; matched cross-platform
     SystemModifier,
     /// Anything we don't have a `NamedKey` for (media keys, F13+, layout-
     /// specific scancodes, etc.). Interruptions of this kind don't emit a
@@ -57,6 +58,15 @@ pub enum Action {
     /// for — we need to press the modifier but can't synthesize the key,
     /// so we pre-inject the modifier and forward the user's keystroke.
     EmitThenForward(SmallVec<[SyntheticEvent; 8]>),
+    /// Forward the event but assert the given modifier on it. Used when a
+    /// transparent modifier is logically held (state is `Modifying{held:
+    /// Some(m)}`) and a subsequent real key event arrives. Platform layers
+    /// stamp the modifier onto the event before letting it through. On
+    /// Windows this is equivalent to `Forward` because `SendInput` already
+    /// updated the global key state; on macOS, CGEvent posting doesn't
+    /// propagate synthetic modifier-down state to real subsequent events,
+    /// so the platform layer has to set the flags explicitly.
+    ForwardWithModifier(Modifier),
 }
 
 impl Action {
@@ -192,11 +202,20 @@ impl StateMachine {
                 self.handle_interruption(trigger, &binding, ev.key)
             }
 
-            // In Modifying with a held modifier: OS thinks the modifier is
-            // pressed, so just forward the incoming key — it picks up the
-            // modifier implicitly. Also catches key-ups in Modifying{None}
-            // (orphaned releases from the synthetic override — harmless).
-            (State::Modifying { .. }, _, None, _) => Action::Forward,
+            // In Modifying with a held modifier: forward the event with the
+            // modifier flag asserted. Windows' SendInput already updated the
+            // global key state so flags propagate naturally on that
+            // platform, but macOS needs explicit per-event flag overrides.
+            // Both platforms accept `ForwardWithModifier`; the macOS path
+            // stamps the flag, the Windows path treats it as a plain
+            // Forward.
+            (State::Modifying { held: Some(m), .. }, _, None, _) => {
+                Action::ForwardWithModifier(m)
+            }
+
+            // Modifying{held: None} catches key-ups orphaned by a synthetic
+            // override's initial emit (harmless — no modifier to stamp).
+            (State::Modifying { held: None, .. }, _, None, _) => Action::Forward,
 
             // Anything else: forward (includes trigger events that don't
             // match the current state's trigger — rare corner case, most
@@ -362,7 +381,14 @@ space:
                 SyntheticEvent::KeyDown(NamedKey::Alpha(b'C')),
             ])
         );
-        assert_eq!(m.on_event(down(alpha('V'))), Action::Forward);
+        // A subsequent key while CapsLock is still held must carry the Ctrl
+        // flag forward — the OS saw our synthetic ModifierDown once, but on
+        // macOS the real V keydown needs explicit flag stamping or it
+        // arrives with flags=0 and gets interpreted as plain V.
+        assert_eq!(
+            m.on_event(down(alpha('V'))),
+            Action::ForwardWithModifier(Modifier::Ctrl)
+        );
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])

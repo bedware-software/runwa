@@ -588,6 +588,7 @@ fn platform_matches(p: &str) -> bool {
 // authored a file yet. Kept minimal on purpose; the richer documented
 // version lives in `rules-template.ts` on the TS side.
 
+#[allow(dead_code)]
 pub const DEFAULT_RULES_YAML: &str = r#"
 capslock:
   to_hotkey:

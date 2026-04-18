@@ -12,6 +12,7 @@
 //!   - `TapDisabledByTimeout` / `TapDisabledByUserInput` are re-enabled in
 //!     the callback so the hook self-heals.
 
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -20,8 +21,8 @@ use core_foundation::base::TCFType;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop, CFRunLoopSource};
 use core_foundation_sys::mach_port::CFMachPortCreateRunLoopSource;
 use core_graphics::event::{
-    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-    EventField, KeyCode,
+    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
@@ -38,6 +39,9 @@ pub struct MacosHook {
     running: Arc<AtomicBool>,
     run_loop: Arc<Mutex<Option<CFRunLoop>>>,
     join: Option<thread::JoinHandle<()>>,
+    /// True iff we called `hidutil` to remap CapsLock→F19 at install
+    /// time. Determines whether `stop()` reverts the mapping.
+    capslock_remapped: bool,
 }
 
 impl super::HookHandle for MacosHook {
@@ -48,6 +52,9 @@ impl super::HookHandle for MacosHook {
         }
         if let Some(join) = self.join.take() {
             let _ = join.join();
+        }
+        if self.capslock_remapped {
+            disable_capslock_hid_remap();
         }
     }
 }
@@ -63,6 +70,22 @@ pub fn install(rules: ResolvedRules) -> Result<MacosHook, String> {
             return Err("keyboard remap already active".into());
         }
     }
+
+    // If the user has a capslock rule, fire off the HID-level CapsLock→F19
+    // remap *before* installing the tap, so the very first physical press
+    // arrives as F19 rather than a lock-toggle. Failure here is logged but
+    // non-fatal — the state machine will simply never see CapsLock events.
+    let capslock_remapped = if rules.capslock.is_some() {
+        match enable_capslock_hid_remap() {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("[keyboard-remap] hidutil remap failed: {e}");
+                false
+            }
+        }
+    } else {
+        false
+    };
 
     {
         let mut guard = SM_SLOT.lock();
@@ -126,9 +149,13 @@ pub fn install(rules: ResolvedRules) -> Result<MacosHook, String> {
             running,
             run_loop,
             join: Some(join),
+            capslock_remapped,
         }),
         ReadyState::Failed(e) => {
             *SM_SLOT.lock() = None;
+            if capslock_remapped {
+                disable_capslock_hid_remap();
+            }
             Err(e)
         }
         ReadyState::Pending => unreachable!(),
@@ -163,7 +190,7 @@ fn install_tap_on_current_thread() -> Result<CGEventTap<'static>, String> {
     let source = unsafe {
         let raw_source = CFMachPortCreateRunLoopSource(
             std::ptr::null_mut(),
-            tap.mach_port.as_concrete_TypeRef(),
+            tap.mach_port().as_concrete_TypeRef(),
             0,
         );
         if raw_source.is_null() {
@@ -184,7 +211,7 @@ fn tap_callback(
     _proxy: core_graphics::event::CGEventTapProxy,
     etype: CGEventType,
     event: &CGEvent,
-) -> Option<CGEvent> {
+) -> CallbackResult {
     // Self-heal: if macOS disabled us, re-enable and let the event through.
     if matches!(
         etype,
@@ -194,13 +221,13 @@ fn tap_callback(
         // effort: post-back a noop and trust that the next tap install
         // will recover. In practice tap-disable-by-timeout is rare if the
         // state machine returns quickly.
-        return Some(event.clone());
+        return CallbackResult::Keep;
     }
 
     // Skip events we injected ourselves.
     let tag = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
     if tag == INJECT_TAG as i64 {
-        return Some(event.clone());
+        return CallbackResult::Keep;
     }
 
     let (kind, key) = match etype {
@@ -213,44 +240,65 @@ fn tap_callback(
             (EventKind::KeyUp, keycode_to_logical(kc))
         }
         CGEventType::FlagsChanged => {
-            // A modifier key was pressed/released. We surface the CapsLock
-            // transitions to the state machine; other modifiers (Shift,
-            // Ctrl, Alt, Cmd) are forwarded unchanged — we don't want to
-            // fight with the user's real modifier keys.
+            // macOS delivers CapsLock as FlagsChanged, not KeyDown/KeyUp.
+            // At HID-tap level we see both the rising edge (physical press-
+            // down) and falling edge (press-up) as separate events, so we
+            // can infer kind from whether the AlphaShift flag is set in
+            // the event's current flags. Other modifiers (Shift, Ctrl, Alt,
+            // Cmd) are forwarded unchanged — we don't want to fight with
+            // the user's real modifier keys.
             let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
             if kc == KeyCode::CAPS_LOCK {
-                // Distinguishing down vs up from FlagsChanged requires
-                // checking the CapsLock flag bit. Simpler: we never
-                // remap CapsLock-as-lock via FlagsChanged and instead
-                // rely on it arriving as a KeyDown/KeyUp — which it
-                // does on recent macOS versions after the accessibility
-                // grant. If we see it here, just forward.
-                return Some(event.clone());
+                let flags = event.get_flags();
+                let kind = if flags.contains(CGEventFlags::CGEventFlagAlphaShift) {
+                    EventKind::KeyDown
+                } else {
+                    EventKind::KeyUp
+                };
+                (kind, LogicalKey::CapsLock)
+            } else {
+                return CallbackResult::Keep;
             }
-            return Some(event.clone());
         }
-        _ => return Some(event.clone()),
+        _ => return CallbackResult::Keep,
     };
+
+    // Snapshot the triggering event's flag state. This preserves the user's
+    // real modifier keys (Shift, Ctrl, Cmd, …) across any synthetic events
+    // we inject or forward: for example, holding Shift while pressing
+    // Space+, must result in Shift+Home, not plain Home, because the user's
+    // Shift should still be "on" when our synthesized Home fires.
+    let event_flags = event.get_flags();
 
     let raw = RawEvent { kind, key };
     let action = {
         let mut guard = SM_SLOT.lock();
         match guard.as_mut() {
             Some(sm) => sm.on_event(raw),
-            None => return Some(event.clone()),
+            None => return CallbackResult::Keep,
         }
     };
 
     match action {
-        Action::Forward => Some(event.clone()),
-        Action::Suppress => None,
+        Action::Forward => CallbackResult::Keep,
+        Action::ForwardWithModifier(m) => {
+            // Stamp the logically-held modifier (e.g. CapsLock's transparent
+            // Ctrl) on top of the user's real modifier state and forward.
+            // macOS — unlike Windows — doesn't propagate synthetic modifier
+            // keydowns onto subsequent real events, so without this stamp
+            // the second CapsLock+D after the first CapsLock+D would arrive
+            // as a naked D.
+            event.set_flags(event_flags | modifier_to_flag(m));
+            CallbackResult::Keep
+        }
+        Action::Suppress => CallbackResult::Drop,
         Action::Emit(events) => {
-            inject(events.as_slice());
-            None
+            inject(events.as_slice(), event_flags);
+            CallbackResult::Drop
         }
         Action::EmitThenForward(events) => {
-            inject(events.as_slice());
-            Some(event.clone())
+            inject(events.as_slice(), event_flags);
+            CallbackResult::Keep
         }
     }
 }
@@ -281,7 +329,13 @@ const KC_PERIOD: u16 = 0x2F;
 const KC_SLASH: u16 = 0x2C;
 
 fn keycode_to_logical(kc: u16) -> LogicalKey {
-    if kc == KeyCode::CAPS_LOCK {
+    // F19 is the HID-level stand-in for CapsLock: we ask macOS's hidutil
+    // to remap CapsLock→F19 at install time, which bypasses the lock-key
+    // driver behavior and gives us proper KeyDown/KeyUp events. See
+    // `enable_capslock_hid_remap`. We still match raw CAPS_LOCK too so
+    // users who have disabled the lock behavior in System Settings (which
+    // already produces KeyDown/KeyUp) get the same treatment.
+    if kc == KeyCode::CAPS_LOCK || kc == KeyCode::F19 {
         return LogicalKey::CapsLock;
     }
     if kc == KeyCode::SPACE {
@@ -463,18 +517,46 @@ fn modifier_to_keycode(m: Modifier) -> u16 {
     }
 }
 
+fn modifier_to_flag(m: Modifier) -> CGEventFlags {
+    match m {
+        Modifier::Ctrl => CGEventFlags::CGEventFlagControl,
+        Modifier::Alt => CGEventFlags::CGEventFlagAlternate,
+        Modifier::Shift => CGEventFlags::CGEventFlagShift,
+        Modifier::Cmd | Modifier::Win => CGEventFlags::CGEventFlagCommand,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Injection
 
-fn inject(events: &[SyntheticEvent]) {
+fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
     let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
         Ok(s) => s,
         Err(_) => return,
     };
+    // Track accumulated modifier state across the burst. CGEvent doesn't
+    // derive flags from "which modifier keyDowns we've posted recently" —
+    // every created event starts with flags=0 unless we set them explicitly.
+    // Receiving apps match hotkeys on the event's `flags` field, so we must
+    // stamp the correct flag set on every KeyDown/KeyUp, and on the
+    // modifier events themselves (so the final flags state lines up with
+    // what a real physical chord would look like).
+    //
+    // `base_flags` is the triggering event's own flags at the time we
+    // entered the callback — this carries forward any modifier the user
+    // was actually holding (e.g. Shift) so Space+Shift+, emits Shift+Home
+    // rather than plain Home.
+    let mut flags = base_flags;
     for ev in events {
         let (keycode, down) = match ev {
-            SyntheticEvent::ModifierDown(m) => (modifier_to_keycode(*m), true),
-            SyntheticEvent::ModifierUp(m) => (modifier_to_keycode(*m), false),
+            SyntheticEvent::ModifierDown(m) => {
+                flags |= modifier_to_flag(*m);
+                (modifier_to_keycode(*m), true)
+            }
+            SyntheticEvent::ModifierUp(m) => {
+                flags &= !modifier_to_flag(*m);
+                (modifier_to_keycode(*m), false)
+            }
             SyntheticEvent::KeyDown(k) => match named_to_keycode(*k) {
                 Some(kc) => (kc, true),
                 None => continue,
@@ -497,7 +579,62 @@ fn inject(events: &[SyntheticEvent]) {
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;
         };
+        cge.set_flags(flags);
         cge.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, INJECT_TAG as i64);
         cge.post(CGEventTapLocation::HID);
     }
+}
+
+// ---------------------------------------------------------------------------
+// hidutil: physical-CapsLock → F19 remap.
+//
+// macOS exposes CapsLock as a session-level toggle (the HID driver latches
+// it); CGEventTap sees a single FlagsChanged per press with no down/up pair.
+// That makes a Karabiner-style tap-for-Esc + hold-for-Ctrl remap impossible
+// from a CGEventTap alone. `hidutil property --set` lets us rewrite the HID
+// usage code per login session before the driver's lock logic runs, so the
+// physical CapsLock key surfaces as F19 with proper KeyDown/KeyUp — which
+// the tap can then remap normally. `keycode_to_logical` maps F19 back to
+// `LogicalKey::CapsLock` so rule YAML can still refer to `capslock`.
+//
+// The remap is per-session (ephemeral, not persisted) and applies across
+// every keyboard and every app. `stop()` reverts it; a crash without
+// cleanup leaves CapsLock→F19 until the user reboots or runs
+// `hidutil property --set '{"UserKeyMapping":[]}'` themselves.
+
+// HID Usage Page 0x07 (Keyboard/Keypad), usage 0x39 = CapsLock.
+const HID_USAGE_CAPS_LOCK: u64 = 0x700000039;
+// HID Usage Page 0x07, usage 0x6E = Keyboard F19.
+const HID_USAGE_F19: u64 = 0x70000006E;
+
+fn enable_capslock_hid_remap() -> Result<(), String> {
+    let payload = format!(
+        r#"{{"UserKeyMapping":[{{"HIDKeyboardModifierMappingSrc":{src},"HIDKeyboardModifierMappingDst":{dst}}}]}}"#,
+        src = HID_USAGE_CAPS_LOCK,
+        dst = HID_USAGE_F19,
+    );
+    run_hidutil(&payload)
+}
+
+fn disable_capslock_hid_remap() {
+    // Clearing to an empty list wipes the remap for this login session.
+    // Best-effort — log and move on if it fails.
+    if let Err(e) = run_hidutil(r#"{"UserKeyMapping":[]}"#) {
+        eprintln!("[keyboard-remap] hidutil revert failed: {e}");
+    }
+}
+
+fn run_hidutil(payload: &str) -> Result<(), String> {
+    let out = Command::new("/usr/bin/hidutil")
+        .args(["property", "--set", payload])
+        .output()
+        .map_err(|e| format!("spawn hidutil: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "hidutil exit {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(())
 }

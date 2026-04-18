@@ -10,6 +10,13 @@ import { trayManager } from './tray'
 import { recorderWindow } from './modules/groq-stt/recorder-window'
 import { indicatorWindow } from './modules/groq-stt/indicator-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
+import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
+import {
+  requestScreenRecordingPermission,
+  isScreenRecordingGranted,
+  requestAccessibilityPermission,
+  isAccessibilityTrusted
+} from './modules/window-switcher/native'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -33,12 +40,6 @@ app.whenReady().then(async () => {
     // returns false forever and `CGWindowList` never surfaces window
     // titles. The call is a no-op after the user has decided once.
     try {
-      const {
-        requestScreenRecordingPermission,
-        isScreenRecordingGranted,
-        requestAccessibilityPermission,
-        isAccessibilityTrusted
-      } = await import('./modules/window-switcher/native')
       // Screen Recording: needed for CGWindowList to return window titles.
       // Accessibility: needed for AX-based precise per-window raise (so
       // clicking Newbro window #3 raises THAT window, not the app's
@@ -94,6 +95,12 @@ app.whenReady().then(async () => {
   //    without removing anything. React to toggle changes live — the
   //    settings store emits on every change; start/stop when the flag
   //    transitions so users don't need to restart runwa.
+  //    Before anything runs, clean up a stale CapsLock→F19 hidutil mapping
+  //    left behind by a prior crashed instance. If the module is still
+  //    enabled, the service's install() will re-apply it; if it's been
+  //    disabled since the crash, this recovers the user's CapsLock key
+  //    without needing a reboot. No-op on non-macOS.
+  cleanupStaleCapsLockRemap()
   if (isKeyboardRemapEnabled()) {
     keyboardRemapService.start()
   }

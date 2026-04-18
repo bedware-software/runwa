@@ -212,6 +212,11 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
 
     match action {
         Action::Forward => CallNextHookEx(None, code, wparam, lparam),
+        // Windows' SendInput already updated the global key state when we
+        // synthesized the modifier-down, so subsequent real events naturally
+        // carry the flag — no per-event override needed. `ForwardWithModifier`
+        // is a macOS-specific concept that Windows collapses into Forward.
+        Action::ForwardWithModifier(_) => CallNextHookEx(None, code, wparam, lparam),
         Action::Suppress => LRESULT(1),
         Action::Emit(events) => {
             // Inject all events synchronously. SendInput runs fast and

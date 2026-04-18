@@ -25,6 +25,12 @@ asarUnpack:
   # uiohook-napi ships prebuilt native binaries per-platform; they must be
   # unpacked from the asar so the dynamic loader can dlopen them.
   - node_modules/uiohook-napi/prebuilds/**
+# All of this project's native deps are N-API (ABI-stable across Node/Electron):
+# `uiohook-napi` ships prebuilts per-platform, and the Rust addon in `native/`
+# is napi-rs and built separately via `npm run build:native`. Letting
+# @electron/rebuild walk node_modules would pointlessly try to recompile
+# uiohook-napi through node-gyp — which breaks on Python 3.12+ (distutils gone).
+npmRebuild: false
 win:
   target:
     - target: nsis
