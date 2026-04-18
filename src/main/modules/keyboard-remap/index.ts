@@ -9,17 +9,10 @@ const MANIFEST: ModuleManifest = {
   description:
     'System-wide keyboard layer. CapsLock → Ctrl (tap = Escape); Space → modifier layer (tap = space). Mirrors AutoHotkey / Karabiner-Elements basics in one cross-platform place.',
   defaultEnabled: true,
-  supportsDirectLaunch: false,
-  configFields: [
-    {
-      key: 'openRules',
-      type: 'action',
-      label: 'Rules file',
-      description:
-        'Rules are stored as YAML at <userData>/keyboard-rules.yaml. The button opens the file in your system default editor. Restart runwa to apply changes.',
-      buttonLabel: 'Edit rules'
-    }
-  ]
+  supportsDirectLaunch: false
+  // Rules file (path, edit, reload, parsed hotkey list) is rendered by a
+  // dedicated KeyboardRemapSection in the renderer — can't express in the
+  // generic `configFields` schema.
 }
 
 export function createKeyboardRemapModule(): PaletteModule {

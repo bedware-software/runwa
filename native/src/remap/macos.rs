@@ -248,11 +248,37 @@ fn tap_callback(
             inject(events.as_slice());
             None
         }
+        Action::EmitThenForward(events) => {
+            inject(events.as_slice());
+            Some(event.clone())
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Keycode mapping (macOS virtual keycodes → LogicalKey)
+
+// Carbon virtual keycodes not exposed by the `core-graphics` crate.
+// Source: HIToolbox/Events.h. US-ANSI layout assumed.
+const KC_LEFT: u16 = 0x7B;
+const KC_RIGHT: u16 = 0x7C;
+const KC_DOWN: u16 = 0x7D;
+const KC_UP: u16 = 0x7E;
+const KC_HOME: u16 = 0x73;
+const KC_END: u16 = 0x77;
+const KC_PGUP: u16 = 0x74;
+const KC_PGDN: u16 = 0x79;
+const KC_GRAVE: u16 = 0x32;
+const KC_MINUS: u16 = 0x1B;
+const KC_EQUAL: u16 = 0x18;
+const KC_LBRACKET: u16 = 0x21;
+const KC_RBRACKET: u16 = 0x1E;
+const KC_BACKSLASH: u16 = 0x2A;
+const KC_SEMICOLON: u16 = 0x29;
+const KC_QUOTE: u16 = 0x27;
+const KC_COMMA: u16 = 0x2B;
+const KC_PERIOD: u16 = 0x2F;
+const KC_SLASH: u16 = 0x2C;
 
 fn keycode_to_logical(kc: u16) -> LogicalKey {
     if kc == KeyCode::CAPS_LOCK {
@@ -266,45 +292,82 @@ fn keycode_to_logical(kc: u16) -> LogicalKey {
     //   W=13, E=14, R=15, Y=16, T=17, 1=18, 2=19, 3=20, 4=21, 6=22, 5=23,
     //   '='=24, 9=25, 7=26, '-'=27, 8=28, 0=29, ']'=30, O=31, U=32, '['=33,
     //   I=34, P=35, L=37, J=38, K=40, N=45, M=46, ...
-    match kc {
-        0x00 => LogicalKey::Alpha(b'A'),
-        0x01 => LogicalKey::Alpha(b'S'),
-        0x02 => LogicalKey::Alpha(b'D'),
-        0x03 => LogicalKey::Alpha(b'F'),
-        0x04 => LogicalKey::Alpha(b'H'),
-        0x05 => LogicalKey::Alpha(b'G'),
-        0x06 => LogicalKey::Alpha(b'Z'),
-        0x07 => LogicalKey::Alpha(b'X'),
-        0x08 => LogicalKey::Alpha(b'C'),
-        0x09 => LogicalKey::Alpha(b'V'),
-        0x0B => LogicalKey::Alpha(b'B'),
-        0x0C => LogicalKey::Alpha(b'Q'),
-        0x0D => LogicalKey::Alpha(b'W'),
-        0x0E => LogicalKey::Alpha(b'E'),
-        0x0F => LogicalKey::Alpha(b'R'),
-        0x10 => LogicalKey::Alpha(b'Y'),
-        0x11 => LogicalKey::Alpha(b'T'),
-        0x12 => LogicalKey::Alpha(b'1'),
-        0x13 => LogicalKey::Alpha(b'2'),
-        0x14 => LogicalKey::Alpha(b'3'),
-        0x15 => LogicalKey::Alpha(b'4'),
-        0x16 => LogicalKey::Alpha(b'6'),
-        0x17 => LogicalKey::Alpha(b'5'),
-        0x19 => LogicalKey::Alpha(b'9'),
-        0x1A => LogicalKey::Alpha(b'7'),
-        0x1C => LogicalKey::Alpha(b'8'),
-        0x1D => LogicalKey::Alpha(b'0'),
-        0x1F => LogicalKey::Alpha(b'O'),
-        0x20 => LogicalKey::Alpha(b'U'),
-        0x22 => LogicalKey::Alpha(b'I'),
-        0x23 => LogicalKey::Alpha(b'P'),
-        0x25 => LogicalKey::Alpha(b'L'),
-        0x26 => LogicalKey::Alpha(b'J'),
-        0x28 => LogicalKey::Alpha(b'K'),
-        0x2D => LogicalKey::Alpha(b'N'),
-        0x2E => LogicalKey::Alpha(b'M'),
-        _ => LogicalKey::Other,
-    }
+    let nk = match kc {
+        0x00 => NamedKey::Alpha(b'A'),
+        0x01 => NamedKey::Alpha(b'S'),
+        0x02 => NamedKey::Alpha(b'D'),
+        0x03 => NamedKey::Alpha(b'F'),
+        0x04 => NamedKey::Alpha(b'H'),
+        0x05 => NamedKey::Alpha(b'G'),
+        0x06 => NamedKey::Alpha(b'Z'),
+        0x07 => NamedKey::Alpha(b'X'),
+        0x08 => NamedKey::Alpha(b'C'),
+        0x09 => NamedKey::Alpha(b'V'),
+        0x0B => NamedKey::Alpha(b'B'),
+        0x0C => NamedKey::Alpha(b'Q'),
+        0x0D => NamedKey::Alpha(b'W'),
+        0x0E => NamedKey::Alpha(b'E'),
+        0x0F => NamedKey::Alpha(b'R'),
+        0x10 => NamedKey::Alpha(b'Y'),
+        0x11 => NamedKey::Alpha(b'T'),
+        0x12 => NamedKey::Alpha(b'1'),
+        0x13 => NamedKey::Alpha(b'2'),
+        0x14 => NamedKey::Alpha(b'3'),
+        0x15 => NamedKey::Alpha(b'4'),
+        0x16 => NamedKey::Alpha(b'6'),
+        0x17 => NamedKey::Alpha(b'5'),
+        0x19 => NamedKey::Alpha(b'9'),
+        0x1A => NamedKey::Alpha(b'7'),
+        0x1C => NamedKey::Alpha(b'8'),
+        0x1D => NamedKey::Alpha(b'0'),
+        0x1F => NamedKey::Alpha(b'O'),
+        0x20 => NamedKey::Alpha(b'U'),
+        0x22 => NamedKey::Alpha(b'I'),
+        0x23 => NamedKey::Alpha(b'P'),
+        0x25 => NamedKey::Alpha(b'L'),
+        0x26 => NamedKey::Alpha(b'J'),
+        0x28 => NamedKey::Alpha(b'K'),
+        0x2D => NamedKey::Alpha(b'N'),
+        0x2E => NamedKey::Alpha(b'M'),
+        // Named keys the user can bind in YAML.
+        kc if kc == KeyCode::ESCAPE => NamedKey::Escape,
+        kc if kc == KeyCode::TAB => NamedKey::Tab,
+        kc if kc == KeyCode::RETURN => NamedKey::Return,
+        kc if kc == KeyCode::DELETE => NamedKey::Delete,
+        kc if kc == KeyCode::F1 => NamedKey::F1,
+        kc if kc == KeyCode::F2 => NamedKey::F2,
+        kc if kc == KeyCode::F3 => NamedKey::F3,
+        kc if kc == KeyCode::F4 => NamedKey::F4,
+        kc if kc == KeyCode::F5 => NamedKey::F5,
+        kc if kc == KeyCode::F6 => NamedKey::F6,
+        kc if kc == KeyCode::F7 => NamedKey::F7,
+        kc if kc == KeyCode::F8 => NamedKey::F8,
+        kc if kc == KeyCode::F9 => NamedKey::F9,
+        kc if kc == KeyCode::F10 => NamedKey::F10,
+        kc if kc == KeyCode::F11 => NamedKey::F11,
+        kc if kc == KeyCode::F12 => NamedKey::F12,
+        KC_LEFT => NamedKey::Left,
+        KC_RIGHT => NamedKey::Right,
+        KC_UP => NamedKey::Up,
+        KC_DOWN => NamedKey::Down,
+        KC_HOME => NamedKey::Home,
+        KC_END => NamedKey::End,
+        KC_PGUP => NamedKey::PageUp,
+        KC_PGDN => NamedKey::PageDown,
+        KC_GRAVE => NamedKey::Backtick,
+        KC_MINUS => NamedKey::Minus,
+        KC_EQUAL => NamedKey::Equals,
+        KC_LBRACKET => NamedKey::LeftBracket,
+        KC_RBRACKET => NamedKey::RightBracket,
+        KC_BACKSLASH => NamedKey::Backslash,
+        KC_SEMICOLON => NamedKey::Semicolon,
+        KC_QUOTE => NamedKey::Quote,
+        KC_COMMA => NamedKey::Comma,
+        KC_PERIOD => NamedKey::Period,
+        KC_SLASH => NamedKey::Slash,
+        _ => return LogicalKey::Other,
+    };
+    LogicalKey::Named(nk)
 }
 
 fn named_to_keycode(key: NamedKey) -> Option<u16> {
@@ -326,6 +389,25 @@ fn named_to_keycode(key: NamedKey) -> Option<u16> {
         NamedKey::F10 => Some(KeyCode::F10),
         NamedKey::F11 => Some(KeyCode::F11),
         NamedKey::F12 => Some(KeyCode::F12),
+        NamedKey::Left => Some(KC_LEFT),
+        NamedKey::Right => Some(KC_RIGHT),
+        NamedKey::Up => Some(KC_UP),
+        NamedKey::Down => Some(KC_DOWN),
+        NamedKey::Home => Some(KC_HOME),
+        NamedKey::End => Some(KC_END),
+        NamedKey::PageUp => Some(KC_PGUP),
+        NamedKey::PageDown => Some(KC_PGDN),
+        NamedKey::Backtick => Some(KC_GRAVE),
+        NamedKey::Minus => Some(KC_MINUS),
+        NamedKey::Equals => Some(KC_EQUAL),
+        NamedKey::LeftBracket => Some(KC_LBRACKET),
+        NamedKey::RightBracket => Some(KC_RBRACKET),
+        NamedKey::Backslash => Some(KC_BACKSLASH),
+        NamedKey::Semicolon => Some(KC_SEMICOLON),
+        NamedKey::Quote => Some(KC_QUOTE),
+        NamedKey::Comma => Some(KC_COMMA),
+        NamedKey::Period => Some(KC_PERIOD),
+        NamedKey::Slash => Some(KC_SLASH),
         NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }
@@ -401,6 +483,16 @@ fn inject(events: &[SyntheticEvent]) {
                 Some(kc) => (kc, false),
                 None => continue,
             },
+            // Virtual-desktop switching on macOS would go through
+            // CGSPrivate's `CGSSetActiveSpace` (private API). Not wired
+            // yet — the action is Windows-only today, parsed but skipped
+            // here so rules that opt in via `platform: windows` don't
+            // crash on mac.
+            SyntheticEvent::SwitchToWorkspace(_)
+            | SyntheticEvent::MoveToWorkspace(_) => {
+                eprintln!("[keyboard-remap] workspace actions not supported on macOS yet");
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;

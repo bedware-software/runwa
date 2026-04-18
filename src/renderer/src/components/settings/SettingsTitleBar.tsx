@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
+import iconUrl from '../../../../../resources/icon.png'
 
 /**
  * Prefer navigator.userAgentData (Chromium 90+), fall back to the deprecated
@@ -42,9 +43,10 @@ export function SettingsTitleBar() {
 
   return (
     <div
-      className="h-12 bg-card border-b border-border flex items-center shrink-0 select-none"
+      className="h-12 bg-card border-b border-border flex items-center gap-2 shrink-0 select-none"
       style={style}
     >
+      <img src={iconUrl} alt="" className="h-5 w-5" draggable={false} />
       <span className="text-sm font-semibold text-foreground">runwa</span>
     </div>
   )

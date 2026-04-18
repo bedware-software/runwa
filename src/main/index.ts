@@ -91,10 +91,23 @@ app.whenReady().then(async () => {
 
   // 9. Low-level keyboard remap (CapsLock → Ctrl/Esc, Space layer).
   //    Gated by the module's `enabled` flag so users can turn it off
-  //    without removing anything.
+  //    without removing anything. React to toggle changes live — the
+  //    settings store emits on every change; start/stop when the flag
+  //    transitions so users don't need to restart runwa.
   if (isKeyboardRemapEnabled()) {
     keyboardRemapService.start()
   }
+  let keyboardRemapEnabled = isKeyboardRemapEnabled()
+  settingsStore.on('change', () => {
+    const next = isKeyboardRemapEnabled()
+    if (next === keyboardRemapEnabled) return
+    keyboardRemapEnabled = next
+    if (next) {
+      keyboardRemapService.start()
+    } else {
+      keyboardRemapService.stop()
+    }
+  })
 
   // 10. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the

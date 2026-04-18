@@ -1,8 +1,10 @@
 import { app, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import type { KeyboardRemapRulesView } from '@shared/types'
 import { startKeyboardRemap, stopKeyboardRemap } from './native'
 import { RULES_TEMPLATE } from './rules-template'
+import { buildRulesView } from './rules-view'
 import {
   isAccessibilityTrusted,
   requestAccessibilityPermission
@@ -74,6 +76,28 @@ class KeyboardRemapService {
     this.loadOrInitRulesFile()
     const err = await shell.openPath(p)
     if (err) console.warn('[keyboard-remap] openPath returned error:', err)
+  }
+
+  /**
+   * Read-only snapshot of the current rules file for the settings panel.
+   * Doesn't touch the running hook — use `reload()` to re-install.
+   */
+  getRulesView(): KeyboardRemapRulesView {
+    // Ensure the file exists so the user sees the seeded template rules on
+    // first open, not a "file not found" placeholder.
+    this.loadOrInitRulesFile()
+    return buildRulesView(this.rulesFilePath())
+  }
+
+  /**
+   * Re-install the hook from disk. Used by the Reload button in settings so
+   * edits take effect without restarting runwa. Errors during start are
+   * swallowed (logged) the same way they are at boot.
+   */
+  reload(): KeyboardRemapRulesView {
+    this.stop()
+    this.start()
+    return buildRulesView(this.rulesFilePath())
   }
 
   /** Read the rules file, writing the template on first access. */

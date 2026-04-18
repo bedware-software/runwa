@@ -4,6 +4,7 @@ import { useSettingsStore } from '@/store/settings-store'
 import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
 import { ConfigField } from './ConfigField'
+import { KeyboardRemapSection } from './KeyboardRemapSection'
 
 function iconFromHint(hint: string | undefined): LucideIcon {
   if (!hint) return Icons.Package
@@ -97,6 +98,8 @@ export function ModulePanel({ moduleId }: Props) {
           ))}
         </div>
       )}
+
+      {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
     </div>
   )
 }

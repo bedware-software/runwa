@@ -43,7 +43,7 @@ pub enum Modifier {
 }
 
 /// Named physical keys we can both match on and synthesize.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NamedKey {
     Escape,
     Space,
@@ -62,18 +62,48 @@ pub enum NamedKey {
     F10,
     F11,
     F12,
+    // Navigation.
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    // Punctuation on a US ANSI layout. Stored by semantic name so the match
+    // works regardless of shift state (e.g. `Backtick` covers both `` ` ``
+    // and `~`; the synthesized output decides whether to press Shift).
+    Backtick,
+    Minus,
+    Equals,
+    LeftBracket,
+    RightBracket,
+    Backslash,
+    Semicolon,
+    Quote,
+    Comma,
+    Period,
+    Slash,
     /// An uppercase ASCII alpha (A–Z) or digit (0–9). Stored as the ASCII
     /// byte so callers can match/synth uniformly.
     Alpha(u8),
 }
 
-/// A single synthetic keyboard event the platform layer should inject.
+/// A single side-effect the platform layer should perform. Keyboard
+/// synthesis lives here, plus higher-level OS actions like switching
+/// virtual desktops (Windows-only; no-op on other platforms).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntheticEvent {
     ModifierDown(Modifier),
     ModifierUp(Modifier),
     KeyDown(NamedKey),
     KeyUp(NamedKey),
+    /// Switch to virtual desktop `N` (1-indexed to match what the user
+    /// writes in the YAML and what their old AHK setup used).
+    SwitchToWorkspace(u32),
+    /// Move the active window to virtual desktop `N` and follow it there.
+    MoveToWorkspace(u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -97,10 +127,11 @@ pub struct ResolvedBinding {
 pub enum ResolvedHold {
     /// While the trigger is held, it acts as this logical modifier.
     TransparentModifier(Modifier),
-    /// Explicit per-combo overrides. Key is the uppercase single-char
-    /// token (e.g. "W", "1"). Value is the pre-baked event sequence.
+    /// Explicit per-combo overrides keyed by the trigger `NamedKey`. The
+    /// state machine resolves the incoming event to a `NamedKey` and does
+    /// a direct lookup — no token-string shuffle.
     Explicit {
-        overrides: HashMap<String, Vec<SyntheticEvent>>,
+        overrides: HashMap<NamedKey, Vec<SyntheticEvent>>,
         /// Fallback modifier for unmapped combos. Sourced from a rule
         /// whose `keys: [_default]` + `to_hotkey: [<modifier>]`.
         fallback: Option<Modifier>,
@@ -132,36 +163,121 @@ struct KeyRemap {
 #[serde(deny_unknown_fields)]
 struct ToHotkey {
     #[serde(default)]
-    on_tap: Option<TapSpec>,
+    on_tap: Option<serde_yml::Value>,
     #[serde(default)]
-    on_hold: Option<HoldSpec>,
+    on_hold: Option<serde_yml::Value>,
 }
 
-/// `on_tap` = a single key name OR a list of tokens forming a hotkey combo.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+/// Parsed form of `on_tap:` — either a single key name or a combo list.
 enum TapSpec {
     Single(String),
     Combo(Vec<String>),
 }
 
-/// `on_hold` = a scalar modifier name (transparent) OR a list of rules.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+/// Parsed form of `on_hold:` — either a scalar modifier name (transparent
+/// layer) or an explicit rules list.
 enum HoldSpec {
     Transparent(String),
     Rules(Vec<HoldRule>),
 }
 
+fn parse_tap_spec(v: &serde_yml::Value) -> Result<TapSpec, String> {
+    if let Some(s) = v.as_str() {
+        return Ok(TapSpec::Single(s.to_string()));
+    }
+    if let Some(seq) = v.as_sequence() {
+        let tokens = seq
+            .iter()
+            .map(|it| {
+                it.as_str()
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| format!("on_tap list item must be a string, got {it:?}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(TapSpec::Combo(tokens));
+    }
+    Err(format!(
+        "on_tap must be a string or a list of strings, got {v:?}"
+    ))
+}
+
+fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
+    if let Some(s) = v.as_str() {
+        return Ok(HoldSpec::Transparent(s.to_string()));
+    }
+    if v.is_sequence() {
+        let rules: Vec<HoldRule> = serde_yml::from_value(v.clone())
+            .map_err(|e| format!("on_hold rules list: {e}"))?;
+        return Ok(HoldSpec::Rules(rules));
+    }
+    Err(format!(
+        "on_hold must be a scalar modifier name or a list of rules, got {v:?}"
+    ))
+}
+
+/// A single rule inside an `on_hold:` list. Exactly one of the action
+/// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace`)
+/// must be populated; having zero or multiple is a parse error.
+///
+/// `keys` and `to_hotkey` are `Vec<YamlToken>` so YAML can supply either
+/// a string (`keys: [w]`, `keys: [","]`) or an integer (`keys: [1]`) —
+/// both become strings internally.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct HoldRule {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     platform: Option<String>,
-    keys: Vec<String>,
-    to_hotkey: Vec<String>,
+    keys: Vec<YamlToken>,
+    // Actions — exactly one per rule.
+    #[serde(default)]
+    to_hotkey: Option<Vec<YamlToken>>,
+    #[serde(default)]
+    switch_to_workspace: Option<u32>,
+    #[serde(default)]
+    move_to_workspace: Option<u32>,
+}
+
+/// Accepts a YAML scalar that might be a string or a number; normalizes
+/// to a String. Lets users write `keys: [1]` without quoting.
+#[derive(Debug, Clone)]
+struct YamlToken(String);
+
+impl YamlToken {
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for YamlToken {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = YamlToken;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string or a number")
+            }
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<YamlToken, E> {
+                Ok(YamlToken(s.to_string()))
+            }
+            fn visit_string<E: serde::de::Error>(self, s: String) -> Result<YamlToken, E> {
+                Ok(YamlToken(s))
+            }
+            fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<YamlToken, E> {
+                Ok(YamlToken(n.to_string()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<YamlToken, E> {
+                Ok(YamlToken(n.to_string()))
+            }
+            fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<YamlToken, E> {
+                Ok(YamlToken(n.to_string()))
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -177,26 +293,29 @@ pub fn parse(yaml: &str) -> Result<ResolvedRules, String> {
 
 fn resolve_binding(remap: &KeyRemap) -> Result<ResolvedBinding, String> {
     let on_tap = match &remap.to_hotkey.on_tap {
-        Some(TapSpec::Single(s)) => Some(bake_hotkey_tokens(std::slice::from_ref(s))?),
-        Some(TapSpec::Combo(items)) => Some(bake_hotkey_tokens(items.as_slice())?),
         None => None,
+        Some(v) => match parse_tap_spec(v)? {
+            TapSpec::Single(s) => Some(bake_hotkey_tokens(std::slice::from_ref(&s))?),
+            TapSpec::Combo(items) => Some(bake_hotkey_tokens(items.as_slice())?),
+        },
     };
 
     let on_hold = match &remap.to_hotkey.on_hold {
         None => ResolvedHold::Passthrough,
-        Some(HoldSpec::Transparent(name)) => match parse_modifier(name) {
-            Some(m) => ResolvedHold::TransparentModifier(m),
-            None => {
-                return Err(format!(
-                    "on_hold '{name}' is not a recognised modifier name"
-                ))
-            }
-        },
-        Some(HoldSpec::Rules(list)) => {
-            let mut overrides: HashMap<String, Vec<SyntheticEvent>> = HashMap::new();
+        Some(v) => match parse_hold_spec(v)? {
+            HoldSpec::Transparent(name) => match parse_modifier(&name) {
+                Some(m) => ResolvedHold::TransparentModifier(m),
+                None => {
+                    return Err(format!(
+                        "on_hold '{name}' is not a recognised modifier name"
+                    ))
+                }
+            },
+            HoldSpec::Rules(list) => {
+            let mut overrides: HashMap<NamedKey, Vec<SyntheticEvent>> = HashMap::new();
             let mut fallback: Option<Modifier> = None;
 
-            for rule in list {
+            for rule in &list {
                 // Platform gate.
                 if let Some(p) = &rule.platform {
                     if !platform_matches(p) {
@@ -216,38 +335,94 @@ fn resolve_binding(remap: &KeyRemap) -> Result<ResolvedBinding, String> {
                     continue;
                 }
 
-                let trigger_raw = &rule.keys[0];
-                let trigger_token = trigger_raw.to_ascii_uppercase();
+                let trigger_raw = rule.keys[0].as_str();
 
-                if trigger_token == "_DEFAULT" {
-                    // Fallback must be a single-modifier entry.
-                    if rule.to_hotkey.len() != 1 {
+                if trigger_raw.eq_ignore_ascii_case("_default") {
+                    // _default only makes sense with to_hotkey = single modifier.
+                    let to = rule.to_hotkey.as_deref().ok_or_else(|| {
+                        "rule with keys: [_default] must use `to_hotkey: [<modifier>]`".to_string()
+                    })?;
+                    if to.len() != 1 {
                         return Err(format!(
-                            "rule with keys: [_default] must have to_hotkey = a single modifier, got {:?}",
-                            rule.to_hotkey
+                            "rule with keys: [_default] must have to_hotkey = a single modifier, got {to:?}"
                         ));
                     }
-                    match parse_modifier(&rule.to_hotkey[0]) {
+                    match parse_modifier(to[0].as_str()) {
                         Some(m) => fallback = Some(m),
                         None => {
                             return Err(format!(
                                 "rule with keys: [_default] has unknown modifier '{}'",
-                                rule.to_hotkey[0]
+                                to[0].as_str()
                             ))
                         }
                     }
                     continue;
                 }
 
-                let events = bake_hotkey_tokens(rule.to_hotkey.as_slice())?;
-                overrides.insert(trigger_token, events);
+                let trigger_key = parse_named_key(trigger_raw).ok_or_else(|| {
+                    format!("unknown trigger key '{trigger_raw}' in rule")
+                })?;
+
+                let events = bake_rule_action(rule)?;
+                overrides.insert(trigger_key, events);
             }
 
-            ResolvedHold::Explicit { overrides, fallback }
-        }
+                ResolvedHold::Explicit { overrides, fallback }
+            }
+        },
     };
 
     Ok(ResolvedBinding { on_tap, on_hold })
+}
+
+/// Pick the action out of a HoldRule and bake it to a synthetic event
+/// sequence. Exactly one of `to_hotkey` / `switch_to_workspace` /
+/// `move_to_workspace` must be populated.
+fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
+    let mut provided: SmallVec<[&'static str; 3]> = SmallVec::new();
+    if rule.to_hotkey.is_some() {
+        provided.push("to_hotkey");
+    }
+    if rule.switch_to_workspace.is_some() {
+        provided.push("switch_to_workspace");
+    }
+    if rule.move_to_workspace.is_some() {
+        provided.push("move_to_workspace");
+    }
+    let name = rule.description.as_deref().unwrap_or("<unnamed>");
+    match provided.as_slice() {
+        [] => Err(format!(
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace"
+        )),
+        [_, ..] if provided.len() > 1 => Err(format!(
+            "rule '{name}' has multiple action fields {provided:?}; pick exactly one"
+        )),
+        ["to_hotkey"] => {
+            let tokens: Vec<String> = rule
+                .to_hotkey
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|t| t.0.clone())
+                .collect();
+            bake_hotkey_tokens(&tokens)
+        }
+        ["switch_to_workspace"] => {
+            let n = rule.switch_to_workspace.unwrap();
+            if n == 0 {
+                return Err(format!("rule '{name}': switch_to_workspace must be >= 1"));
+            }
+            Ok(vec![SyntheticEvent::SwitchToWorkspace(n)])
+        }
+        ["move_to_workspace"] => {
+            let n = rule.move_to_workspace.unwrap();
+            if n == 0 {
+                return Err(format!("rule '{name}': move_to_workspace must be >= 1"));
+            }
+            Ok(vec![SyntheticEvent::MoveToWorkspace(n)])
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// Pre-bake a hotkey token list into a synthetic event sequence. Every
@@ -337,14 +512,56 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "f10" => Some(NamedKey::F10),
         "f11" => Some(NamedKey::F11),
         "f12" => Some(NamedKey::F12),
-        other if other.len() == 1 => {
-            let b = other.as_bytes()[0].to_ascii_uppercase();
-            if b.is_ascii_uppercase() || b.is_ascii_digit() {
-                Some(NamedKey::Alpha(b))
-            } else {
-                None
-            }
-        }
+        // Navigation — word forms only (arrows aren't typable as a single
+        // character in YAML).
+        "left" => Some(NamedKey::Left),
+        "right" => Some(NamedKey::Right),
+        "up" => Some(NamedKey::Up),
+        "down" => Some(NamedKey::Down),
+        "home" => Some(NamedKey::Home),
+        "end" => Some(NamedKey::End),
+        "pageup" | "pgup" => Some(NamedKey::PageUp),
+        "pagedown" | "pgdn" | "pgdown" => Some(NamedKey::PageDown),
+        // Punctuation — word aliases. Literal characters are handled in the
+        // single-char arm below so users can write e.g. `keys: ["`"]`.
+        "backtick" | "grave" => Some(NamedKey::Backtick),
+        "minus" | "dash" | "hyphen" => Some(NamedKey::Minus),
+        "equals" | "equal" => Some(NamedKey::Equals),
+        "lbracket" | "leftbracket" | "openbracket" => Some(NamedKey::LeftBracket),
+        "rbracket" | "rightbracket" | "closebracket" => Some(NamedKey::RightBracket),
+        "backslash" => Some(NamedKey::Backslash),
+        "semicolon" => Some(NamedKey::Semicolon),
+        "quote" | "apostrophe" => Some(NamedKey::Quote),
+        "comma" => Some(NamedKey::Comma),
+        "period" | "dot" => Some(NamedKey::Period),
+        "slash" | "forwardslash" => Some(NamedKey::Slash),
+        other if other.len() == 1 => parse_single_char(other.as_bytes()[0]),
+        _ => None,
+    }
+}
+
+fn parse_single_char(b: u8) -> Option<NamedKey> {
+    // Letters/digits first — these preserve the Alpha(byte) shape for
+    // cheap matching.
+    let up = b.to_ascii_uppercase();
+    if up.is_ascii_uppercase() || up.is_ascii_digit() {
+        return Some(NamedKey::Alpha(up));
+    }
+    // Punctuation literals on a US layout. Both the unshifted and shifted
+    // forms map to the same NamedKey (the shift state of the injected event
+    // is what decides which glyph comes out).
+    match b {
+        b'`' | b'~' => Some(NamedKey::Backtick),
+        b'-' | b'_' => Some(NamedKey::Minus),
+        b'=' | b'+' => Some(NamedKey::Equals),
+        b'[' | b'{' => Some(NamedKey::LeftBracket),
+        b']' | b'}' => Some(NamedKey::RightBracket),
+        b'\\' | b'|' => Some(NamedKey::Backslash),
+        b';' | b':' => Some(NamedKey::Semicolon),
+        b'\'' | b'"' => Some(NamedKey::Quote),
+        b',' | b'<' => Some(NamedKey::Comma),
+        b'.' | b'>' => Some(NamedKey::Period),
+        b'/' | b'?' => Some(NamedKey::Slash),
         _ => None,
     }
 }
@@ -447,7 +664,7 @@ space:
         match s.on_hold {
             ResolvedHold::Explicit { overrides, fallback } => {
                 assert_eq!(fallback, Some(Modifier::Cmd));
-                let events = overrides.get("W").expect("W override present");
+                let events = overrides.get(&alpha('W')).expect("W override present");
                 assert_eq!(
                     events.as_slice(),
                     &[
@@ -476,7 +693,7 @@ space:
         let r = parse(src).unwrap();
         match r.space.unwrap().on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
-                assert!(overrides.contains_key("W"));
+                assert!(overrides.contains_key(&alpha('W')));
             }
             _ => panic!(),
         }
@@ -500,18 +717,88 @@ space:
             ResolvedHold::Explicit { overrides, .. } => {
                 #[cfg(target_os = "macos")]
                 {
-                    assert!(overrides.contains_key("W"));
-                    assert!(!overrides.contains_key("Q"));
+                    assert!(overrides.contains_key(&alpha('W')));
+                    assert!(!overrides.contains_key(&alpha('Q')));
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    assert!(overrides.contains_key("Q"));
-                    assert!(!overrides.contains_key("W"));
+                    assert!(overrides.contains_key(&alpha('Q')));
+                    assert!(!overrides.contains_key(&alpha('W')));
                 }
                 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 {
                     assert!(overrides.is_empty());
                 }
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn punctuation_trigger_keys_parse() {
+        let src = r#"
+space:
+  to_hotkey:
+    on_hold:
+      - keys: [","]
+        to_hotkey: [home]
+      - keys: ["`"]
+        to_hotkey: [win, "`"]
+      - keys: [.]
+        to_hotkey: [end]
+"#;
+        let r = parse(src).unwrap();
+        match r.space.unwrap().on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                assert!(overrides.contains_key(&NamedKey::Comma));
+                assert!(overrides.contains_key(&NamedKey::Backtick));
+                assert!(overrides.contains_key(&NamedKey::Period));
+                // Win+` output has Win-down, `-down, `-up, Win-up.
+                let events = overrides.get(&NamedKey::Backtick).unwrap();
+                assert_eq!(
+                    events.as_slice(),
+                    &[
+                        SyntheticEvent::ModifierDown(Modifier::Win),
+                        SyntheticEvent::KeyDown(NamedKey::Backtick),
+                        SyntheticEvent::KeyUp(NamedKey::Backtick),
+                        SyntheticEvent::ModifierUp(Modifier::Win),
+                    ]
+                );
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn arrow_key_triggers_parse() {
+        let src = r#"
+space:
+  to_hotkey:
+    on_hold:
+      - keys: [j]
+        to_hotkey: [down]
+      - keys: [k]
+        to_hotkey: [up]
+"#;
+        let r = parse(src).unwrap();
+        match r.space.unwrap().on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let down = overrides.get(&alpha('J')).unwrap();
+                assert_eq!(
+                    down.as_slice(),
+                    &[
+                        SyntheticEvent::KeyDown(NamedKey::Down),
+                        SyntheticEvent::KeyUp(NamedKey::Down),
+                    ]
+                );
+                let up = overrides.get(&alpha('K')).unwrap();
+                assert_eq!(
+                    up.as_slice(),
+                    &[
+                        SyntheticEvent::KeyDown(NamedKey::Up),
+                        SyntheticEvent::KeyUp(NamedKey::Up),
+                    ]
+                );
             }
             _ => panic!(),
         }
@@ -561,6 +848,66 @@ capslock:
     }
 
     #[test]
+    fn switch_to_workspace_action_parses() {
+        let src = r#"
+space:
+  to_hotkey:
+    on_tap: space
+    on_hold:
+      - keys: [1]
+        switch_to_workspace: 1
+      - keys: [2]
+        move_to_workspace: 2
+"#;
+        let r = parse(src).expect("parse");
+        match r.space.unwrap().on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                assert_eq!(
+                    overrides.get(&alpha('1')).unwrap().as_slice(),
+                    &[SyntheticEvent::SwitchToWorkspace(1)]
+                );
+                assert_eq!(
+                    overrides.get(&alpha('2')).unwrap().as_slice(),
+                    &[SyntheticEvent::MoveToWorkspace(2)]
+                );
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn rule_without_action_errors() {
+        let src = r#"
+space:
+  to_hotkey:
+    on_hold:
+      - keys: [1]
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("exactly one of"),
+            "expected action-missing error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rule_with_multiple_actions_errors() {
+        let src = r#"
+space:
+  to_hotkey:
+    on_hold:
+      - keys: [1]
+        to_hotkey: [left]
+        switch_to_workspace: 1
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("multiple action fields"),
+            "expected multiple-actions error, got: {err}"
+        );
+    }
+
+    #[test]
     fn multi_key_triggers_are_skipped_not_errored() {
         let src = r#"
 space:
@@ -574,7 +921,7 @@ space:
         let r = parse(src).unwrap();
         match r.space.unwrap().on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
-                assert!(overrides.contains_key("W"));
+                assert!(overrides.contains_key(&alpha('W')));
                 // Multi-key rule got dropped, not errored out.
                 assert_eq!(overrides.len(), 1);
             }
