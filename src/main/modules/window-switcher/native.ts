@@ -47,6 +47,10 @@ interface NativeAddon {
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
   getWindowIcon(id: string): NativeWindowIcon | null
+  isAccessibilityTrusted(): boolean
+  requestAccessibilityPermission(): boolean
+  isScreenRecordingGranted(): boolean
+  requestScreenRecordingPermission(): boolean
 }
 
 let addon: NativeAddon | null = null
@@ -97,17 +101,9 @@ export function listWindowsCached(
   const key = `${currentDesktopOnly}:${hideSystemWindows}`
   const entry = cache.get(key)
   if (entry && now - entry.t < CACHE_TTL_MS) {
-    console.log(`[perf] listWindowsCached: cache hit`)
     return entry.windows
   }
-  const tLoad = Date.now()
-  const mod = loadAddon()
-  const tCall = Date.now()
-  const windows = mod.listWindows(currentDesktopOnly, hideSystemWindows)
-  const tDone = Date.now()
-  console.log(
-    `[perf] listWindowsCached: loadAddon=${tCall - tLoad}ms nativeListWindows=${tDone - tCall}ms count=${windows.length} (currentDesktopOnly=${currentDesktopOnly})`
-  )
+  const windows = loadAddon().listWindows(currentDesktopOnly, hideSystemWindows)
   cache.set(key, { t: now, windows })
   return windows
 }
@@ -144,6 +140,42 @@ export function describeWindow(id: string): NativeWindow | null {
  */
 export function getWindowIcon(id: string): NativeWindowIcon | null {
   return loadAddon().getWindowIcon(id)
+}
+
+/**
+ * macOS-only check. True on every other platform (no equivalent gate).
+ * Used by the UI to surface a one-time prompt before the first all-Spaces
+ * listing — AX calls silently return empty results when permission is
+ * missing, which would otherwise look like "nothing is open".
+ */
+export function isAccessibilityTrusted(): boolean {
+  return loadAddon().isAccessibilityTrusted()
+}
+
+/**
+ * macOS-only. Shows the system Accessibility prompt (if the user hasn't
+ * already denied it outside our process) and returns the current trusted
+ * state. AX caches the trust bit at process start — after the user toggles
+ * the switch in System Settings, runwa must be restarted.
+ */
+export function requestAccessibilityPermission(): boolean {
+  return loadAddon().requestAccessibilityPermission()
+}
+
+/** macOS-only. True once `CGPreflightScreenCaptureAccess` reports the grant
+ * has propagated. Required for `CGWindowList` to return window titles. */
+export function isScreenRecordingGranted(): boolean {
+  return loadAddon().isScreenRecordingGranted()
+}
+
+/** macOS-only. Triggers the Screen Recording permission prompt and
+ * registers the app with TCC under its codesign identifier. Must be called
+ * at least once per process on Sequoia+ — otherwise manually adding the
+ * app under System Settings → Screen Recording often doesn't actually
+ * propagate the grant. Fire-and-forget; the user still needs to relaunch
+ * after granting before CGWindowList starts returning titles. */
+export function requestScreenRecordingPermission(): boolean {
+  return loadAddon().requestScreenRecordingPermission()
 }
 
 export function invalidateCache(): void {

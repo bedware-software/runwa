@@ -107,7 +107,6 @@ export const usePaletteStore = create<PaletteState>()(
     },
 
     onPaletteShow: (initialModuleId?: ModuleId) => {
-      console.log(`[perf] renderer onPaletteShow received at ${Date.now()}`)
       // Cancel any pending debounced search from a previous session.
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer)
@@ -136,17 +135,12 @@ type Setter = (fn: (state: PaletteState) => void) => void
 type Getter = () => PaletteState
 
 async function runSearch(query: string, get: Getter, set: Setter): Promise<void> {
-  const tStart = Date.now()
-  const dt = (): string => `+${Date.now() - tStart}ms`
-  const isInitial = pendingReadySignal
-  if (isInitial) console.log(`[perf] renderer runSearch start q="${query}"`)
   const prev = get()
   const newId = prev.requestId + 1
 
   // Cancel any older in-flight request.
   try {
     await window.electronAPI.modulesCancelSearch(prev.requestId)
-    if (isInitial) console.log(`[perf] renderer ${dt()} cancelSearch returned`)
   } catch {
     // ignore
   }
@@ -162,7 +156,6 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
       query,
       scopeModuleId: get().activeModuleId
     })
-    if (isInitial) console.log(`[perf] renderer ${dt()} modulesSearch returned items=${result.items.length}`)
 
     // Drop stale results.
     if (get().requestId !== newId) return
@@ -178,7 +171,6 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
     if (pendingReadySignal) {
       pendingReadySignal = false
       window.electronAPI.paletteReady()
-      console.log(`[perf] renderer ${dt()} paletteReady() sent`)
     }
   } catch (err) {
     console.warn('[palette] search failed', err)

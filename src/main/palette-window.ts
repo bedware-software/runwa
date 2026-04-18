@@ -216,13 +216,6 @@ class PaletteWindow {
       this.window = null
     })
 
-    // Forward renderer [perf] logs to the main-process terminal so the full
-    // show() timeline lands in one place. Temporary — remove with the rest
-    // of the perf instrumentation.
-    this.window.webContents.on('console-message', (_e, _level, msg) => {
-      if (msg.startsWith('[perf]')) console.log(msg)
-    })
-
     // electron-vite sets this env var in dev.
     if (process.env.ELECTRON_RENDERER_URL) {
       this.window.loadURL(process.env.ELECTRON_RENDERER_URL + '#palette')
@@ -232,9 +225,6 @@ class PaletteWindow {
   }
 
   show(moduleId?: ModuleId): void {
-    const t0 = (globalThis as { __runwaShowT0?: number }).__runwaShowT0 ?? Date.now()
-    const dt = (): string => `+${Date.now() - t0}ms`
-    console.log(`[perf] ${dt()} show() entered`)
     // Windows virtual-desktop affinity: a BrowserWindow's HWND sticks to the
     // virtual desktop where it was last shown. Hide → switch desktop → show
     // re-reveals the HWND on the *original* desktop, invisibly to the user
@@ -260,11 +250,7 @@ class PaletteWindow {
       console.log(`[palette] show: no existing window (will create)`)
     }
 
-    if (!this.window || this.window.isDestroyed()) {
-      console.log(`[perf] ${dt()} create() begin`)
-      this.create()
-      console.log(`[perf] ${dt()} create() end`)
-    }
+    if (!this.window || this.window.isDestroyed()) this.create()
     const win = this.window!
 
     // Remember which window had focus so we can restore it on dismiss.
@@ -299,11 +285,8 @@ class PaletteWindow {
     // our foreground change).
     this.lastShownAt = Date.now()
     win.setOpacity(0)
-    console.log(`[perf] ${dt()} win.show() begin`)
     win.show()
-    console.log(`[perf] ${dt()} win.show() returned`)
     win.focus()
-    console.log(`[perf] ${dt()} win.focus() returned`)
 
     // Windows foreground-lock: plain SetForegroundWindow from a background
     // process is routinely refused, which leaves the palette on-screen but
@@ -332,24 +315,21 @@ class PaletteWindow {
     // Tell the renderer to reset & search.
     const payload: PaletteShowPayload = { initialModuleId: moduleId }
     win.webContents.send('palette:show', payload)
-    console.log(`[perf] ${dt()} palette:show IPC sent`)
 
-    const reveal = (reason: string): void => {
-      console.log(`[perf] ${dt()} reveal() via ${reason}`)
+    const reveal = (): void => {
       if (win.isDestroyed()) return
       // Guard: if the window was hidden (e.g. blur) during the search,
       // don't re-reveal it.
       if (!win.isVisible()) return
       win.setOpacity(1)
-      console.log(`[perf] ${dt()} setOpacity(1) done`)
     }
 
     // Wait for the renderer to signal it has fresh results.
     // Timeout ensures the window still shows if something goes wrong.
-    const timeout = setTimeout(() => reveal('timeout'), 400)
+    const timeout = setTimeout(reveal, 400)
     ipcMain.once('palette:ready', () => {
       clearTimeout(timeout)
-      reveal('palette:ready')
+      reveal()
     })
   }
 

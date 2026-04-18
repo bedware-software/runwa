@@ -175,3 +175,68 @@ pub fn get_window_icon(id: String) -> napi::Result<Option<WindowIcon>> {
     Ok(None)
   }
 }
+
+/// macOS-only: true if this process has been granted Accessibility in
+/// System Settings → Privacy & Security → Accessibility. Always true on
+/// other platforms (no equivalent gate exists there).
+#[napi]
+pub fn is_accessibility_trusted() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    return macos::is_accessibility_trusted();
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    true
+  }
+}
+
+/// macOS-only: shows the one-time Accessibility permission prompt and
+/// returns the trusted state. If false, the user must toggle runwa on in
+/// System Settings → Privacy & Security → Accessibility and restart — AX
+/// caches the trust bit per-process at launch.
+#[napi]
+pub fn request_accessibility_permission() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    return macos::request_accessibility_permission();
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    true
+  }
+}
+
+/// macOS-only: true if `CGPreflightScreenCaptureAccess` reports Screen
+/// Recording permission has propagated to this process. Titles in
+/// `CGWindowList` output (and therefore per-window rows in the palette)
+/// require this to be true.
+#[napi]
+pub fn is_screen_recording_granted() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    return macos::is_screen_recording_granted();
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    true
+  }
+}
+
+/// macOS-only: triggers the Screen Recording permission prompt and registers
+/// the app with TCC. On Sequoia, TCC often refuses to honor a manually-added
+/// entry in System Settings unless the app has explicitly called this at
+/// least once — so we fire it at startup. Returns the immediate trusted
+/// state; after the user grants, a relaunch is still required before
+/// `CGWindowList` starts returning window titles.
+#[napi]
+pub fn request_screen_recording_permission() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    return macos::request_screen_recording_permission();
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    true
+  }
+}

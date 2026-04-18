@@ -35,8 +35,6 @@ class HotkeyManager {
       settings.activationHotkey,
       'activation',
       () => {
-        console.log(`[perf] t=0 activation hotkey fired`)
-        ;(globalThis as { __runwaShowT0?: number }).__runwaShowT0 = Date.now()
         paletteWindow.toggle()
       }
     )

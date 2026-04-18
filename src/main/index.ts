@@ -23,6 +23,34 @@ app.whenReady().then(async () => {
   // Hide the dock icon on macOS — runwa is a background launcher, not a regular app.
   if (process.platform === 'darwin') {
     app.dock?.hide()
+    // Fire the Screen Recording permission request on every startup. On
+    // Sequoia+, TCC refuses to honor a manually-added entry in System
+    // Settings unless the process has at least once called
+    // `CGRequestScreenCaptureAccess` — without it, `CGPreflightScreenCaptureAccess`
+    // returns false forever and `CGWindowList` never surfaces window
+    // titles. The call is a no-op after the user has decided once.
+    try {
+      const {
+        requestScreenRecordingPermission,
+        isScreenRecordingGranted,
+        requestAccessibilityPermission,
+        isAccessibilityTrusted
+      } = await import('./modules/window-switcher/native')
+      // Screen Recording: needed for CGWindowList to return window titles.
+      // Accessibility: needed for AX-based precise per-window raise (so
+      // clicking Newbro window #3 raises THAT window, not the app's
+      // most-recent window). Both requests are no-ops after the user has
+      // decided once, but firing them every launch ensures TCC has the
+      // app's identifier registered and that a manually-added toggle in
+      // System Settings actually binds to us.
+      requestScreenRecordingPermission()
+      requestAccessibilityPermission()
+      console.log(
+        `[main] permissions: screen_recording=${isScreenRecordingGranted()} accessibility=${isAccessibilityTrusted()}`
+      )
+    } catch (err) {
+      console.warn('[main] permission request failed', err)
+    }
   }
 
   // 1. Persistence layer
