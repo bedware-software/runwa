@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
 
@@ -57,6 +58,13 @@ export function ConfigField({ field, value, onChange }: Props) {
     )
   }
 
+  if (field.type === 'text') {
+    const currentText = typeof effective === 'string' ? effective : field.defaultValue
+    return (
+      <TextConfigField field={field} value={currentText} onChange={onChange} />
+    )
+  }
+
   // field.type === 'radio'
   const current = typeof effective === 'string' ? effective : field.defaultValue
   return (
@@ -86,6 +94,71 @@ export function ConfigField({ field, value, onChange }: Props) {
             </button>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+interface TextFieldProps {
+  field: Extract<ModuleConfigField, { type: 'text' }>
+  value: string
+  onChange: (value: ModuleConfigValue) => void
+}
+
+// Debounced locally so every keystroke doesn't round-trip through IPC +
+// trigger a settings-changed broadcast — which, for secret fields, could
+// also cause the hotkey manager to unregister/re-register on each keypress.
+function TextConfigField({ field, value, onChange }: TextFieldProps) {
+  const [draft, setDraft] = useState(value)
+  const [revealed, setRevealed] = useState(false)
+
+  // Adopt server updates when they don't match the in-flight draft — covers
+  // external changes (another window, file edit) without clobbering typing.
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+
+  const commit = (next: string): void => {
+    if (next !== value) onChange(next)
+  }
+
+  const inputType = field.secret && !revealed ? 'password' : 'text'
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs font-medium text-foreground">{field.label}</div>
+      {field.description && (
+        <div className="text-xs text-muted-foreground -mt-1">
+          {field.description}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type={inputType}
+          value={draft}
+          placeholder={field.placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commit(draft)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit(draft)
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          spellCheck={false}
+          autoComplete="off"
+          className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono"
+        />
+        {field.secret && (
+          <button
+            type="button"
+            onClick={() => setRevealed((v) => !v)}
+            className="h-8 px-2 rounded-md text-xs font-medium border bg-secondary text-secondary-foreground border-input hover:bg-accent"
+          >
+            {revealed ? 'Hide' : 'Show'}
+          </button>
+        )}
       </div>
     </div>
   )

@@ -82,3 +82,81 @@ const api: ElectronAPI = {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
+
+/**
+ * Separate bridge exposed *only* to the hidden recorder window. Kept
+ * distinct from `electronAPI` so the palette / settings renderers can't
+ * accidentally drive the microphone. Main gates messages by webContents.id
+ * on the receiving end, so even if the palette sends these channels they'd
+ * be ignored.
+ */
+interface RecorderAPI {
+  signalReady: () => void
+  sendAudio: (requestId: number, data: Uint8Array, mimeType: string) => void
+  sendError: (requestId: number, message: string) => void
+  onStart: (cb: (payload: { requestId: number }) => void) => () => void
+  onStop: (cb: () => void) => () => void
+}
+
+const recorderApi: RecorderAPI = {
+  signalReady: () => {
+    ipcRenderer.send('groq-stt:recorder:ready')
+  },
+  sendAudio: (requestId, data, mimeType) => {
+    ipcRenderer.send('groq-stt:recorder:audio', { requestId, data, mimeType })
+  },
+  sendError: (requestId, message) => {
+    ipcRenderer.send('groq-stt:recorder:error', { requestId, message })
+  },
+  onStart: (cb) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      payload: { requestId: number }
+    ): void => {
+      cb(payload)
+    }
+    ipcRenderer.on('groq-stt:recorder:start', listener)
+    return () => {
+      ipcRenderer.removeListener('groq-stt:recorder:start', listener)
+    }
+  },
+  onStop: (cb) => {
+    const listener = (): void => {
+      cb()
+    }
+    ipcRenderer.on('groq-stt:recorder:stop', listener)
+    return () => {
+      ipcRenderer.removeListener('groq-stt:recorder:stop', listener)
+    }
+  }
+}
+
+contextBridge.exposeInMainWorld('groqRecorder', recorderApi)
+
+/** Bridge for the small recording-indicator window. */
+type GroqIndicatorState = 'hidden' | 'recording' | 'transcribing'
+
+interface IndicatorAPI {
+  signalReady: () => void
+  onState: (cb: (state: GroqIndicatorState) => void) => () => void
+}
+
+const indicatorApi: IndicatorAPI = {
+  signalReady: () => {
+    ipcRenderer.send('groq-stt:indicator:ready')
+  },
+  onState: (cb) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      state: GroqIndicatorState
+    ): void => {
+      cb(state)
+    }
+    ipcRenderer.on('groq-stt:indicator:state', listener)
+    return () => {
+      ipcRenderer.removeListener('groq-stt:indicator:state', listener)
+    }
+  }
+}
+
+contextBridge.exposeInMainWorld('groqIndicator', indicatorApi)

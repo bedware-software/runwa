@@ -34,7 +34,19 @@ export interface ModuleConfigFieldRadio extends ModuleConfigFieldBase {
   options: Array<{ value: string; label: string }>
 }
 
-export type ModuleConfigField = ModuleConfigFieldCheckbox | ModuleConfigFieldRadio
+export interface ModuleConfigFieldText extends ModuleConfigFieldBase {
+  type: 'text'
+  defaultValue: string
+  /** Render as a password input (masked) — for API keys, tokens, etc. */
+  secret?: boolean
+  /** Placeholder shown when the value is empty. */
+  placeholder?: string
+}
+
+export type ModuleConfigField =
+  | ModuleConfigFieldCheckbox
+  | ModuleConfigFieldRadio
+  | ModuleConfigFieldText
 
 export interface ModuleManifest {
   id: ModuleId
@@ -44,6 +56,13 @@ export interface ModuleManifest {
   description: string
   defaultEnabled: boolean
   supportsDirectLaunch: boolean
+  /**
+   * Recommended direct-launch hotkey. Surfaced in the settings UI as the
+   * reset-to-default target; NOT auto-registered on first launch (so we
+   * don't spring surprise global shortcuts on users). Only meaningful
+   * when `supportsDirectLaunch` is true.
+   */
+  defaultDirectLaunchHotkey?: string
   /** Declarative config schema — the settings UI renders fields from this. */
   configFields?: ModuleConfigField[]
 }

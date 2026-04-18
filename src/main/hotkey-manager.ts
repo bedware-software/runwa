@@ -2,14 +2,33 @@ import { globalShortcut } from 'electron'
 import type { Settings, ModuleId } from '@shared/types'
 import { settingsStore } from './settings-store'
 import { paletteWindow } from './palette-window'
+import { moduleRegistry } from './modules/registry'
+import {
+  acceleratorToKeyBinding,
+  getLoadErrorMessage,
+  isModifierOnlyAccelerator,
+  isUiohookAvailable,
+  uiohookBridge,
+  type KeyBinding
+} from './modules/groq-stt/uiohook-bridge'
 
 /**
  * Owns all global shortcut registrations. Re-registers everything whenever
  * settings change. Silent on failure (bad hotkeys from user input are common)
  * — logs a warning so the user can fix it in settings.
+ *
+ * Two registration paths:
+ *   1. Electron's `globalShortcut` — key-down only. Default path.
+ *   2. uiohook-napi — gives both key-down and key-up. Used only when a module
+ *      opts in via `wantsKeyUpEvents()` (push-to-talk).
  */
 class HotkeyManager {
   private registered: string[] = []
+  private uiohookBindings: Array<{
+    binding: KeyBinding
+    onPress: () => void
+    onRelease: () => void
+  }> = []
   private activationRegistered = false
 
   /** True if the current activation hotkey is live. False means another
@@ -31,25 +50,153 @@ class HotkeyManager {
     //    (openSettingsHotkey is intentionally NOT registered globally — it's
     //    a window-local shortcut handled in the renderer, so chords like
     //    Ctrl+, don't hijack the same binding in IDEs.)
-    const activationOk = this.tryRegister(
-      settings.activationHotkey,
-      'activation',
-      () => {
+    //
+    // If the user cleared the activation binding (Backspace in the
+    // HotkeyRecorder persists an empty string), skip the registration
+    // entirely — passing "" to Electron's globalShortcut throws a noisy
+    // "conversion failure" TypeError. The downstream fallback in
+    // src/main/index.ts still catches this and opens the settings window
+    // so the user can rebind.
+    if (settings.activationHotkey && settings.activationHotkey.trim() !== '') {
+      const activationToggle = (): void => {
         paletteWindow.toggle()
       }
-    )
-    this.activationRegistered = activationOk
+      if (isModifierOnlyAccelerator(settings.activationHotkey)) {
+        // Modifier-only chord — Electron globalShortcut can't take it.
+        // Fall through to uiohook, which also gives us a free keyup we
+        // don't currently use (toggle semantics only need press).
+        if (!isUiohookAvailable()) {
+          console.warn(
+            `[hotkey] activation: modifier-only chord "${settings.activationHotkey}" requires uiohook-napi (${
+              getLoadErrorMessage() || 'not loaded'
+            }). Rebind to a chord with a main key.`
+          )
+        } else {
+          const binding = acceleratorToKeyBinding(settings.activationHotkey)
+          if (binding) {
+            const noop = (): void => undefined
+            const ok = uiohookBridge.registerHoldToTalk(
+              binding,
+              activationToggle,
+              noop
+            )
+            if (ok) {
+              this.uiohookBindings.push({
+                binding,
+                onPress: activationToggle,
+                onRelease: noop
+              })
+              this.activationRegistered = true
+            }
+          }
+        }
+      } else {
+        this.activationRegistered = this.tryRegister(
+          settings.activationHotkey,
+          'activation',
+          activationToggle
+        )
+      }
+    } else {
+      console.warn(
+        '[hotkey] activation hotkey is empty; skipping registration. Rebind it in Settings.'
+      )
+    }
 
-    // 2. Per-module direct-launch hotkeys → open palette pre-scoped to that module
+    // 2. Per-module direct-launch hotkeys
     for (const [moduleId, mod] of Object.entries(settings.modules)) {
       if (!mod.enabled) continue
       const key = mod.directLaunchHotkey
-      if (!key) continue
+      // Skip if empty (user cleared it) or whitespace-only — same reason
+      // as the activation guard above.
+      if (!key || key.trim() === '') continue
       // Avoid double-registering the same accelerator
       if (key === settings.activationHotkey) continue
-      this.tryRegister(key, `module:${moduleId}`, () => {
-        paletteWindow.show(moduleId as ModuleId)
-      })
+
+      const module = moduleRegistry.getModule(moduleId as ModuleId)
+      const hasCustomHandler = typeof module?.handleDirectLaunch === 'function'
+      const wantsKeyUp =
+        hasCustomHandler && module?.wantsKeyUpEvents?.() === true
+
+      const onPress = hasCustomHandler
+        ? () => module!.handleDirectLaunch!('press')
+        : () => paletteWindow.show(moduleId as ModuleId)
+
+      // Modifier-only chord (Ctrl+Super, Alt+Shift, …): Electron's
+      // globalShortcut rejects these with a "conversion failure"
+      // TypeError, so we route them through uiohook regardless of
+      // whether push-to-talk is on. No uiohook → no binding.
+      const modifierOnly = isModifierOnlyAccelerator(key)
+      if (modifierOnly) {
+        if (!isUiohookAvailable()) {
+          console.warn(
+            `[hotkey] module:${moduleId}: modifier-only chord "${key}" requires uiohook-napi, which isn't loaded (${
+              getLoadErrorMessage() || 'unknown reason'
+            }). Run \`npm install\` and restart runwa, or rebind to a chord with a regular key.`
+          )
+          continue
+        }
+        const binding = acceleratorToKeyBinding(key)
+        if (!binding) {
+          console.warn(
+            `[hotkey] module:${moduleId}: cannot parse modifier-only chord "${key}"`
+          )
+          continue
+        }
+        const onRelease = hasCustomHandler
+          ? () => module!.handleDirectLaunch!('release')
+          : () => {
+              /* no release semantics for palette-opens */
+            }
+        const ok = uiohookBridge.registerHoldToTalk(binding, onPress, onRelease)
+        if (ok) {
+          this.uiohookBindings.push({ binding, onPress, onRelease })
+        } else {
+          console.warn(
+            `[hotkey] module:${moduleId}: uiohook refused to register "${key}"`
+          )
+        }
+        continue
+      }
+
+      if (wantsKeyUp) {
+        // Distinguish "the native key-hook library is missing" (common on
+        // Windows without the VC++ runtime, on Linux with a permissions
+        // mismatch, etc.) from "the accelerator itself can't be parsed".
+        // Both cases fall back to press-only via globalShortcut — and the
+        // module's press handler degrades to toggle in that case — but
+        // the log should make it clear *why* hold-to-talk isn't active
+        // so the user can fix the install instead of assuming a bug.
+        if (!isUiohookAvailable()) {
+          console.warn(
+            `[hotkey] module:${moduleId}: push-to-talk requested but uiohook-napi is not loaded (${
+              getLoadErrorMessage() || 'unknown reason'
+            }). Falling back to toggle via globalShortcut.`
+          )
+          this.tryRegister(key, `module:${moduleId}`, onPress)
+          continue
+        }
+        const binding = acceleratorToKeyBinding(key)
+        if (!binding) {
+          console.warn(
+            `[hotkey] module:${moduleId}: cannot parse "${key}" for push-to-talk; falling back to toggle via globalShortcut`
+          )
+          this.tryRegister(key, `module:${moduleId}`, onPress)
+          continue
+        }
+        const onRelease = (): void => module!.handleDirectLaunch!('release')
+        const ok = uiohookBridge.registerHoldToTalk(binding, onPress, onRelease)
+        if (ok) {
+          this.uiohookBindings.push({ binding, onPress, onRelease })
+        } else {
+          console.warn(
+            `[hotkey] module:${moduleId}: uiohook refused to start; falling back to toggle via globalShortcut`
+          )
+          this.tryRegister(key, `module:${moduleId}`, onPress)
+        }
+      } else {
+        this.tryRegister(key, `module:${moduleId}`, onPress)
+      }
     }
   }
 
@@ -79,11 +226,16 @@ class HotkeyManager {
       }
     }
     this.registered = []
+    for (const b of this.uiohookBindings) {
+      uiohookBridge.unregisterHoldToTalk(b.binding, b.onPress, b.onRelease)
+    }
+    this.uiohookBindings = []
   }
 
   dispose(): void {
     globalShortcut.unregisterAll()
     this.registered = []
+    uiohookBridge.dispose()
   }
 }
 

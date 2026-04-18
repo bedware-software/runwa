@@ -3,10 +3,23 @@ import './lib/electron'
 import './globals.css'
 import { PaletteApp } from './components/palette/PaletteApp'
 import { SettingsApp } from './components/settings/SettingsApp'
+import { RecorderApp } from './components/recorder/RecorderApp'
+import { IndicatorApp } from './components/indicator/IndicatorApp'
 
-// Hash-based routing so one HTML file / one bundle serves both windows.
+// Hash-based routing so one HTML file / one bundle serves every window.
 const view = (window.location.hash || '#palette').replace(/^#/, '')
-const Root = view === 'settings' ? SettingsApp : PaletteApp
+const Root =
+  view === 'settings'
+    ? SettingsApp
+    : view === 'recorder'
+      ? RecorderApp
+      : view === 'indicator'
+        ? IndicatorApp
+        : PaletteApp
+
+// Tag the root so globals.css can strip the default body background /
+// height for transparent surfaces like the recording-indicator pill.
+document.documentElement.setAttribute('data-view', view)
 
 // Apply stored theme ASAP — reduces flash of wrong theme on first paint.
 window.electronAPI

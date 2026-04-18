@@ -2,7 +2,7 @@ import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings-store'
 import { cn } from '@/lib/utils'
-import { HotkeyRecorder } from './HotkeyRecorder'
+import { HotkeyRow } from './HotkeyRow'
 import { ConfigField } from './ConfigField'
 
 function iconFromHint(hint: string | undefined): LucideIcon {
@@ -59,6 +59,27 @@ export function ModulePanel({ moduleId }: Props) {
         </div>
       </div>
 
+      {/*
+        Hotkey first (right after the header + toggle + description),
+        config fields second. Hotkeys are what the user reaches for most
+        often, and keeping them pinned directly under the toggle makes
+        the layout stable across modules — config is secondary detail.
+      */}
+      {module.supportsDirectLaunch && module.enabled && (
+        <div className="pt-3 border-t border-border">
+          <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+            <HotkeyRow
+              title="Direct-launch hotkey"
+              scope="Global"
+              description={`Triggers ${module.name} from anywhere.`}
+              value={module.directLaunchHotkey ?? ''}
+              defaultValue={module.defaultDirectLaunchHotkey}
+              onChange={(v) => void setHotkey(module.id, v || undefined)}
+            />
+          </div>
+        </div>
+      )}
+
       {module.enabled && module.configFields && module.configFields.length > 0 && (
         <div className="pt-3 border-t border-border flex flex-col gap-3">
           {module.configFields.map((field) => (
@@ -71,18 +92,6 @@ export function ModulePanel({ moduleId }: Props) {
               }
             />
           ))}
-        </div>
-      )}
-
-      {module.supportsDirectLaunch && module.enabled && (
-        <div className="flex items-center gap-3 pt-3 border-t border-border">
-          <div className="text-xs text-muted-foreground flex-1">
-            Direct-launch hotkey
-          </div>
-          <HotkeyRecorder
-            value={module.directLaunchHotkey ?? ''}
-            onChange={(v) => void setHotkey(module.id, v || undefined)}
-          />
         </div>
       )}
     </div>

@@ -6,6 +6,13 @@ export interface SearchContext {
 }
 
 /**
+ * Event fired by the hotkey layer when the module's direct-launch hotkey
+ * transitions. 'press' always fires; 'release' only fires when we have a
+ * native key-hook available (uiohook-napi) and the module asked for it.
+ */
+export type DirectLaunchEvent = 'press' | 'release'
+
+/**
  * PaletteModule interface.
  *
  * FIREWALL: This file is imported ONLY by code under src/main/modules/**.
@@ -33,6 +40,24 @@ export interface PaletteModule {
    * MUST re-validate `actionKind` and `action` before doing anything with them.
    */
   execute(item: PaletteItem): Promise<{ dismissPalette: boolean }>
+
+  /**
+   * Optional: take over the module's direct-launch hotkey instead of opening
+   * the palette. Modules that do their own thing on a global keystroke (e.g.
+   * start/stop a background recording) implement this. The hotkey manager
+   * only calls 'release' when a key-up source is available AND
+   * `wantsKeyUpEvents()` returned true — otherwise behave as press-only.
+   */
+  handleDirectLaunch?(event: DirectLaunchEvent): void
+
+  /**
+   * Optional: signal that the module wants keyup events for its direct-launch
+   * hotkey. Returning true causes the hotkey manager to route through the
+   * native key listener (uiohook-napi) when available. Re-evaluated on every
+   * settings change, so this can reflect runtime config (e.g. push-to-talk
+   * vs. toggle mode).
+   */
+  wantsKeyUpEvents?(): boolean
 
   /** Optional cleanup, called on app shutdown. */
   dispose?(): Promise<void>

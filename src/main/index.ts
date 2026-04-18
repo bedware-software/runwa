@@ -7,6 +7,8 @@ import { settingsWindow } from './settings-window'
 import { hotkeyManager } from './hotkey-manager'
 import { registerIpcHandlers, wireSettingsBroadcast } from './ipc/handlers'
 import { trayManager } from './tray'
+import { recorderWindow } from './modules/groq-stt/recorder-window'
+import { indicatorWindow } from './modules/groq-stt/indicator-window'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -65,17 +67,28 @@ app.whenReady().then(async () => {
   // 4. Create (but don't show) the palette window
   paletteWindow.create()
 
-  // 5. IPC + settings broadcast
+  // 5. Hidden recorder window — boots the MediaRecorder / getUserMedia
+  //    stack in the background so the first press of the Groq hotkey isn't
+  //    gated on a cold renderer init. No-op if the groq-stt module is
+  //    disabled — the window is cheap (1×1, never shown) and the mic only
+  //    opens on demand.
+  recorderWindow.init()
+  // Pre-create the recording-indicator window (hidden until needed) so the
+  // first hotkey press doesn't have to wait for a renderer cold-boot
+  // before the user sees the "Listening…" pill.
+  indicatorWindow.init()
+
+  // 6. IPC + settings broadcast
   registerIpcHandlers()
   wireSettingsBroadcast()
 
-  // 6. System tray
+  // 7. System tray
   trayManager.init()
 
-  // 7. Global shortcuts — must come after settings is ready
+  // 8. Global shortcuts — must come after settings is ready
   hotkeyManager.init()
 
-  // 8. Fallback: if the activation hotkey couldn't be registered (another
+  // 9. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
   //    settings window so the user can pick a working chord. Without this
   //    it's impossible to reach settings on first launch.
@@ -94,4 +107,6 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   hotkeyManager.dispose()
+  recorderWindow.dispose()
+  indicatorWindow.dispose()
 })

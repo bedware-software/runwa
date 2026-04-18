@@ -130,3 +130,22 @@ kbd {
   }
   #root { height: 100vh; display: flex; flex-direction: column; }
 }
+
+/* ── Transparent surfaces (recording indicator + hidden recorder) ──
+   Override the opaque body background applied in @layer base so the
+   pill-shaped indicator window and the 1×1 recorder window don't
+   paint an ugly rectangle on top of the user's desktop. Outside of
+   @layer base these rules win by normal cascade priority — no
+   !important needed. */
+html[data-view="indicator"],
+html[data-view="indicator"] body,
+html[data-view="recorder"],
+html[data-view="recorder"] body {
+  background: transparent;
+}
+html[data-view="indicator"] body {
+  /* Keep the pill absolutely centered at the bottom of the small
+     frameless window — the default 100vh + flex #root is fine, we
+     just need the background chrome gone. */
+  color: inherit;
+}

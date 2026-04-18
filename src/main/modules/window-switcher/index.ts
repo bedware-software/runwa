@@ -21,6 +21,7 @@ const MANIFEST: ModuleManifest = {
   description: 'Jump to any open window on your desktop — like PowerToys Window Walker.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+W',
   configFields: [
     {
       key: 'currentDesktopOnly',
