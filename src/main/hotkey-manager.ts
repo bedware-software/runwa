@@ -5,6 +5,8 @@ import { paletteWindow } from './palette-window'
 import { moduleRegistry } from './modules/registry'
 import {
   acceleratorToKeyBinding,
+  getLoadErrorMessage,
+  isUiohookAvailable,
   uiohookBridge,
   type KeyBinding
 } from './modules/groq-stt/uiohook-bridge'
@@ -74,10 +76,26 @@ class HotkeyManager {
         : () => paletteWindow.show(moduleId as ModuleId)
 
       if (wantsKeyUp) {
+        // Distinguish "the native key-hook library is missing" (common on
+        // Windows without the VC++ runtime, on Linux with a permissions
+        // mismatch, etc.) from "the accelerator itself can't be parsed".
+        // Both cases fall back to press-only via globalShortcut — and the
+        // module's press handler degrades to toggle in that case — but
+        // the log should make it clear *why* hold-to-talk isn't active
+        // so the user can fix the install instead of assuming a bug.
+        if (!isUiohookAvailable()) {
+          console.warn(
+            `[hotkey] module:${moduleId}: push-to-talk requested but uiohook-napi is not loaded (${
+              getLoadErrorMessage() || 'unknown reason'
+            }). Falling back to toggle via globalShortcut.`
+          )
+          this.tryRegister(key, `module:${moduleId}`, onPress)
+          continue
+        }
         const binding = acceleratorToKeyBinding(key)
         if (!binding) {
           console.warn(
-            `[hotkey] module:${moduleId}: cannot parse "${key}" for push-to-talk; falling back to globalShortcut`
+            `[hotkey] module:${moduleId}: cannot parse "${key}" for push-to-talk; falling back to toggle via globalShortcut`
           )
           this.tryRegister(key, `module:${moduleId}`, onPress)
           continue
@@ -87,11 +105,8 @@ class HotkeyManager {
         if (ok) {
           this.uiohookBindings.push({ binding, onPress, onRelease })
         } else {
-          // uiohook-napi isn't available (failed to load / missing native
-          // binary) — silently fall back to press-only. The module should
-          // still be usable in its press-only branch.
           console.warn(
-            `[hotkey] module:${moduleId}: uiohook unavailable; falling back to press-only via globalShortcut`
+            `[hotkey] module:${moduleId}: uiohook refused to start; falling back to toggle via globalShortcut`
           )
           this.tryRegister(key, `module:${moduleId}`, onPress)
         }

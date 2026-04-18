@@ -232,27 +232,33 @@ export function createGroqSttModule(): PaletteModule {
   }
 
   const handleDirectLaunch = (event: DirectLaunchEvent): void => {
-    const cfg = getConfig()
-    const mode = configString(cfg, 'mode') || 'push-to-talk'
-    if (mode === 'toggle') {
-      // Toggle mode only cares about 'press' — each press flips state.
-      // 'release' events (if they ever arrive) are ignored, so the hotkey
-      // behaves consistently whether or not uiohook-napi is loaded.
-      if (event !== 'press') return
+    // Uniform press semantics: press-while-idle starts recording,
+    // press-while-recording stops it. Works for the two live paths:
+    //
+    //   - Toggle mode: we register via Electron's globalShortcut (press
+    //     only). Each press flips the state.
+    //   - Push-to-talk *fallback*: uiohook-napi failed to load, so we
+    //     also only get presses — same press-to-toggle behavior
+    //     ensures the module doesn't get stuck in "recording" with no
+    //     way to stop.
+    //
+    // Release events are meaningful only in real push-to-talk (uiohook
+    // hooked up): they close out the session the press opened.
+    if (event === 'press') {
       if (state.state === 'recording') {
         void endRecording()
       } else if (state.state === 'idle') {
         void beginRecording()
       }
-      // While transcribing, ignore presses so a double-tap doesn't try to
-      // start a second recording mid-request.
+      // Presses during the 'transcribing' window are ignored so a
+      // stray double-tap doesn't try to start a new session mid-request.
       return
     }
 
-    // push-to-talk: press starts, release ends.
-    if (event === 'press') {
-      void beginRecording()
-    } else {
+    // event === 'release' — only fires when uiohook is available.
+    // Close the session only if we're still holding one open; ignore
+    // any release that arrives after a press-toggle has already ended it.
+    if (state.state === 'recording') {
       void endRecording()
     }
   }

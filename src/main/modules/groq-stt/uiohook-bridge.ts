@@ -50,7 +50,19 @@ interface UiohookModule {
 }
 
 let cachedModule: UiohookModule | null | undefined
+let loadError: Error | null = null
 let loadAttempted = false
+
+/** Reason the bridge couldn't register a hold-to-talk binding. Used by the
+ *  hotkey manager to decide whether to log a separate user-visible message
+ *  ("native hook missing") vs. a parser-level warning ("bad chord"). */
+export type UiohookUnavailableReason = 'not-installed' | 'parse-failed'
+
+/** Error message from the last failed require(). Empty string if uiohook
+ *  loaded successfully or no load has been attempted yet. */
+export function getLoadErrorMessage(): string {
+  return loadError?.message ?? ''
+}
 
 function tryLoadUiohook(): UiohookModule | null {
   if (loadAttempted) return cachedModule ?? null
@@ -60,15 +72,33 @@ function tryLoadUiohook(): UiohookModule | null {
     // at runtime — if the user hasn't run `npm install` yet, or the prebuild
     // for their Electron ABI is missing, the rest of the app keeps working.
     cachedModule = nodeRequire('uiohook-napi') as UiohookModule
+    // Loud, one-line confirmation so the user can tell from the log
+    // whether hold-to-talk is actually wired up.
+    console.log('[uiohook-bridge] uiohook-napi loaded — push-to-talk enabled')
     return cachedModule
   } catch (err) {
-    console.warn(
-      '[uiohook-bridge] uiohook-napi unavailable — push-to-talk disabled:',
-      (err as Error).message
+    loadError = err as Error
+    // Extra-loud so the message isn't buried under React DevTools / vite
+    // noise. Includes the raw error so the user can see the root cause
+    // (missing VC++ runtime on Windows, unsupported glibc on Linux, etc.).
+    console.error(
+      '\n[uiohook-bridge] ================================================================\n' +
+        '[uiohook-bridge] uiohook-napi FAILED to load — push-to-talk will fall back to toggle.\n' +
+        '[uiohook-bridge] Reason:',
+      loadError.message,
+      '\n[uiohook-bridge] Try: npm rebuild uiohook-napi (Windows also needs the VC++ 2015-2022 Redistributable).\n' +
+        '[uiohook-bridge] ================================================================\n'
     )
     cachedModule = null
     return null
   }
+}
+
+/** Convenience: report whether uiohook is loaded without forcing a second
+ *  require attempt. The first call triggers a require; subsequent calls
+ *  just read the cached result. */
+export function isUiohookAvailable(): boolean {
+  return tryLoadUiohook() !== null
 }
 
 /** Map Electron Accelerator token → uiohook keycode key name. */
@@ -80,8 +110,9 @@ function keycodeFor(token: string, mod: UiohookModule): number | null {
     const num = Number(fn[1])
     if (num >= 1 && num <= 24) return K[`F${num}`] ?? null
   }
-  // Digits 0..9 are 'Digit0'..'Digit9' in uiohook-napi's enum
-  if (/^\d$/.test(token)) return K[`Digit${token}`] ?? null
+  // Digits 0..9 live under numeric-string keys on uiohook-napi's enum
+  // (e.g. UiohookKey[0] === 11 — there's no 'Digit0' alias).
+  if (/^\d$/.test(token)) return K[token] ?? null
   // Single letter keys
   if (/^[A-Za-z]$/.test(token)) return K[token.toUpperCase()] ?? null
   // Named keys — normalize a handful of Electron synonyms to uiohook's names.

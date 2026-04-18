@@ -17,6 +17,10 @@ const Root =
         ? IndicatorApp
         : PaletteApp
 
+// Tag the root so globals.css can strip the default body background /
+// height for transparent surfaces like the recording-indicator pill.
+document.documentElement.setAttribute('data-view', view)
+
 // Apply stored theme ASAP — reduces flash of wrong theme on first paint.
 window.electronAPI
   .settingsGet()
