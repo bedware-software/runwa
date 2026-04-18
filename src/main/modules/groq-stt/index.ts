@@ -21,8 +21,7 @@ const MODULE_ID = 'groq-stt'
 
 const MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'whisper-large-v3', label: 'Whisper Large v3' },
-  { value: 'whisper-large-v3-turbo', label: 'Whisper Large v3 Turbo' },
-  { value: 'distil-whisper-large-v3-en', label: 'Distil Whisper (English only)' }
+  { value: 'whisper-large-v3-turbo', label: 'Whisper Large v3 Turbo' }
 ]
 
 const LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
