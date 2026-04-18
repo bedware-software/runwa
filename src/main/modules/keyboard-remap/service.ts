@@ -11,7 +11,7 @@ import {
 /**
  * Lifecycle owner for the native keyboard-remap hook.
  *
- * Reads rules from `<userData>/keyboard-rules.json`. If the file doesn't
+ * Reads rules from `<userData>/keyboard-rules.yaml`. If the file doesn't
  * exist, a template is written so the user has something to edit.
  *
  * On macOS the hook needs Accessibility permission. If it's missing we
@@ -24,7 +24,7 @@ class KeyboardRemapService {
   private started = false
 
   rulesFilePath(): string {
-    return path.join(app.getPath('userData'), 'keyboard-rules.json')
+    return path.join(app.getPath('userData'), 'keyboard-rules.yaml')
   }
 
   start(): void {
@@ -46,9 +46,9 @@ class KeyboardRemapService {
       return
     }
 
-    const rulesJson = this.loadOrInitRulesFile()
+    const rulesYaml = this.loadOrInitRulesFile()
     try {
-      this.handle = startKeyboardRemap(rulesJson)
+      this.handle = startKeyboardRemap(rulesYaml)
       console.log(`[keyboard-remap] started (handle ${this.handle})`)
     } catch (err) {
       console.warn('[keyboard-remap] failed to start:', err)

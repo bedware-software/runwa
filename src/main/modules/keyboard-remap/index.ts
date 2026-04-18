@@ -16,7 +16,7 @@ const MANIFEST: ModuleManifest = {
       type: 'action',
       label: 'Rules file',
       description:
-        'Rules are stored as JSON5 (JSON with comments) at <userData>/keyboard-rules.json. The button opens the file in your system default editor. Restart runwa to apply changes.',
+        'Rules are stored as YAML at <userData>/keyboard-rules.yaml. The button opens the file in your system default editor. Restart runwa to apply changes.',
       buttonLabel: 'Edit rules'
     }
   ]

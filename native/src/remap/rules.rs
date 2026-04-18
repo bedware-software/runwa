@@ -1,8 +1,8 @@
 //! Rule schema and parsing.
 //!
-//! Rules are authored as JSON5 (JSON with comments) so users can annotate
-//! the file on disk. After parsing, we canonicalise keys to an uppercase
-//! ASCII form so the state machine can do simple HashMap lookups.
+//! Rules are authored as YAML so users can annotate the file on disk with
+//! `#`-comments. After parsing we canonicalise override keys to uppercase
+//! ASCII so the state machine can do simple HashMap lookups.
 
 use serde::Deserialize;
 use smallvec::SmallVec;
@@ -98,8 +98,8 @@ pub struct ResolvedAction {
     pub key: KeyToken,
 }
 
-pub fn parse(json: &str) -> Result<ResolvedRules, String> {
-    let rules: Rules = json5::from_str(json).map_err(|e| format!("{e}"))?;
+pub fn parse(yaml: &str) -> Result<ResolvedRules, String> {
+    let rules: Rules = serde_yml::from_str(yaml).map_err(|e| format!("{e}"))?;
     Ok(resolve(rules))
 }
 
@@ -194,72 +194,66 @@ fn parse_modifier(s: &str) -> Option<Modifier> {
 }
 
 /// Built-in default rules used when no user file exists yet. Kept in sync
-/// with `DEFAULT_RULES_TEMPLATE` on the TS side; the TS template has
-/// comments, this is the machine-readable copy for fallback parsing.
-pub const DEFAULT_RULES_JSON: &str = r#"{
-  "capslock_to_ctrl_escape": true,
-  "space_layer": {
-    "enabled": true,
-    "macos_transparent_modifier": "cmd",
-    "windows_transparent_modifier": null,
-    "overrides": {
-      "Q_windows_only": { "synthesize": ["Alt", "F4"] }
-    }
-  }
-}"#;
+/// with the TS-side template; this is the minimal machine-readable copy
+/// for fallback parsing.
+pub const DEFAULT_RULES_YAML: &str = r#"
+capslock_to_ctrl_escape: true
+space_layer:
+  enabled: true
+  macos_transparent_modifier: cmd
+  windows_transparent_modifier: null
+  overrides:
+    Q_windows_only:
+      synthesize: [Alt, F4]
+"#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parses_default_json() {
-        let r = parse(DEFAULT_RULES_JSON).expect("default rules parse");
+    fn parses_default_yaml() {
+        let r = parse(DEFAULT_RULES_YAML).expect("default rules parse");
         assert!(r.capslock_to_ctrl_escape);
         assert!(r.space_layer_enabled);
     }
 
     #[test]
-    fn parses_json5_with_comments() {
+    fn parses_yaml_with_comments() {
         let src = r#"
-            // top-level comment
-            {
-              capslock_to_ctrl_escape: true,
-              space_layer: {
-                enabled: true,
-                overrides: {
-                  // inline
-                  "W": { synthesize: ["Ctrl", "Alt", "W"] }
-                }
-              }
-            }
+# top-level comment
+capslock_to_ctrl_escape: true
+space_layer:
+  enabled: true
+  overrides:
+    # inline comment
+    W:
+      synthesize: [Ctrl, Alt, W]
         "#;
-        let r = parse(src).expect("json5 parse");
+        let r = parse(src).expect("yaml parse");
         assert!(r.space_overrides.contains_key("W"));
     }
 
     #[test]
     fn uppercases_override_keys() {
-        let src = r#"{
-          "space_layer": {
-            "overrides": {
-              "w": { "synthesize": ["Ctrl", "Alt", "W"] }
-            }
-          }
-        }"#;
+        let src = r#"
+space_layer:
+  overrides:
+    w:
+      synthesize: [Ctrl, Alt, W]
+"#;
         let r = parse(src).unwrap();
         assert!(r.space_overrides.contains_key("W"));
     }
 
     #[test]
     fn synthesize_parses_modifiers_and_key() {
-        let src = r#"{
-          "space_layer": {
-            "overrides": {
-              "W": { "synthesize": ["Ctrl", "Alt", "W"] }
-            }
-          }
-        }"#;
+        let src = r#"
+space_layer:
+  overrides:
+    W:
+      synthesize: [Ctrl, Alt, W]
+"#;
         let r = parse(src).unwrap();
         let action = r.space_overrides.get("W").unwrap();
         assert_eq!(action.key, "W");
