@@ -41,6 +41,8 @@ export interface ModuleConfigFieldText extends ModuleConfigFieldBase {
   secret?: boolean
   /** Placeholder shown when the value is empty. */
   placeholder?: string
+  /** Render as an auto-growing textarea with soft-wrapped lines. */
+  multiline?: boolean
 }
 
 export type ModuleConfigField =

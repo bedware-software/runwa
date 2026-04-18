@@ -90,8 +90,10 @@ const MANIFEST: ModuleManifest = {
       label: 'Biasing prompt',
       description:
         'Optional short hint about the speaker/topic. Improves recognition of domain-specific vocabulary (names, jargon, library references).',
-      defaultValue: '',
-      placeholder: 'e.g. "programmer discussing TypeScript and Electron"'
+      defaultValue:
+        'Programmer discussing about programming in English and Russian. React, Kubernetis, Control+M and etc.',
+      placeholder: 'e.g. "programmer discussing TypeScript and Electron"',
+      multiline: true
     }
   ]
 }

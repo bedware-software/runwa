@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
 
@@ -111,12 +111,24 @@ interface TextFieldProps {
 function TextConfigField({ field, value, onChange }: TextFieldProps) {
   const [draft, setDraft] = useState(value)
   const [revealed, setRevealed] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Adopt server updates when they don't match the in-flight draft — covers
   // external changes (another window, file edit) without clobbering typing.
   useEffect(() => {
     setDraft(value)
   }, [value])
+
+  // Auto-grow the textarea to its content so the whole prompt stays visible
+  // without an internal scrollbar. Runs synchronously before paint to avoid
+  // a one-frame flash of the wrong height on first mount / draft changes.
+  useLayoutEffect(() => {
+    if (!field.multiline) return
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [draft, field.multiline])
 
   const commit = (next: string): void => {
     if (next !== value) onChange(next)
@@ -132,24 +144,38 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
           {field.description}
         </div>
       )}
-      <div className="flex items-center gap-2">
-        <input
-          type={inputType}
-          value={draft}
-          placeholder={field.placeholder}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => commit(draft)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit(draft)
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono"
-        />
+      <div className={cn('flex gap-2', field.multiline ? 'items-start' : 'items-center')}>
+        {field.multiline ? (
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            placeholder={field.placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => commit(draft)}
+            spellCheck={false}
+            autoComplete="off"
+            rows={3}
+            className="flex-1 min-h-[4.5rem] px-3 py-2 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono resize-none overflow-hidden whitespace-pre-wrap break-words leading-5"
+          />
+        ) : (
+          <input
+            type={inputType}
+            value={draft}
+            placeholder={field.placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => commit(draft)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commit(draft)
+                ;(e.target as HTMLInputElement).blur()
+              }
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono"
+          />
+        )}
         {field.secret && (
           <button
             type="button"
