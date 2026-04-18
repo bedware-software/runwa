@@ -49,20 +49,34 @@ class HotkeyManager {
     //    (openSettingsHotkey is intentionally NOT registered globally — it's
     //    a window-local shortcut handled in the renderer, so chords like
     //    Ctrl+, don't hijack the same binding in IDEs.)
-    const activationOk = this.tryRegister(
-      settings.activationHotkey,
-      'activation',
-      () => {
-        paletteWindow.toggle()
-      }
-    )
-    this.activationRegistered = activationOk
+    //
+    // If the user cleared the activation binding (Backspace in the
+    // HotkeyRecorder persists an empty string), skip the registration
+    // entirely — passing "" to Electron's globalShortcut throws a noisy
+    // "conversion failure" TypeError. The downstream fallback in
+    // src/main/index.ts still catches this and opens the settings window
+    // so the user can rebind.
+    if (settings.activationHotkey && settings.activationHotkey.trim() !== '') {
+      this.activationRegistered = this.tryRegister(
+        settings.activationHotkey,
+        'activation',
+        () => {
+          paletteWindow.toggle()
+        }
+      )
+    } else {
+      console.warn(
+        '[hotkey] activation hotkey is empty; skipping registration. Rebind it in Settings.'
+      )
+    }
 
     // 2. Per-module direct-launch hotkeys
     for (const [moduleId, mod] of Object.entries(settings.modules)) {
       if (!mod.enabled) continue
       const key = mod.directLaunchHotkey
-      if (!key) continue
+      // Skip if empty (user cleared it) or whitespace-only — same reason
+      // as the activation guard above.
+      if (!key || key.trim() === '') continue
       // Avoid double-registering the same accelerator
       if (key === settings.activationHotkey) continue
 

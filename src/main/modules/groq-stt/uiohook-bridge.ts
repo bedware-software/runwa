@@ -78,15 +78,24 @@ function tryLoadUiohook(): UiohookModule | null {
     return cachedModule
   } catch (err) {
     loadError = err as Error
+    // "Cannot find module" means the package isn't in node_modules at all
+    // — so the right fix is `npm install`, not `npm rebuild`. Distinguish
+    // that from a runtime linker error (missing VC++ runtime, unsupported
+    // glibc, etc.) which IS fixable with `npm rebuild` + a redistributable.
+    const notInstalled =
+      loadError.message.includes('Cannot find module') ||
+      (loadError as NodeJS.ErrnoException).code === 'MODULE_NOT_FOUND'
+    const hint = notInstalled
+      ? 'Run `npm install` — the package is listed in package.json but not yet installed.'
+      : 'Run `npm rebuild uiohook-napi`. On Windows you also need the VC++ 2015-2022 Redistributable (x64).'
     // Extra-loud so the message isn't buried under React DevTools / vite
-    // noise. Includes the raw error so the user can see the root cause
-    // (missing VC++ runtime on Windows, unsupported glibc on Linux, etc.).
+    // noise.
     console.error(
       '\n[uiohook-bridge] ================================================================\n' +
         '[uiohook-bridge] uiohook-napi FAILED to load — push-to-talk will fall back to toggle.\n' +
         '[uiohook-bridge] Reason:',
       loadError.message,
-      '\n[uiohook-bridge] Try: npm rebuild uiohook-napi (Windows also needs the VC++ 2015-2022 Redistributable).\n' +
+      `\n[uiohook-bridge] Fix: ${hint}\n` +
         '[uiohook-bridge] ================================================================\n'
     )
     cachedModule = null
