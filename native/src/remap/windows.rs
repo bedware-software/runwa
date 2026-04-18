@@ -32,10 +32,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use super::rules::{Modifier, ResolvedRules};
-use super::state::{
-    Action, EventKind, LogicalKey, RawEvent, StateMachine, SynthKey, SyntheticEvent,
-};
+use super::rules::{Modifier, NamedKey, ResolvedRules, SyntheticEvent};
+use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
 /// Handle owned by the registry. Dropping via `HookHandle::stop` posts
@@ -245,12 +243,30 @@ fn vk_to_logical(vk: u32) -> LogicalKey {
     }
 }
 
-fn logical_to_vk(key: SynthKey) -> VIRTUAL_KEY {
+fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        VK_BACK, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
+        VK_RETURN, VK_TAB,
+    };
     match key {
-        SynthKey::Escape => VK_ESCAPE,
-        SynthKey::Space => VK_SPACE,
-        SynthKey::F4 => VK_F4,
-        SynthKey::Alpha(b) => VIRTUAL_KEY(b as u16),
+        NamedKey::Escape => VK_ESCAPE,
+        NamedKey::Space => VK_SPACE,
+        NamedKey::Tab => VK_TAB,
+        NamedKey::Return => VK_RETURN,
+        NamedKey::Delete => VK_BACK,
+        NamedKey::F1 => VK_F1,
+        NamedKey::F2 => VK_F2,
+        NamedKey::F3 => VK_F3,
+        NamedKey::F4 => VK_F4,
+        NamedKey::F5 => VK_F5,
+        NamedKey::F6 => VK_F6,
+        NamedKey::F7 => VK_F7,
+        NamedKey::F8 => VK_F8,
+        NamedKey::F9 => VK_F9,
+        NamedKey::F10 => VK_F10,
+        NamedKey::F11 => VK_F11,
+        NamedKey::F12 => VK_F12,
+        NamedKey::Alpha(b) => VIRTUAL_KEY(b as u16),
     }
 }
 
@@ -272,8 +288,8 @@ fn inject(events: &[SyntheticEvent]) {
         let (vk, flags) = match ev {
             SyntheticEvent::ModifierDown(m) => (modifier_to_vk(*m), 0u32),
             SyntheticEvent::ModifierUp(m) => (modifier_to_vk(*m), KEYEVENTF_KEYUP.0),
-            SyntheticEvent::KeyDown(k) => (logical_to_vk(*k), 0u32),
-            SyntheticEvent::KeyUp(k) => (logical_to_vk(*k), KEYEVENTF_KEYUP.0),
+            SyntheticEvent::KeyDown(k) => (named_to_vk(*k), 0u32),
+            SyntheticEvent::KeyUp(k) => (named_to_vk(*k), KEYEVENTF_KEYUP.0),
         };
         inputs.push(build_input(vk, flags));
     }

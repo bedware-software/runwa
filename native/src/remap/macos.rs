@@ -27,10 +27,8 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 
-use super::rules::{Modifier, ResolvedRules};
-use super::state::{
-    Action, EventKind, LogicalKey, RawEvent, StateMachine, SynthKey, SyntheticEvent,
-};
+use super::rules::{Modifier, NamedKey, ResolvedRules, SyntheticEvent};
+use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
 // ---------------------------------------------------------------------------
@@ -309,12 +307,26 @@ fn keycode_to_logical(kc: u16) -> LogicalKey {
     }
 }
 
-fn logical_to_keycode(key: SynthKey) -> Option<u16> {
+fn named_to_keycode(key: NamedKey) -> Option<u16> {
     match key {
-        SynthKey::Escape => Some(KeyCode::ESCAPE),
-        SynthKey::Space => Some(KeyCode::SPACE),
-        SynthKey::F4 => Some(KeyCode::F4),
-        SynthKey::Alpha(b) => alpha_to_keycode(b),
+        NamedKey::Escape => Some(KeyCode::ESCAPE),
+        NamedKey::Space => Some(KeyCode::SPACE),
+        NamedKey::Tab => Some(KeyCode::TAB),
+        NamedKey::Return => Some(KeyCode::RETURN),
+        NamedKey::Delete => Some(KeyCode::DELETE),
+        NamedKey::F1 => Some(KeyCode::F1),
+        NamedKey::F2 => Some(KeyCode::F2),
+        NamedKey::F3 => Some(KeyCode::F3),
+        NamedKey::F4 => Some(KeyCode::F4),
+        NamedKey::F5 => Some(KeyCode::F5),
+        NamedKey::F6 => Some(KeyCode::F6),
+        NamedKey::F7 => Some(KeyCode::F7),
+        NamedKey::F8 => Some(KeyCode::F8),
+        NamedKey::F9 => Some(KeyCode::F9),
+        NamedKey::F10 => Some(KeyCode::F10),
+        NamedKey::F11 => Some(KeyCode::F11),
+        NamedKey::F12 => Some(KeyCode::F12),
+        NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }
 
@@ -381,11 +393,11 @@ fn inject(events: &[SyntheticEvent]) {
         let (keycode, down) = match ev {
             SyntheticEvent::ModifierDown(m) => (modifier_to_keycode(*m), true),
             SyntheticEvent::ModifierUp(m) => (modifier_to_keycode(*m), false),
-            SyntheticEvent::KeyDown(k) => match logical_to_keycode(*k) {
+            SyntheticEvent::KeyDown(k) => match named_to_keycode(*k) {
                 Some(kc) => (kc, true),
                 None => continue,
             },
-            SyntheticEvent::KeyUp(k) => match logical_to_keycode(*k) {
+            SyntheticEvent::KeyUp(k) => match named_to_keycode(*k) {
                 Some(kc) => (kc, false),
                 None => continue,
             },
