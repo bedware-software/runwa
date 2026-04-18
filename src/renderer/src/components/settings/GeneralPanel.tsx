@@ -1,7 +1,10 @@
+import { useState } from 'react'
+import { AlertTriangle, Trash2 } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
+import { ConfirmDialog } from '../ConfirmDialog'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: 'system', label: 'System' },
@@ -22,6 +25,14 @@ export function GeneralPanel() {
   const setOpenSettingsHotkey = useSettingsStore(
     (s) => s.setOpenSettingsHotkey
   )
+
+  const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false)
+
+  const handleWipeAllData = (): void => {
+    setWipeConfirmOpen(false)
+    // Fire-and-forget — main process will relaunch the app immediately.
+    void window.electronAPI.wipeAllData()
+  }
 
   return (
     <div className="flex flex-col gap-8 max-w-xl">
@@ -73,7 +84,46 @@ export function GeneralPanel() {
           />
         </div>
       </section>
+
+      <section className="pt-4 border-t border-destructive/30">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle size={14} className="text-destructive" />
+          <h2 className="text-sm font-semibold text-destructive">
+            Danger Zone
+          </h2>
+        </div>
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Wipe all data
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+              Permanently deletes the entire runwa application directory,
+              including all settings, hotkeys, module configuration, keyboard
+              remap rules, and caches. The app will relaunch as if freshly
+              installed. This action cannot be undone.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWipeConfirmOpen(true)}
+            className="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium bg-destructive text-destructive-foreground hover:opacity-90"
+          >
+            <Trash2 size={12} />
+            Wipe all data
+          </button>
+        </div>
+      </section>
+
+      <ConfirmDialog
+        open={wipeConfirmOpen}
+        title="Wipe all runwa data?"
+        message="This will permanently delete every setting, hotkey, module configuration, keyboard remap rule, and cache, then relaunch the app. This cannot be undone."
+        confirmLabel="Wipe everything"
+        destructive
+        onConfirm={handleWipeAllData}
+        onCancel={() => setWipeConfirmOpen(false)}
+      />
     </div>
   )
 }
-

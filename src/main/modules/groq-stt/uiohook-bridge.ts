@@ -78,7 +78,9 @@ function tryLoadUiohook(): UiohookModule | null {
     cachedModule = nodeRequire('uiohook-napi') as UiohookModule
     // Loud, one-line confirmation so the user can tell from the log
     // whether hold-to-talk is actually wired up.
-    console.log('[uiohook-bridge] uiohook-napi loaded — push-to-talk enabled')
+    // ASCII-only in log output so Windows consoles on non-UTF-8 codepages
+    // (e.g. cp1251) don't mojibake the em dash.
+    console.log('[uiohook-bridge] uiohook-napi loaded - push-to-talk enabled')
     return cachedModule
   } catch (err) {
     loadError = err as Error

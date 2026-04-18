@@ -6,6 +6,7 @@ interface Props {
   field: ModuleConfigField
   value: ModuleConfigValue | undefined
   onChange: (value: ModuleConfigValue) => void
+  onAction?: (key: string) => void
 }
 
 /**
@@ -13,7 +14,32 @@ interface Props {
  * falling back to the field's declared default when the stored value is
  * undefined — so config appears "applied" even before the user touches it.
  */
-export function ConfigField({ field, value, onChange }: Props) {
+export function ConfigField({ field, value, onChange, onAction }: Props) {
+  if (field.type === 'action') {
+    return (
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium text-foreground">{field.label}</div>
+          {field.description && (
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {field.description}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => onAction?.(field.key)}
+          className={cn(
+            'h-7 px-3 rounded-md text-xs font-medium border transition-colors shrink-0',
+            'bg-secondary text-secondary-foreground border-input hover:bg-accent'
+          )}
+        >
+          {field.buttonLabel}
+        </button>
+      </div>
+    )
+  }
+
   const effective = value ?? field.defaultValue
 
   if (field.type === 'checkbox') {

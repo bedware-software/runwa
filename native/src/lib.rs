@@ -9,6 +9,8 @@ mod windows_impl;
 #[cfg(target_os = "macos")]
 mod macos;
 
+mod remap;
+
 #[napi(object)]
 #[derive(Clone)]
 pub struct NativeWindow {
@@ -239,4 +241,19 @@ pub fn request_screen_recording_permission() -> bool {
   {
     true
   }
+}
+
+/// Install a cross-platform keyboard remapping hook. `rules_json` is a JSON5
+/// document describing the rule set (see `remap::rules::DEFAULT_RULES_JSON`).
+/// Returns an opaque handle id; pass it to `stop_keyboard_remap` to tear down.
+#[napi]
+pub fn start_keyboard_remap(rules_json: String) -> napi::Result<u32> {
+  remap::start(&rules_json).map_err(|e| napi::Error::from_reason(e))
+}
+
+/// Tear down a keyboard remap hook previously installed via
+/// `start_keyboard_remap`. Unknown handle ids return an error.
+#[napi]
+pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
+  remap::stop(handle).map_err(|e| napi::Error::from_reason(e))
 }

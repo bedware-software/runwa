@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ElectronAPI,
+  KeyboardRemapRulesView,
   ModuleMeta,
   ModuleId,
   ModuleSettings,
@@ -22,6 +23,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('modules:cancelSearch', requestId),
   modulesExecute: (item: PaletteItem): Promise<ExecuteResult> =>
     ipcRenderer.invoke('modules:execute', item),
+  modulesAction: (moduleId: ModuleId, actionKey: string): Promise<void> =>
+    ipcRenderer.invoke('modules:action', moduleId, actionKey),
 
   // Settings
   settingsGet: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
@@ -58,6 +61,15 @@ const api: ElectronAPI = {
   paletteEndMove: (): void => {
     ipcRenderer.send('palette:endMove')
   },
+
+  // Keyboard remap — module-specific surface for the settings panel
+  keyboardRemapGetRules: (): Promise<KeyboardRemapRulesView> =>
+    ipcRenderer.invoke('keyboard-remap:getRules'),
+  keyboardRemapReload: (): Promise<KeyboardRemapRulesView> =>
+    ipcRenderer.invoke('keyboard-remap:reload'),
+
+  // Danger zone: wipe the entire userData directory and relaunch.
+  wipeAllData: (): Promise<void> => ipcRenderer.invoke('app:wipe-data'),
 
   // Events — return unsubscribe functions
   onPaletteShow: (cb: (payload: PaletteShowPayload) => void) => {

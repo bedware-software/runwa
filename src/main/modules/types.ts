@@ -59,6 +59,13 @@ export interface PaletteModule {
    */
   wantsKeyUpEvents?(): boolean
 
+  /**
+   * Handle a click on a `type: 'action'` config field. `key` is the field
+   * key from the module's manifest. Errors are logged and swallowed by the
+   * registry — the UI is fire-and-forget.
+   */
+  onAction?(key: string): Promise<void> | void
+
   /** Optional cleanup, called on app shutdown. */
   dispose?(): Promise<void>
 }
