@@ -4,11 +4,18 @@ import './globals.css'
 import { PaletteApp } from './components/palette/PaletteApp'
 import { SettingsApp } from './components/settings/SettingsApp'
 import { RecorderApp } from './components/recorder/RecorderApp'
+import { IndicatorApp } from './components/indicator/IndicatorApp'
 
 // Hash-based routing so one HTML file / one bundle serves every window.
 const view = (window.location.hash || '#palette').replace(/^#/, '')
 const Root =
-  view === 'settings' ? SettingsApp : view === 'recorder' ? RecorderApp : PaletteApp
+  view === 'settings'
+    ? SettingsApp
+    : view === 'recorder'
+      ? RecorderApp
+      : view === 'indicator'
+        ? IndicatorApp
+        : PaletteApp
 
 // Apply stored theme ASAP — reduces flash of wrong theme on first paint.
 window.electronAPI

@@ -132,3 +132,31 @@ const recorderApi: RecorderAPI = {
 }
 
 contextBridge.exposeInMainWorld('groqRecorder', recorderApi)
+
+/** Bridge for the small recording-indicator window. */
+type GroqIndicatorState = 'hidden' | 'recording' | 'transcribing'
+
+interface IndicatorAPI {
+  signalReady: () => void
+  onState: (cb: (state: GroqIndicatorState) => void) => () => void
+}
+
+const indicatorApi: IndicatorAPI = {
+  signalReady: () => {
+    ipcRenderer.send('groq-stt:indicator:ready')
+  },
+  onState: (cb) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      state: GroqIndicatorState
+    ): void => {
+      cb(state)
+    }
+    ipcRenderer.on('groq-stt:indicator:state', listener)
+    return () => {
+      ipcRenderer.removeListener('groq-stt:indicator:state', listener)
+    }
+  }
+}
+
+contextBridge.exposeInMainWorld('groqIndicator', indicatorApi)

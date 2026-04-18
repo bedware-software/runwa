@@ -8,6 +8,7 @@ import { hotkeyManager } from './hotkey-manager'
 import { registerIpcHandlers, wireSettingsBroadcast } from './ipc/handlers'
 import { trayManager } from './tray'
 import { recorderWindow } from './modules/groq-stt/recorder-window'
+import { indicatorWindow } from './modules/groq-stt/indicator-window'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -72,6 +73,10 @@ app.whenReady().then(async () => {
   //    disabled — the window is cheap (1×1, never shown) and the mic only
   //    opens on demand.
   recorderWindow.init()
+  // Pre-create the recording-indicator window (hidden until needed) so the
+  // first hotkey press doesn't have to wait for a renderer cold-boot
+  // before the user sees the "Listening…" pill.
+  indicatorWindow.init()
 
   // 6. IPC + settings broadcast
   registerIpcHandlers()
@@ -103,4 +108,5 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   hotkeyManager.dispose()
   recorderWindow.dispose()
+  indicatorWindow.dispose()
 })

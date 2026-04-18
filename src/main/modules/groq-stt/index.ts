@@ -4,6 +4,7 @@ import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/typ
 import type { DirectLaunchEvent, PaletteModule } from '../types'
 import { settingsStore } from '../../settings-store'
 import { recorderWindow } from './recorder-window'
+import { indicatorWindow } from './indicator-window'
 import { GroqError, transcribe } from './groq-client'
 
 /**
@@ -169,6 +170,7 @@ export function createGroqSttModule(): PaletteModule {
     // Synchronously mark recording + capture the promise so a near-instant
     // release/toggle event sees a real in-flight result instead of null.
     state.state = 'recording'
+    indicatorWindow.setState('recording')
     state.recordingResult = recorderWindow.start()
     // Swallow unhandled-rejection noise for the fire-and-forget case where
     // the user never releases the key (app quits mid-recording, etc.).
@@ -181,6 +183,7 @@ export function createGroqSttModule(): PaletteModule {
   const endRecording = async (): Promise<void> => {
     if (state.state !== 'recording' || !state.recordingResult) return
     state.state = 'transcribing'
+    indicatorWindow.setState('transcribing')
     recorderWindow.stop()
     let audio: { data: Uint8Array; mimeType: string }
     try {
@@ -188,6 +191,7 @@ export function createGroqSttModule(): PaletteModule {
     } catch (err) {
       state.state = 'idle'
       state.recordingResult = null
+      indicatorWindow.setState('hidden')
       notify('Groq Transcription', `Recording failed: ${(err as Error).message}`, 'critical')
       return
     }
@@ -223,6 +227,7 @@ export function createGroqSttModule(): PaletteModule {
       }
     } finally {
       state.state = 'idle'
+      indicatorWindow.setState('hidden')
     }
   }
 

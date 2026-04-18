@@ -13,10 +13,17 @@ interface GroqRecorderAPI {
   onStop: (cb: () => void) => () => void
 }
 
+type GroqIndicatorState = 'hidden' | 'recording' | 'transcribing'
+interface GroqIndicatorAPI {
+  signalReady: () => void
+  onState: (cb: (state: GroqIndicatorState) => void) => () => void
+}
+
 declare global {
   interface Window {
     electronAPI: ElectronAPI
     groqRecorder?: GroqRecorderAPI
+    groqIndicator?: GroqIndicatorAPI
   }
 }
 
