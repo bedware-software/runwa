@@ -59,21 +59,12 @@ export function ModulePanel({ moduleId }: Props) {
         </div>
       </div>
 
-      {module.enabled && module.configFields && module.configFields.length > 0 && (
-        <div className="pt-3 border-t border-border flex flex-col gap-3">
-          {module.configFields.map((field) => (
-            <ConfigField
-              key={field.key}
-              field={field}
-              value={module.config[field.key]}
-              onChange={(value) =>
-                void setConfig(module.id, { [field.key]: value })
-              }
-            />
-          ))}
-        </div>
-      )}
-
+      {/*
+        Hotkey first (right after the header + toggle + description),
+        config fields second. Hotkeys are what the user reaches for most
+        often, and keeping them pinned directly under the toggle makes
+        the layout stable across modules — config is secondary detail.
+      */}
       {module.supportsDirectLaunch && module.enabled && (
         <div className="pt-3 border-t border-border">
           <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
@@ -86,6 +77,21 @@ export function ModulePanel({ moduleId }: Props) {
               onChange={(v) => void setHotkey(module.id, v || undefined)}
             />
           </div>
+        </div>
+      )}
+
+      {module.enabled && module.configFields && module.configFields.length > 0 && (
+        <div className="pt-3 border-t border-border flex flex-col gap-3">
+          {module.configFields.map((field) => (
+            <ConfigField
+              key={field.key}
+              field={field}
+              value={module.config[field.key]}
+              onChange={(value) =>
+                void setConfig(module.id, { [field.key]: value })
+              }
+            />
+          ))}
         </div>
       )}
     </div>
