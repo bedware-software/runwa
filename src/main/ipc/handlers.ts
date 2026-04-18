@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron'
+import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -8,13 +8,21 @@ import type {
   Settings,
   ModuleId,
   ModuleSettings,
-  ModuleConfigValue
+  ModuleConfigValue,
+  PermissionName,
+  PermissionStatus
 } from '@shared/types'
 import { settingsStore } from '../settings-store'
 import { moduleRegistry } from '../modules/registry'
 import { paletteWindow } from '../palette-window'
 import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
+import {
+  isAccessibilityTrusted,
+  isScreenRecordingGranted,
+  requestAccessibilityPermission,
+  requestScreenRecordingPermission
+} from '../modules/window-switcher/native'
 
 export function registerIpcHandlers(): void {
   // Modules
@@ -77,6 +85,54 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle('keyboard-remap:reload', async () =>
     keyboardRemapService.reload()
+  )
+
+  // macOS permission status surface for the settings UI. Returns null on
+  // platforms that don't gate our native calls behind TCC — the renderer
+  // uses that to hide the section entirely.
+  ipcMain.handle('permissions:get', async (): Promise<PermissionStatus> => {
+    if (process.platform !== 'darwin') return null
+    return {
+      accessibility: isAccessibilityTrusted(),
+      screenRecording: isScreenRecordingGranted()
+    }
+  })
+
+  // Fires the system prompt (no-op if already decided) and returns the
+  // current status. The user still has to flip the toggle in System
+  // Settings and restart runwa before the AX/CGWindow APIs actually pick
+  // up the grant — but the badge updates live off the TCC read.
+  ipcMain.handle(
+    'permissions:request',
+    async (_e, name: PermissionName): Promise<PermissionStatus> => {
+      if (process.platform !== 'darwin') return null
+      try {
+        if (name === 'accessibility') requestAccessibilityPermission()
+        else if (name === 'screenRecording') requestScreenRecordingPermission()
+      } catch (err) {
+        console.warn(`[permissions] request ${name} failed`, err)
+      }
+      return {
+        accessibility: isAccessibilityTrusted(),
+        screenRecording: isScreenRecordingGranted()
+      }
+    }
+  )
+
+  // Deep-link into the right System Settings pane. Users who already
+  // dismissed the prompt need a path back without digging through menus.
+  ipcMain.handle(
+    'permissions:openSystemSettings',
+    async (_e, name: PermissionName): Promise<void> => {
+      if (process.platform !== 'darwin') return
+      const anchor =
+        name === 'accessibility'
+          ? 'Privacy_Accessibility'
+          : 'Privacy_ScreenCapture'
+      await shell.openExternal(
+        `x-apple.systempreferences:com.apple.preference.security?${anchor}`
+      )
+    }
   )
 
   // Danger zone — wipe userData and relaunch.

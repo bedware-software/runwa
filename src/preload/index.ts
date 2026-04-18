@@ -8,6 +8,8 @@ import type {
   ModuleConfigValue,
   PaletteItem,
   PaletteShowPayload,
+  PermissionName,
+  PermissionStatus,
   SearchRequest,
   SearchResult,
   Settings,
@@ -67,6 +69,14 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('keyboard-remap:getRules'),
   keyboardRemapReload: (): Promise<KeyboardRemapRulesView> =>
     ipcRenderer.invoke('keyboard-remap:reload'),
+
+  // macOS permissions — null on non-macOS platforms.
+  permissionsGet: (): Promise<PermissionStatus> =>
+    ipcRenderer.invoke('permissions:get'),
+  permissionsRequest: (name: PermissionName): Promise<PermissionStatus> =>
+    ipcRenderer.invoke('permissions:request', name),
+  permissionsOpenSystemSettings: (name: PermissionName): Promise<void> =>
+    ipcRenderer.invoke('permissions:openSystemSettings', name),
 
   // Danger zone: wipe the entire userData directory and relaunch.
   wipeAllData: (): Promise<void> => ipcRenderer.invoke('app:wipe-data'),

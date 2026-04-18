@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
 import { ConfigField } from './ConfigField'
 import { KeyboardRemapSection } from './KeyboardRemapSection'
+import { PermissionSection } from './PermissionSection'
 
 function iconFromHint(hint: string | undefined): LucideIcon {
   if (!hint) return Icons.Package
@@ -100,6 +101,23 @@ export function ModulePanel({ moduleId }: Props) {
       )}
 
       {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
+
+      {module.enabled && module.id === 'window-switcher' && (
+        <div className="pt-3 border-t border-border">
+          <PermissionSection
+            heading="Permissions"
+            description="macOS Screen Recording access is needed to read window titles. Relaunch runwa after granting."
+            rows={[
+              {
+                name: 'screenRecording',
+                title: 'Screen recording',
+                description:
+                  'Required for CGWindowList to return window titles — without it, entries fall back to the process name.'
+              }
+            ]}
+          />
+        </div>
+      )}
     </div>
   )
 }

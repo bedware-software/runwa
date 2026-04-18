@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { KeyboardRemapRulesView } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { PermissionSection } from './PermissionSection'
 
 /**
  * Dedicated settings section for the keyboard-remap module. Renders the
@@ -84,6 +85,19 @@ export function KeyboardRemapSection() {
       </div>
 
       <RulesList view={view} />
+
+      <PermissionSection
+        heading="Permissions"
+        description="macOS Accessibility access is needed to install the low-level keyboard hook. Relaunch runwa after granting."
+        rows={[
+          {
+            name: 'accessibility',
+            title: 'Accessibility',
+            description:
+              'Lets runwa intercept and synthesize key events for CapsLock / Space-layer rebinds.'
+          }
+        ]}
+      />
     </div>
   )
 }

@@ -205,6 +205,19 @@ export interface KeyboardRemapComboView {
 }
 
 /**
+ * macOS TCC-gated permissions the settings UI surfaces. Null on platforms
+ * without a matching concept — the renderer uses that as "hide the section".
+ */
+export type PermissionName = 'accessibility' | 'screenRecording'
+
+export interface PermissionFlags {
+  accessibility: boolean
+  screenRecording: boolean
+}
+
+export type PermissionStatus = PermissionFlags | null
+
+/**
  * Narrow surface between renderer and main. The preload script exposes an
  * implementation of this on window.electronAPI.
  */
@@ -240,6 +253,11 @@ export interface ElectronAPI {
   // Keyboard remap — module-specific surface for the settings panel.
   keyboardRemapGetRules: () => Promise<KeyboardRemapRulesView>
   keyboardRemapReload: () => Promise<KeyboardRemapRulesView>
+
+  // macOS permission status for the General panel. Null on other OSes.
+  permissionsGet: () => Promise<PermissionStatus>
+  permissionsRequest: (name: PermissionName) => Promise<PermissionStatus>
+  permissionsOpenSystemSettings: (name: PermissionName) => Promise<void>
 
   // Danger zone — wipe the entire userData directory and relaunch.
   wipeAllData: () => Promise<void>
