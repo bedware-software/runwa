@@ -22,6 +22,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('modules:cancelSearch', requestId),
   modulesExecute: (item: PaletteItem): Promise<ExecuteResult> =>
     ipcRenderer.invoke('modules:execute', item),
+  modulesAction: (moduleId: ModuleId, actionKey: string): Promise<void> =>
+    ipcRenderer.invoke('modules:action', moduleId, actionKey),
 
   // Settings
   settingsGet: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),

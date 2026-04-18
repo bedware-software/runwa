@@ -45,10 +45,22 @@ export interface ModuleConfigFieldText extends ModuleConfigFieldBase {
   multiline?: boolean
 }
 
+/**
+ * A clickable action — no stored value, fires an IPC call to the module's
+ * `onAction(key)` handler. Useful for side-effect operations like "open
+ * config file in external editor".
+ */
+export interface ModuleConfigFieldAction extends ModuleConfigFieldBase {
+  type: 'action'
+  /** Button label shown to the user. */
+  buttonLabel: string
+}
+
 export type ModuleConfigField =
   | ModuleConfigFieldCheckbox
   | ModuleConfigFieldRadio
   | ModuleConfigFieldText
+  | ModuleConfigFieldAction
 
 export interface ModuleManifest {
   id: ModuleId
@@ -167,6 +179,7 @@ export interface ElectronAPI {
   modulesSearch: (req: SearchRequest) => Promise<SearchResult>
   modulesCancelSearch: (requestId: number) => Promise<void>
   modulesExecute: (item: PaletteItem) => Promise<ExecuteResult>
+  modulesAction: (moduleId: ModuleId, actionKey: string) => Promise<void>
 
   // Settings
   settingsGet: () => Promise<Settings>

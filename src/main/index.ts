@@ -9,6 +9,7 @@ import { registerIpcHandlers, wireSettingsBroadcast } from './ipc/handlers'
 import { trayManager } from './tray'
 import { recorderWindow } from './modules/groq-stt/recorder-window'
 import { indicatorWindow } from './modules/groq-stt/indicator-window'
+import { keyboardRemapService } from './modules/keyboard-remap/service'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -88,7 +89,14 @@ app.whenReady().then(async () => {
   // 8. Global shortcuts — must come after settings is ready
   hotkeyManager.init()
 
-  // 9. Fallback: if the activation hotkey couldn't be registered (another
+  // 9. Low-level keyboard remap (CapsLock → Ctrl/Esc, Space layer).
+  //    Gated by the module's `enabled` flag so users can turn it off
+  //    without removing anything.
+  if (isKeyboardRemapEnabled()) {
+    keyboardRemapService.start()
+  }
+
+  // 10. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
   //    settings window so the user can pick a working chord. Without this
   //    it's impossible to reach settings on first launch.
@@ -109,4 +117,15 @@ app.on('will-quit', () => {
   hotkeyManager.dispose()
   recorderWindow.dispose()
   indicatorWindow.dispose()
+  keyboardRemapService.stop()
 })
+
+function isKeyboardRemapEnabled(): boolean {
+  const s = settingsStore.get()
+  const mod = s.modules['keyboard-remap']
+  // Fall back to enabled=true when the settings entry doesn't exist yet —
+  // registry.register seeds it, but reading from this scope happens after
+  // registerModules() so the entry should always be there. The `?? true`
+  // handles the degenerate case without blocking the feature.
+  return mod?.enabled ?? true
+}

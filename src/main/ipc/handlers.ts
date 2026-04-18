@@ -32,6 +32,10 @@ export function registerIpcHandlers(): void {
     return result
   })
 
+  ipcMain.handle('modules:action', async (_e, moduleId: ModuleId, key: string) =>
+    moduleRegistry.action(moduleId, key)
+  )
+
   // Settings
   ipcMain.handle('settings:get', async () => settingsStore.get())
 

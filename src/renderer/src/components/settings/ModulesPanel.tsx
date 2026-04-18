@@ -90,6 +90,9 @@ export function ModulePanel({ moduleId }: Props) {
               onChange={(value) =>
                 void setConfig(module.id, { [field.key]: value })
               }
+              onAction={(key) =>
+                void window.electronAPI.modulesAction(module.id, key)
+              }
             />
           ))}
         </div>

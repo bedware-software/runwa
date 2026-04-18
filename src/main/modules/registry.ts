@@ -210,6 +210,16 @@ class ModuleRegistry {
     }
   }
 
+  async action(moduleId: ModuleId, key: string): Promise<void> {
+    const m = this.modules.get(moduleId)
+    if (!m || !m.onAction) return
+    try {
+      await m.onAction(key)
+    } catch (err) {
+      console.warn(`[registry] action ${moduleId}.${key} failed:`, err)
+    }
+  }
+
   async dispose(): Promise<void> {
     for (const ctrl of this.activeControllers.values()) ctrl.abort()
     this.activeControllers.clear()

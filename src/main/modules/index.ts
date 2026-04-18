@@ -1,6 +1,7 @@
 import { moduleRegistry } from './registry'
 import { createWindowSwitcherModule } from './window-switcher'
 import { createGroqSttModule } from './groq-stt'
+import { createKeyboardRemapModule } from './keyboard-remap'
 
 /**
  * Hard-coded module registration. Adding a new module is a one-file change:
@@ -10,5 +11,6 @@ import { createGroqSttModule } from './groq-stt'
 export async function registerModules(): Promise<void> {
   moduleRegistry.register(createWindowSwitcherModule())
   moduleRegistry.register(createGroqSttModule())
+  moduleRegistry.register(createKeyboardRemapModule())
   // Future: apps, files, calculator, clipboard, web search, …
 }
