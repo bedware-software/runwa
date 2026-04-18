@@ -43,7 +43,7 @@ const MANIFEST: ModuleManifest = {
     'Hold (or toggle) a hotkey to record your voice; Groq Whisper transcribes it and the result lands on your clipboard.',
   defaultEnabled: false,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+V',
+  defaultDirectLaunchHotkey: 'Ctrl+Super',
   configFields: [
     {
       key: 'apiKey',
