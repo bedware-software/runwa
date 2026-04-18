@@ -1,7 +1,7 @@
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { HotkeyRecorder } from './HotkeyRecorder'
+import { HotkeyRow } from './HotkeyRow'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: 'system', label: 'System' },
@@ -77,35 +77,3 @@ export function GeneralPanel() {
   )
 }
 
-interface HotkeyRowProps {
-  title: string
-  scope: 'Global' | 'Window-local'
-  description: string
-  value: string
-  defaultValue?: string
-  onChange: (v: string) => void
-}
-
-function HotkeyRow({ title, scope, description, value, defaultValue, onChange }: HotkeyRowProps) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-foreground">{title}</span>
-          <span
-            className={cn(
-              'text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded',
-              scope === 'Global'
-                ? 'bg-primary/15 text-primary'
-                : 'bg-secondary text-muted-foreground'
-            )}
-          >
-            {scope}
-          </span>
-        </div>
-        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
-      </div>
-      <HotkeyRecorder value={value} defaultValue={defaultValue} onChange={onChange} />
-    </div>
-  )
-}

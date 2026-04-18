@@ -56,6 +56,13 @@ export interface ModuleManifest {
   description: string
   defaultEnabled: boolean
   supportsDirectLaunch: boolean
+  /**
+   * Recommended direct-launch hotkey. Surfaced in the settings UI as the
+   * reset-to-default target; NOT auto-registered on first launch (so we
+   * don't spring surprise global shortcuts on users). Only meaningful
+   * when `supportsDirectLaunch` is true.
+   */
+  defaultDirectLaunchHotkey?: string
   /** Declarative config schema — the settings UI renders fields from this. */
   configFields?: ModuleConfigField[]
 }
