@@ -1,6 +1,6 @@
 import { clipboard, Notification, nativeImage, app } from 'electron'
 import path from 'path'
-import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/types'
+import type { ModuleConfigValue, ModuleManifest } from '@shared/types'
 import type { DirectLaunchEvent, PaletteModule } from '../types'
 import { settingsStore } from '../../settings-store'
 import { recorderWindow } from './recorder-window'
@@ -37,7 +37,9 @@ const MANIFEST: ModuleManifest = {
   id: MODULE_ID,
   name: 'Groq Transcription',
   icon: 'mic',
-  prefix: 'voice',
+  // No `prefix` on purpose — this module is hotkey-only and has no
+  // palette results, so a prefix would just scope queries to an empty
+  // result set and confuse the user.
   description:
     'Hold (or toggle) a hotkey to record your voice; Groq Whisper transcribes it and the result lands on your clipboard.',
   defaultEnabled: false,
@@ -283,49 +285,16 @@ export function createGroqSttModule(): PaletteModule {
   return {
     manifest: MANIFEST,
 
-    async search(query) {
-      // The module's primary entry point is the global hotkey, not the
-      // palette. We still surface a single item so users can discover the
-      // feature and trigger a toggle from the palette when a hotkey isn't
-      // bound yet.
-      const normalized = query.trim().toLowerCase()
-      const interesting =
-        normalized === '' ||
-        'voice'.startsWith(normalized) ||
-        'record'.startsWith(normalized) ||
-        'transcribe'.startsWith(normalized) ||
-        'dictate'.startsWith(normalized) ||
-        'groq'.startsWith(normalized) ||
-        'stt'.startsWith(normalized)
-      if (!interesting) return []
-
-      const label = describeState(state.state)
-      return [
-        {
-          id: 'groq-stt:toggle',
-          title: label.title,
-          subtitle: label.subtitle,
-          iconHint: 'mic',
-          actionKind: 'groq-stt:toggle',
-          action: {},
-          score: normalized === '' ? 0.9 : 0.1
-        } satisfies Omit<PaletteItem, 'moduleId'>
-      ]
+    // This module is hotkey-only by design: a mouse click can't give us
+    // the keyup needed for push-to-talk, and the palette item would
+    // pollute every empty-query search (sitting next to open windows,
+    // apps, etc.). Discovery lives in Settings → Groq Transcription.
+    async search() {
+      return []
     },
 
-    async execute(item) {
-      if (item.actionKind !== 'groq-stt:toggle') {
-        return { dismissPalette: false }
-      }
-      // Palette-initiated invocation is always toggle-like: a mouse click
-      // doesn't give us keyup. Delegating to `press` in toggle mode gives
-      // consistent behavior no matter which mode is configured.
-      if (state.state === 'recording') {
-        void endRecording()
-      } else if (state.state === 'idle') {
-        void beginRecording()
-      }
-      return { dismissPalette: true }
+    async execute() {
+      return { dismissPalette: false }
     },
 
     handleDirectLaunch,
@@ -349,16 +318,3 @@ function pickFilename(mimeType: string): string {
   return 'audio.webm'
 }
 
-function describeState(s: TranscriptionState): { title: string; subtitle: string } {
-  switch (s) {
-    case 'recording':
-      return { title: 'Stop recording', subtitle: 'Recording… release or press again to transcribe' }
-    case 'transcribing':
-      return { title: 'Transcribing…', subtitle: 'Waiting for Groq response' }
-    default:
-      return {
-        title: 'Start voice transcription',
-        subtitle: 'Record with Groq Whisper and copy the transcript to your clipboard'
-      }
-  }
-}
