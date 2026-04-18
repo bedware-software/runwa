@@ -69,6 +69,11 @@ class ModuleRegistry {
     return { ...defaults, ...stored }
   }
 
+  /** Look up a module by id for direct invocation (hotkey manager, IPC). */
+  getModule(id: ModuleId): PaletteModule | undefined {
+    return this.modules.get(id)
+  }
+
   getManifests(): ModuleMeta[] {
     const results: ModuleMeta[] = []
     for (const m of this.modules.values()) {

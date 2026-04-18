@@ -34,7 +34,19 @@ export interface ModuleConfigFieldRadio extends ModuleConfigFieldBase {
   options: Array<{ value: string; label: string }>
 }
 
-export type ModuleConfigField = ModuleConfigFieldCheckbox | ModuleConfigFieldRadio
+export interface ModuleConfigFieldText extends ModuleConfigFieldBase {
+  type: 'text'
+  defaultValue: string
+  /** Render as a password input (masked) — for API keys, tokens, etc. */
+  secret?: boolean
+  /** Placeholder shown when the value is empty. */
+  placeholder?: string
+}
+
+export type ModuleConfigField =
+  | ModuleConfigFieldCheckbox
+  | ModuleConfigFieldRadio
+  | ModuleConfigFieldText
 
 export interface ModuleManifest {
   id: ModuleId

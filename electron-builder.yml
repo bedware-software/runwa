@@ -22,6 +22,9 @@ extraResources:
 asarUnpack:
   - "**/*.node"
   - native/**
+  # uiohook-napi ships prebuilt native binaries per-platform; they must be
+  # unpacked from the asar so the dynamic loader can dlopen them.
+  - node_modules/uiohook-napi/prebuilds/**
 win:
   target:
     - target: nsis
@@ -39,6 +42,10 @@ mac:
         - x64
         - arm64
   category: public.app-category.utilities
+  extendInfo:
+    # Required so the Groq transcription module can open the default
+    # microphone; shown once when macOS prompts the user for permission.
+    NSMicrophoneUsageDescription: runwa uses the microphone to record voice input for the Groq transcription module.
 linux:
   target:
     - AppImage
