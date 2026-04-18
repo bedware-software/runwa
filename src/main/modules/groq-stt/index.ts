@@ -6,6 +6,7 @@ import { settingsStore } from '../../settings-store'
 import { recorderWindow } from './recorder-window'
 import { indicatorWindow } from './indicator-window'
 import { GroqError, transcribe } from './groq-client'
+import { simulatePaste } from './uiohook-bridge'
 
 /**
  * Groq-powered voice-to-text, modeled after the `groq_whisperer` Python
@@ -213,12 +214,22 @@ export function createGroqSttModule(): PaletteModule {
         language,
         prompt
       })
-      if (!text) {
-        notify('Groq Transcription', 'No speech detected.', 'low')
-      } else {
+      if (text) {
         clipboard.writeText(text)
-        notify('Groq Transcription', text.length > 180 ? text.slice(0, 177) + '…' : text, 'low')
+        // Auto-paste: briefly yield so the indicator's hide + focus
+        // handoff settles, then synthesize Ctrl+V (or Cmd+V) into
+        // whatever window currently has keyboard focus. If uiohook
+        // isn't loaded, simulatePaste() returns false and the user
+        // still has the text on their clipboard for a manual paste.
+        state.state = 'idle'
+        indicatorWindow.setState('hidden')
+        setTimeout(() => {
+          simulatePaste()
+        }, 40)
+        return
       }
+      // Empty response: silent — the indicator disappearing with
+      // nothing getting pasted is enough of a signal. No notification.
     } catch (err) {
       if (err instanceof GroqError) {
         notify('Groq Transcription', `API error (${err.status}): ${err.message}`, 'critical')
