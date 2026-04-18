@@ -29,7 +29,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
+    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
@@ -68,15 +68,8 @@ static HOOK_SLOT: once_cell::sync::Lazy<Mutex<Option<ActiveHook>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 struct ActiveHook {
-    hhook: HHOOK,
     sm: StateMachine,
 }
-
-// HHOOK is a `*mut c_void` wrapper. The hook is installed on and torn down
-// from a single dedicated thread, so the raw pointer never crosses into
-// concurrent use — it's safe to hold in a statically-shared Mutex.
-unsafe impl Send for ActiveHook {}
-unsafe impl Sync for ActiveHook {}
 
 // ---------------------------------------------------------------------------
 
@@ -121,7 +114,6 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
             {
                 let mut slot = HOOK_SLOT.lock();
                 *slot = Some(ActiveHook {
-                    hhook,
                     sm: StateMachine::new(rules_for_thread),
                 });
             }

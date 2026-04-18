@@ -10,6 +10,12 @@ import { trayManager } from './tray'
 import { recorderWindow } from './modules/groq-stt/recorder-window'
 import { indicatorWindow } from './modules/groq-stt/indicator-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
+import {
+  requestScreenRecordingPermission,
+  isScreenRecordingGranted,
+  requestAccessibilityPermission,
+  isAccessibilityTrusted
+} from './modules/window-switcher/native'
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()
@@ -33,12 +39,6 @@ app.whenReady().then(async () => {
     // returns false forever and `CGWindowList` never surfaces window
     // titles. The call is a no-op after the user has decided once.
     try {
-      const {
-        requestScreenRecordingPermission,
-        isScreenRecordingGranted,
-        requestAccessibilityPermission,
-        isAccessibilityTrusted
-      } = await import('./modules/window-switcher/native')
       // Screen Recording: needed for CGWindowList to return window titles.
       // Accessibility: needed for AX-based precise per-window raise (so
       // clicking Newbro window #3 raises THAT window, not the app's
