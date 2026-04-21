@@ -28,7 +28,7 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 
-use super::rules::{Modifier, NamedKey, ResolvedRules, SyntheticEvent};
+use super::rules::{Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
@@ -75,7 +75,7 @@ pub fn install(rules: ResolvedRules) -> Result<MacosHook, String> {
     // remap *before* installing the tap, so the very first physical press
     // arrives as F19 rather than a lock-toggle. Failure here is logged but
     // non-fatal — the state machine will simply never see CapsLock events.
-    let capslock_remapped = if rules.capslock.is_some() {
+    let capslock_remapped = if rules.triggers.contains_key(&LogicalKey::CapsLock) {
         match enable_capslock_hid_remap() {
             Ok(()) => true,
             Err(e) => {
@@ -240,25 +240,24 @@ fn tap_callback(
             (EventKind::KeyUp, keycode_to_logical(kc))
         }
         CGEventType::FlagsChanged => {
-            // macOS delivers CapsLock as FlagsChanged, not KeyDown/KeyUp.
-            // At HID-tap level we see both the rising edge (physical press-
-            // down) and falling edge (press-up) as separate events, so we
-            // can infer kind from whether the AlphaShift flag is set in
-            // the event's current flags. Other modifiers (Shift, Ctrl, Alt,
-            // Cmd) are forwarded unchanged — we don't want to fight with
-            // the user's real modifier keys.
+            // macOS delivers modifier keys (CapsLock, Shift, Ctrl, Alt,
+            // Cmd) as FlagsChanged, not KeyDown/KeyUp. At HID-tap level we
+            // see both the rising and falling edge per physical press, so
+            // we can recover down/up by looking at whether this key's flag
+            // bit is currently set. We dispatch *every* modifier to the
+            // state machine — if the user hasn't configured that key as a
+            // trigger, `on_event` returns Forward and we keep the event.
             let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-            if kc == KeyCode::CAPS_LOCK {
-                let flags = event.get_flags();
-                let kind = if flags.contains(CGEventFlags::CGEventFlagAlphaShift) {
-                    EventKind::KeyDown
-                } else {
-                    EventKind::KeyUp
-                };
-                (kind, LogicalKey::CapsLock)
-            } else {
+            let Some((logical, flag_bit)) = modifier_keycode_to_logical(kc) else {
                 return CallbackResult::Keep;
-            }
+            };
+            let flags = event.get_flags();
+            let kind = if flags.contains(flag_bit) {
+                EventKind::KeyDown
+            } else {
+                EventKind::KeyUp
+            };
+            (kind, logical)
         }
         _ => return CallbackResult::Keep,
     };
@@ -270,7 +269,13 @@ fn tap_callback(
     // Shift should still be "on" when our synthesized Home fires.
     let event_flags = event.get_flags();
 
-    let raw = RawEvent { kind, key };
+    // Mirror the flag state into the logical ModifierMask so rule lookup
+    // can distinguish `keys: [shift, 1]` from `keys: [1]`.
+    let raw = RawEvent {
+        kind,
+        key,
+        modifiers: modifier_mask_from_flags(event_flags),
+    };
     let action = {
         let mut guard = SM_SLOT.lock();
         match guard.as_mut() {
@@ -292,6 +297,15 @@ fn tap_callback(
             CallbackResult::Keep
         }
         Action::Suppress => CallbackResult::Drop,
+        Action::EmitTap(events) => {
+            // Tap emission — do NOT inherit the trigger-up event's flags.
+            // See the `EmitTap` doc comment: posting with `event_flags`
+            // leaks stale synthetic-modifier state into the output and
+            // makes apps like Zed observe Ctrl+Esc for what should be a
+            // naked Esc.
+            inject(events.as_slice(), CGEventFlags::empty());
+            CallbackResult::Drop
+        }
         Action::Emit(events) => {
             inject(events.as_slice(), event_flags);
             CallbackResult::Drop
@@ -517,6 +531,26 @@ fn modifier_to_keycode(m: Modifier) -> u16 {
     }
 }
 
+/// Map a macOS virtual keycode that arrives via `FlagsChanged` to the
+/// `LogicalKey` the state machine cares about, plus the `CGEventFlags` bit
+/// that distinguishes down from up on that key. Covers every modifier that
+/// could be a top-level trigger in the YAML. Returns None for keycodes that
+/// aren't modifier-like (we leave those events untouched).
+fn modifier_keycode_to_logical(kc: u16) -> Option<(LogicalKey, CGEventFlags)> {
+    let right_shift = 0x3C_u16;
+    let right_control = 0x3E_u16;
+    let right_option = 0x3D_u16;
+    let right_command = 0x36_u16;
+    match kc {
+        kc if kc == KeyCode::CAPS_LOCK => Some((LogicalKey::CapsLock, CGEventFlags::CGEventFlagAlphaShift)),
+        kc if kc == KeyCode::SHIFT || kc == right_shift => Some((LogicalKey::Shift, CGEventFlags::CGEventFlagShift)),
+        kc if kc == KeyCode::CONTROL || kc == right_control => Some((LogicalKey::Ctrl, CGEventFlags::CGEventFlagControl)),
+        kc if kc == KeyCode::OPTION || kc == right_option => Some((LogicalKey::Alt, CGEventFlags::CGEventFlagAlternate)),
+        kc if kc == KeyCode::COMMAND || kc == right_command => Some((LogicalKey::Cmd, CGEventFlags::CGEventFlagCommand)),
+        _ => None,
+    }
+}
+
 fn modifier_to_flag(m: Modifier) -> CGEventFlags {
     match m {
         Modifier::Ctrl => CGEventFlags::CGEventFlagControl,
@@ -526,10 +560,27 @@ fn modifier_to_flag(m: Modifier) -> CGEventFlags {
     }
 }
 
+fn modifier_mask_from_flags(flags: CGEventFlags) -> ModifierMask {
+    let mut m = ModifierMask::EMPTY;
+    if flags.contains(CGEventFlags::CGEventFlagShift) {
+        m.insert(Modifier::Shift);
+    }
+    if flags.contains(CGEventFlags::CGEventFlagControl) {
+        m.insert(Modifier::Ctrl);
+    }
+    if flags.contains(CGEventFlags::CGEventFlagAlternate) {
+        m.insert(Modifier::Alt);
+    }
+    if flags.contains(CGEventFlags::CGEventFlagCommand) {
+        m.insert(Modifier::Cmd);
+    }
+    m
+}
+
 // ---------------------------------------------------------------------------
 // Injection
 
-fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
+pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
     let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
         Ok(s) => s,
         Err(_) => return,
@@ -565,14 +616,43 @@ fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 Some(kc) => (kc, false),
                 None => continue,
             },
-            // Virtual-desktop switching on macOS would go through
-            // CGSPrivate's `CGSSetActiveSpace` (private API). Not wired
-            // yet — the action is Windows-only today, parsed but skipped
-            // here so rules that opt in via `platform: windows` don't
-            // crash on mac.
-            SyntheticEvent::SwitchToWorkspace(_)
-            | SyntheticEvent::MoveToWorkspace(_) => {
-                eprintln!("[keyboard-remap] workspace actions not supported on macOS yet");
+            SyntheticEvent::SwitchToWorkspace(n) => {
+                // macOS has no reliable public API for space switching —
+                // SkyLight's `CGSManagedDisplaySetCurrentSpace` moves the
+                // compositor pointer but doesn't sync with WindowServer /
+                // Dock / Mission Control on Sequoia+, leaving windows
+                // from the previous space bleeding through. Without a
+                // yabai-style scripting addition (SIP partially disabled),
+                // the pragmatic approach is to synthesize the built-in
+                // `Ctrl+N` shortcut — users enable it once in
+                // System Settings → Keyboard → Shortcuts → Mission Control
+                // → Switch to Desktop N.
+                let n = *n;
+                let key = if (1..=9).contains(&n) {
+                    NamedKey::Alpha(b'0' + n as u8)
+                } else {
+                    eprintln!(
+                        "[keyboard-remap] switch_to_workspace({n}) on macOS supports 1-9 only"
+                    );
+                    continue;
+                };
+                inject(
+                    &[
+                        SyntheticEvent::ModifierDown(Modifier::Ctrl),
+                        SyntheticEvent::KeyDown(key),
+                        SyntheticEvent::KeyUp(key),
+                        SyntheticEvent::ModifierUp(Modifier::Ctrl),
+                    ],
+                    flags,
+                );
+                continue;
+            }
+            SyntheticEvent::MoveToWorkspace(n) => {
+                // No public macOS API for cross-Space window moves; we
+                // mimic the manual gesture (grab title bar, switch Space,
+                // drop) on a detached thread. See
+                // `macos_move_window::move_active_window_to_workspace`.
+                super::macos_move_window::move_active_window_to_workspace(*n);
                 continue;
             }
         };

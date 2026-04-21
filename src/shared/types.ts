@@ -200,8 +200,8 @@ export interface KeyboardRemapComboView {
   /** E.g. "Ctrl+Alt+S" or "Alt+F4". */
   result: string
   description?: string
-  /** Platform filter from the rule, if any. */
-  platform?: string
+  /** OS filter from the rule, if any. */
+  os?: string
 }
 
 /**

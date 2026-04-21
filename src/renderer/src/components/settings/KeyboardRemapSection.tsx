@@ -150,9 +150,9 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
                       <Kbd>{c.trigger}</Kbd>
                       <span className="text-muted-foreground">→</span>
                       <Kbd>{c.result}</Kbd>
-                      {c.platform && (
+                      {c.os && (
                         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {c.platform}
+                          {c.os}
                         </span>
                       )}
                     </div>

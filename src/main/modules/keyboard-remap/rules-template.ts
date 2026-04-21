@@ -3,29 +3,44 @@
  * Comments survive user edits; the Rust side parses this as YAML.
  *
  * Schema:
- *   Top-level keys name a physical trigger (capslock, space). Presence of
- *   the block = the trigger is active; omit it = the key behaves normally.
- *   Each trigger has a `to_hotkey` sub-block with `on_tap` and `on_hold`.
+ *   Top-level keys name a physical trigger. Any recognised logical key
+ *   works — the classic lock/space triggers (capslock, space), the OS
+ *   modifiers (shift, ctrl, alt, cmd), alpha/number keys, named keys,
+ *   punctuation aliases, etc. Presence of a block = the trigger is
+ *   active; omit it = the key behaves normally.
  *
- *   on_tap:   <key_name>           emit this key on a clean press-release
- *   on_tap:   [mod, ..., key]      emit a combo on tap
+ *   on_tap:   [key]                press-and-release with no interruption
+ *   on_tap:   [mod, ..., key]      combo on tap
  *
- *   on_hold:  <modifier_name>      while held, act as that modifier
+ *   on_hold:  [<modifier>]         while held, act as that modifier
  *                                  (transparent layer)
- *   on_hold:  [<rule>, ...]        list of explicit per-combo rules; each
- *                                  rule has exactly one action field.
+ *   on_hold:                       explicit per-combo rule list
+ *     - { ... }
+ *
+ *   If on_hold is omitted for a modifier trigger (shift/ctrl/alt/cmd),
+ *   it defaults to a transparent layer of itself — so a shift tap rule
+ *   doesn't break Shift+L for capital L.
  *
  *   Rule schema:
  *     - description:           optional, human-readable label (ignored)
- *       platform:              optional filter: windows | macos | linux
- *       keys:                  [<trigger_key>]   single key (MVP)
+ *       os:                    optional filter: windows | macos | linux
+ *       keys:                  [<mods...>, <trigger_key>]  trigger key + optional
+ *                                                          required physical
+ *                                                          modifiers. Examples:
+ *                                                            [1]           bare
+ *                                                            [shift, 1]    Shift held
+ *                                                            [ctrl, shift, 1]
  *       <exactly one action>:
  *         to_hotkey:            [mod, ..., key]    emit this key combo
- *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows only)
- *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow
+ *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
+ *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
  *
  *   A rule with keys: [_default] + to_hotkey: [<modifier>] sets the
- *   fallback modifier for any Space+X combo that has no explicit rule.
+ *   fallback modifier for any <trigger>+X combo that has no explicit rule.
+ *   Exact modifier match wins over the bare form: if both `[1]` and
+ *   `[shift, 1]` exist, Space+1 fires the first and Space+Shift+1 fires
+ *   the second. A qualified rule with no match falls back to the bare
+ *   rule if one exists (so `keys: [w]` still fires on Shift+W).
  */
 export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 # Edit and save; reload from Settings → Modules → Keyboard Remap, no app restart needed.
@@ -43,61 +58,59 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #
 # Each on_hold rule carries exactly ONE action:
 #   to_hotkey: [mod, ..., key]      emit this key combo
-#   switch_to_workspace: N          jump to virtual desktop N (Windows only, 1-indexed)
-#   move_to_workspace:   N          move active window to VD N and follow (Windows only)
+#   switch_to_workspace: N          jump to virtual desktop N (1-indexed)
+#   move_to_workspace:   N          move active window to VD N and follow (1-indexed)
 
 capslock:
-  to_hotkey:
-    on_tap: escape
-    on_hold: ctrl
+  on_tap: [escape]
+  on_hold: [ctrl]
+
+shift:
+  on_tap: [cmd, space]
 
 space:
-  to_hotkey:
-    on_tap: space
-    on_hold:
-      # Space+W opens the Window Switcher. Matches the direct-launch
-      # hotkey you've set in Settings → Modules → Window Switcher; change
-      # the RHS if you bound a different chord.
-      - description: Space+W triggers the Window Switcher direct-launch hotkey
-        keys: [w]
-        to_hotkey: [ctrl, alt, s]
+  on_tap: [space]
+  on_hold:
+    - { keys: [w], to_hotkey: [ctrl, alt, s] }
 
-      # Vim-style arrow layer: Space+hjkl = left/down/up/right.
-      - { keys: [h], to_hotkey: [left] }
-      - { keys: [j], to_hotkey: [down] }
-      - { keys: [k], to_hotkey: [up] }
-      - { keys: [l], to_hotkey: [right] }
+    - { keys: [h], to_hotkey: [left] }
+    - { keys: [j], to_hotkey: [down] }
+    - { keys: [k], to_hotkey: [up] }
+    - { keys: [l], to_hotkey: [right] }
 
-      # Navigation via punctuation / letters.
-      - { keys: [","], to_hotkey: [home] }
-      - { keys: [.],   to_hotkey: [end] }
-      - { keys: [u],   to_hotkey: [pageup] }
-      - { keys: [p],   to_hotkey: [pagedown] }
+    - { keys: [","], to_hotkey: [home] }
+    - { keys: [.],   to_hotkey: [end] }
+    - { keys: [u],   to_hotkey: [pageup] }
+    - { keys: [p],   to_hotkey: [pagedown] }
 
-      # Windows: Space+Q closes the active window like Cmd+Q on macOS.
-      - description: Space+Q closes the active window on Windows
-        platform: windows
-        keys: [q]
-        to_hotkey: [alt, f4]
+    - { os: windows, keys: [q], to_hotkey: [alt, f4] }
 
-      # Windows: Space+backtick toggles the Quake-style Windows Terminal.
-      - description: Space+\` toggles the quake terminal
-        platform: windows
-        keys: ["\`"]
-        to_hotkey: [win, "\`"]
+    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
 
-      # Windows virtual-desktop layer (1-indexed; Space+Shift+N moves the
-      # active window to desktop N and follows it there).
-      - { platform: windows, keys: [1], switch_to_workspace: 1 }
-      - { platform: windows, keys: [2], switch_to_workspace: 2 }
-      - { platform: windows, keys: [3], switch_to_workspace: 3 }
-      - { platform: windows, keys: [4], switch_to_workspace: 4 }
-      - { platform: windows, keys: [5], switch_to_workspace: 5 }
+    - { keys: [1], switch_to_workspace: 1 }
+    - { keys: [2], switch_to_workspace: 2 }
+    - { keys: [3], switch_to_workspace: 3 }
+    - { keys: [4], switch_to_workspace: 4 }
+    - { keys: [5], switch_to_workspace: 5 }
+    - { keys: [6], switch_to_workspace: 6 }
+    - { keys: [7], switch_to_workspace: 7 }
+    - { keys: [8], switch_to_workspace: 8 }
+    - { keys: [9], switch_to_workspace: 9 }
 
-      # macOS fallback: any unmapped Space+X = Cmd+X. Gives you Space+C =
-      # Cmd+C, Space+V = Cmd+V, Space+Z = Cmd+Z, etc. for free.
-      - description: transparent Cmd on macOS for all unmapped combos
-        platform: macos
-        keys: [_default]
-        to_hotkey: [cmd]
+    # Move active window to virtual desktop N and follow.
+    # Windows: native winvd COM API.
+    # macOS: title-bar-drag trick (cursor flashes briefly). Requires
+    # "Switch to Desktop N" shortcuts enabled in System Settings →
+    # Keyboard → Shortcuts → Mission Control.
+    - { keys: [shift, 1], move_to_workspace: 1 }
+    - { keys: [shift, 2], move_to_workspace: 2 }
+    - { keys: [shift, 3], move_to_workspace: 3 }
+    - { keys: [shift, 4], move_to_workspace: 4 }
+    - { keys: [shift, 5], move_to_workspace: 5 }
+    - { keys: [shift, 6], move_to_workspace: 6 }
+    - { keys: [shift, 7], move_to_workspace: 7 }
+    - { keys: [shift, 8], move_to_workspace: 8 }
+    - { keys: [shift, 9], move_to_workspace: 9 }
+
+    - { os: macos, keys: [_default], to_hotkey: [cmd] }
 `

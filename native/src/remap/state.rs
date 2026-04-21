@@ -1,9 +1,9 @@
 //! Platform-agnostic state machine.
 //!
-//! Each trigger (CapsLock, Space) carries a `ResolvedBinding` that tells the
-//! engine what to emit on tap, and how to behave on hold: transparent
-//! modifier, explicit per-key overrides (with optional fallback modifier),
-//! or pure passthrough.
+//! Any `LogicalKey` can be a trigger — the config is a map keyed by logical
+//! key name, and a `ResolvedBinding` tells the engine what to emit on tap
+//! and how to behave on hold: transparent modifier, explicit per-key
+//! overrides (with optional fallback modifier), or pure passthrough.
 //!
 //! Tap-vs-hold is decided by interruption, not time: if another key was
 //! pressed between trigger-down and trigger-up, it's a hold. No timers,
@@ -11,7 +11,9 @@
 
 use smallvec::SmallVec;
 
-use super::rules::{Modifier, NamedKey, ResolvedBinding, ResolvedHold, ResolvedRules, SyntheticEvent};
+use super::rules::{
+    Modifier, ModifierMask, NamedKey, ResolvedBinding, ResolvedHold, ResolvedRules, SyntheticEvent,
+};
 
 /// Logical key at the state-machine boundary. Platform layers map their
 /// native scancodes to this enum.
@@ -23,17 +25,30 @@ pub enum LogicalKey {
     /// Covers alphanumerics (Alpha(b)), arrows, navigation, punctuation,
     /// F-keys, and named keys like Escape/Tab/Enter.
     Named(NamedKey),
-    /// Shift / Ctrl / Alt / Win — keys the OS uses as modifiers. We never
-    /// want one of these to interrupt a Pending trigger (it would consume
-    /// the layer), so they always forward and leave state untouched.
-    /// Example: Space-down → Shift-down → ","-down should still fire the
-    /// Space+"," override with Shift naturally held.
-    #[allow(dead_code)] // constructed in windows.rs only; matched cross-platform
-    SystemModifier,
+    /// OS-level modifier keys. Split into distinct variants (not a single
+    /// `SystemModifier`) so any of them can be a trigger with its own rule
+    /// — e.g. `shift:` at the top level of the YAML config. When a
+    /// modifier does NOT have a rule (or another trigger is already active),
+    /// the state machine forwards it untouched so the physical modifier is
+    /// still held on whatever key comes next.
+    Shift,
+    Ctrl,
+    Alt,
+    /// Cmd on macOS, Win on Windows — they're the same logical key.
+    Cmd,
     /// Anything we don't have a `NamedKey` for (media keys, F13+, layout-
     /// specific scancodes, etc.). Interruptions of this kind don't emit a
     /// synthetic keypress — they just take the state machine out of Pending.
     Other,
+}
+
+impl LogicalKey {
+    /// True if the key is one of the OS-level modifiers. The state machine
+    /// treats these specially: they don't interrupt another trigger's
+    /// layer (so e.g. Space+Shift+, still fires the Space+, override).
+    pub fn is_modifier(self) -> bool {
+        matches!(self, LogicalKey::Shift | LogicalKey::Ctrl | LogicalKey::Alt | LogicalKey::Cmd)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,12 +61,31 @@ pub enum EventKind {
 pub struct RawEvent {
     pub kind: EventKind,
     pub key: LogicalKey,
+    /// Physical modifier state at event time. Consulted only for KeyDown of
+    /// non-modifier keys to pick between qualified rules (`keys: [shift, 1]`)
+    /// and unqualified ones (`keys: [1]`). Platform layers populate this
+    /// from the event's flag state (macOS) or `GetAsyncKeyState` (Windows).
+    pub modifiers: ModifierMask,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     Forward,
     Suppress,
+    /// Inject these synthetic events as a standalone action — no modifier
+    /// flags from the triggering event should leak into the output. Used
+    /// for tap emission (Pending→Idle on trigger KeyUp) where the trigger
+    /// is being released on its own; any flags on the trigger-up event
+    /// are either spurious (stale synthetic state) or unrelated to the
+    /// tap's intent. On Windows this is indistinguishable from `Emit`
+    /// (SendInput doesn't stamp per-event flags); on macOS the injector
+    /// posts with flags=0 so e.g. CapsLock-tap → Esc doesn't accidentally
+    /// carry a Ctrl flag into Zed or Cmd flag into anything else.
+    EmitTap(SmallVec<[SyntheticEvent; 8]>),
+    /// Inject these synthetic events in the context of the current event,
+    /// inheriting its flags. Used for interruptions — Space+Shift+, →
+    /// Shift+Home needs the user's physically-held Shift to carry onto
+    /// the synthesized Home events.
     Emit(SmallVec<[SyntheticEvent; 8]>),
     /// Inject synthetic events AND let the original event through. Used for
     /// transparent-modifier interruptions by keys we don't have a NamedKey
@@ -74,6 +108,10 @@ impl Action {
         Action::Emit(events.into_iter().collect())
     }
 
+    pub fn emit_tap(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
+        Action::EmitTap(events.into_iter().collect())
+    }
+
     pub fn emit_then_forward(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
         Action::EmitThenForward(events.into_iter().collect())
     }
@@ -82,21 +120,15 @@ impl Action {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Trigger {
-    CapsLock,
-    Space,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Idle,
     /// Trigger is physically down, nothing else has been seen yet.
-    Pending { trigger: Trigger },
+    Pending { trigger: LogicalKey },
     /// Trigger is held and we've processed at least one other key. `held`
     /// tracks the modifier we've injected a down-for but haven't released
     /// yet (we emit the matching up on trigger release). `None` means no
     /// modifier is outstanding.
-    Modifying { trigger: Trigger, held: Option<Modifier> },
+    Modifying { trigger: LogicalKey, held: Option<Modifier> },
 }
 
 pub struct StateMachine {
@@ -113,27 +145,39 @@ impl StateMachine {
     }
 
     pub fn on_event(&mut self, ev: RawEvent) -> Action {
-        let (trigger_match, binding) = match ev.key {
-            LogicalKey::CapsLock => (Some(Trigger::CapsLock), self.rules.capslock.as_ref()),
-            LogicalKey::Space => (Some(Trigger::Space), self.rules.space.as_ref()),
-            _ => (None, None),
+        // Does this key itself have a rule? Treat it as a trigger candidate
+        // if it does.
+        let binding = self.rules.triggers.get(&ev.key).cloned();
+
+        // Modifier keys (Shift/Ctrl/Alt/Cmd) that aren't the trigger of an
+        // already-active layer should never interrupt or consume that
+        // layer. Example: while Space is Pending, a physical Shift-down
+        // must pass through so the user can type Space+Shift+, to get
+        // Shift+Home. Modifiers DO act as triggers themselves, but only
+        // when they're pressed from Idle — once another trigger has the
+        // layer, modifiers are transparent.
+        let is_current_trigger = match self.state {
+            State::Pending { trigger } | State::Modifying { trigger, .. } => trigger == ev.key,
+            State::Idle => false,
         };
+        if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
+            return Action::Forward;
+        }
 
-        match (self.state, ev.kind, trigger_match, binding) {
+        let trigger_match = if binding.is_some() { Some(ev.key) } else { None };
+
+        match (self.state, ev.kind, trigger_match, binding.as_ref()) {
             // -----------------------------------------------------------
-            // Trigger key events (CapsLock or Space — same logic, different
-            // binding).
+            // Trigger key events (any bound top-level key).
             // -----------------------------------------------------------
 
-            // Idle + trigger-down: enter Pending if this trigger has a binding.
+            // Idle + trigger-down: enter Pending.
             (State::Idle, EventKind::KeyDown, Some(t), Some(_)) => {
                 self.state = State::Pending { trigger: t };
                 Action::Suppress
             }
-            // Idle + trigger-down without a binding: forward.
-            (State::Idle, EventKind::KeyDown, Some(_), None) => Action::Forward,
 
-            // Autorepeat trigger-down: always suppress.
+            // Autorepeat trigger-down on the CURRENT trigger: suppress.
             (
                 State::Pending { trigger: ts } | State::Modifying { trigger: ts, .. },
                 EventKind::KeyDown,
@@ -141,16 +185,22 @@ impl StateMachine {
                 _,
             ) if ts == te => Action::Suppress,
 
-            // Trigger-up in Pending: pure tap — emit on_tap.
+            // Trigger-up of the CURRENT trigger in Pending: pure tap. Use
+            // `EmitTap` (not `Emit`) so the macOS platform layer posts
+            // the synthesized events with flags=0 rather than inheriting
+            // the trigger-up event's flag state — which can include stale
+            // synthetic-modifier flags and make e.g. Esc arrive as
+            // Ctrl+Esc in Zed.
             (State::Pending { trigger: ts }, EventKind::KeyUp, Some(te), Some(b)) if ts == te => {
                 self.state = State::Idle;
                 match &b.on_tap {
-                    Some(events) => Action::emit(events.iter().copied()),
+                    Some(events) => Action::emit_tap(events.iter().copied()),
                     None => Action::Suppress,
                 }
             }
 
-            // Trigger-up in Modifying: release held modifier (if any).
+            // Trigger-up of the CURRENT trigger in Modifying: release held
+            // modifier (if any).
             (State::Modifying { trigger: ts, held }, EventKind::KeyUp, Some(te), _) if ts == te => {
                 self.state = State::Idle;
                 match held {
@@ -159,76 +209,64 @@ impl StateMachine {
                 }
             }
 
-            // Trigger-up for a trigger we don't own (no binding): forward.
-            (_, EventKind::KeyUp, Some(_), None) => Action::Forward,
-
             // -----------------------------------------------------------
-            // Non-trigger key events.
+            // Non-current-trigger key events.
+            //
+            // These match regardless of whether the incoming key has its
+            // own binding. A different trigger's down event during another
+            // trigger's Pending still acts as an interruption — the active
+            // layer takes precedence over the new trigger until the active
+            // one is released.
             // -----------------------------------------------------------
 
-            // System modifiers (Shift/Ctrl/Alt/Win) never interrupt or
-            // consume the layer. Forward them and keep state so the next
-            // real key still fires the binding.
-            (_, _, None, _) if matches!(ev.key, LogicalKey::SystemModifier) => Action::Forward,
-
-            // In Pending, a non-trigger key-down = interruption. Dispatch
-            // according to the binding's on_hold mode.
-            (State::Pending { trigger }, EventKind::KeyDown, None, _) => {
-                let binding = match trigger {
-                    Trigger::CapsLock => self.rules.capslock.clone(),
-                    Trigger::Space => self.rules.space.clone(),
-                };
-                let Some(binding) = binding else {
+            // In Pending, a key-down for anything that isn't the current
+            // trigger = interruption. Dispatch according to the current
+            // binding's on_hold mode.
+            (State::Pending { trigger }, EventKind::KeyDown, _, _) => {
+                let Some(binding) = self.rules.triggers.get(&trigger).cloned() else {
                     // Shouldn't happen — we only enter Pending when the
                     // binding exists. Defensive fallback.
                     self.state = State::Idle;
                     return Action::Forward;
                 };
-                self.handle_interruption(trigger, &binding, ev.key)
+                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
             // In Modifying{held: None} (an explicit override just fired),
-            // a new key-down should re-fire the override — so holding the
-            // trigger and tapping the target key repeatedly works, not
-            // just the first tap.
-            (State::Modifying { trigger, held: None }, EventKind::KeyDown, None, _) => {
-                let binding = match trigger {
-                    Trigger::CapsLock => self.rules.capslock.clone(),
-                    Trigger::Space => self.rules.space.clone(),
-                };
-                let Some(binding) = binding else {
+            // a new key-down for a non-current-trigger key should re-fire
+            // the override — holding the trigger and tapping the target
+            // key repeatedly works, not just the first tap.
+            (State::Modifying { trigger, held: None }, EventKind::KeyDown, _, _) => {
+                let Some(binding) = self.rules.triggers.get(&trigger).cloned() else {
                     return Action::Forward;
                 };
-                self.handle_interruption(trigger, &binding, ev.key)
+                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
             // In Modifying with a held modifier: forward the event with the
-            // modifier flag asserted. Windows' SendInput already updated the
-            // global key state so flags propagate naturally on that
+            // modifier flag asserted. Windows' SendInput already updated
+            // the global key state so flags propagate naturally on that
             // platform, but macOS needs explicit per-event flag overrides.
             // Both platforms accept `ForwardWithModifier`; the macOS path
             // stamps the flag, the Windows path treats it as a plain
-            // Forward.
-            (State::Modifying { held: Some(m), .. }, _, None, _) => {
+            // Forward. Skip modifiers themselves — they forward through
+            // the earlier short-circuit.
+            (State::Modifying { held: Some(m), .. }, _, _, _) if !ev.key.is_modifier() => {
                 Action::ForwardWithModifier(m)
             }
 
-            // Modifying{held: None} catches key-ups orphaned by a synthetic
-            // override's initial emit (harmless — no modifier to stamp).
-            (State::Modifying { held: None, .. }, _, None, _) => Action::Forward,
-
-            // Anything else: forward (includes trigger events that don't
-            // match the current state's trigger — rare corner case, most
-            // commonly a second trigger pressed while the first is held).
+            // Anything else: forward. Covers Idle + key we don't bind,
+            // orphan key-ups in Modifying{held: None}, etc.
             _ => Action::Forward,
         }
     }
 
     fn handle_interruption(
         &mut self,
-        trigger: Trigger,
+        trigger: LogicalKey,
         binding: &ResolvedBinding,
         other: LogicalKey,
+        mods: ModifierMask,
     ) -> Action {
         match &binding.on_hold {
             ResolvedHold::Passthrough => {
@@ -259,11 +297,22 @@ impl StateMachine {
             }
 
             ResolvedHold::Explicit { overrides, fallback } => {
-                // Explicit override first — direct NamedKey lookup.
+                // Explicit override lookup: try the exact (modifiers, key)
+                // pair first, then fall back to the unqualified (empty,
+                // key) form so rules authored without modifier prefixes
+                // still fire when the user happens to be holding e.g.
+                // Shift. The fallback-modifier path below then stamps the
+                // physical modifier onto the synthesized output.
                 if let LogicalKey::Named(nk) = other {
-                    if let Some(events) = overrides.get(&nk) {
+                    if let Some(events) = overrides.get(&(mods, nk)) {
                         self.state = State::Modifying { trigger, held: None };
                         return Action::emit(events.iter().copied());
+                    }
+                    if !mods.is_empty() {
+                        if let Some(events) = overrides.get(&(ModifierMask::EMPTY, nk)) {
+                            self.state = State::Modifying { trigger, held: None };
+                            return Action::emit(events.iter().copied());
+                        }
                     }
                 }
 
@@ -302,10 +351,25 @@ mod tests {
     }
 
     fn down(k: LogicalKey) -> RawEvent {
-        RawEvent { kind: EventKind::KeyDown, key: k }
+        RawEvent {
+            kind: EventKind::KeyDown,
+            key: k,
+            modifiers: ModifierMask::EMPTY,
+        }
     }
     fn up(k: LogicalKey) -> RawEvent {
-        RawEvent { kind: EventKind::KeyUp, key: k }
+        RawEvent {
+            kind: EventKind::KeyUp,
+            key: k,
+            modifiers: ModifierMask::EMPTY,
+        }
+    }
+    fn down_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
+        RawEvent {
+            kind: EventKind::KeyDown,
+            key: k,
+            modifiers,
+        }
     }
     fn alpha(c: char) -> LogicalKey {
         LogicalKey::Named(NamedKey::Alpha(c as u8))
@@ -317,41 +381,40 @@ mod tests {
     fn emit(v: Vec<SyntheticEvent>) -> Action {
         Action::emit(v.into_iter())
     }
+    fn emit_tap(v: Vec<SyntheticEvent>) -> Action {
+        Action::emit_tap(v.into_iter())
+    }
 
     // -----------------------------------------------------------------
     // Common fixtures
 
     const CAPS_CTRL_ESC: &str = r#"
 capslock:
-  to_hotkey:
-    on_tap: escape
-    on_hold: ctrl
+  on_tap: [escape]
+  on_hold: [ctrl]
 "#;
 
     const SPACE_MAC: &str = r#"
 capslock:
-  to_hotkey:
-    on_tap: escape
-    on_hold: ctrl
+  on_tap: [escape]
+  on_hold: [ctrl]
 space:
-  to_hotkey:
-    on_tap: space
-    on_hold:
-      - keys: [w]
-        to_hotkey: [ctrl, alt, s]
-      - keys: [_default]
-        to_hotkey: [cmd]
+  on_tap: [space]
+  on_hold:
+    - keys: [w]
+      to_hotkey: [ctrl, alt, s]
+    - keys: [_default]
+      to_hotkey: [cmd]
 "#;
 
     const SPACE_WIN: &str = r#"
 space:
-  to_hotkey:
-    on_tap: space
-    on_hold:
-      - keys: [w]
-        to_hotkey: [ctrl, alt, s]
-      - keys: [q]
-        to_hotkey: [alt, f4]
+  on_tap: [space]
+  on_hold:
+    - keys: [w]
+      to_hotkey: [ctrl, alt, s]
+    - keys: [q]
+      to_hotkey: [alt, f4]
 "#;
 
     // -----------------------------------------------------------------
@@ -363,7 +426,7 @@ space:
         assert_eq!(m.on_event(down(LogicalKey::CapsLock)), Action::Suppress);
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
-            emit(vec![
+            emit_tap(vec![
                 SyntheticEvent::KeyDown(NamedKey::Escape),
                 SyntheticEvent::KeyUp(NamedKey::Escape),
             ])
@@ -406,8 +469,7 @@ space:
     fn omitting_capslock_binding_leaves_it_alone() {
         let yaml = r#"
 space:
-  to_hotkey:
-    on_tap: space
+  on_tap: [space]
 "#;
         let mut m = sm(yaml);
         assert_eq!(m.on_event(down(LogicalKey::CapsLock)), Action::Forward);
@@ -423,7 +485,7 @@ space:
         assert_eq!(m.on_event(down(LogicalKey::Space)), Action::Suppress);
         assert_eq!(
             m.on_event(up(LogicalKey::Space)),
-            emit(vec![
+            emit_tap(vec![
                 SyntheticEvent::KeyDown(NamedKey::Space),
                 SyntheticEvent::KeyUp(NamedKey::Space),
             ])
@@ -517,11 +579,10 @@ space:
     fn space_plus_j_emits_down_arrow() {
         let src = r#"
 space:
-  to_hotkey:
-    on_tap: space
-    on_hold:
-      - keys: [j]
-        to_hotkey: [down]
+  on_tap: [space]
+  on_hold:
+    - keys: [j]
+      to_hotkey: [down]
 "#;
         let mut m = sm(src);
         m.on_event(down(LogicalKey::Space));
@@ -538,10 +599,9 @@ space:
     fn space_plus_comma_emits_home() {
         let src = r#"
 space:
-  to_hotkey:
-    on_hold:
-      - keys: [","]
-        to_hotkey: [home]
+  on_hold:
+    - keys: [","]
+      to_hotkey: [home]
 "#;
         let mut m = sm(src);
         m.on_event(down(LogicalKey::Space));
@@ -558,10 +618,9 @@ space:
     fn space_plus_backtick_emits_win_backtick() {
         let src = r#"
 space:
-  to_hotkey:
-    on_hold:
-      - keys: ["`"]
-        to_hotkey: [win, "`"]
+  on_hold:
+    - keys: ["`"]
+      to_hotkey: [win, "`"]
 "#;
         let mut m = sm(src);
         m.on_event(down(LogicalKey::Space));
@@ -606,7 +665,7 @@ space:
         let mut m = sm(SPACE_WIN);
         m.on_event(down(LogicalKey::Space));
         // Shift-down is forwarded without touching state.
-        assert_eq!(m.on_event(down(LogicalKey::SystemModifier)), Action::Forward);
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Forward);
         // Q still fires the override.
         assert_eq!(
             m.on_event(down(alpha('Q'))),
@@ -617,7 +676,7 @@ space:
                 SyntheticEvent::ModifierUp(Modifier::Alt),
             ])
         );
-        assert_eq!(m.on_event(up(LogicalKey::SystemModifier)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Shift)), Action::Forward);
     }
 
     // Pressing only a system modifier during Space (no real key) must
@@ -626,14 +685,154 @@ space:
     fn system_modifier_alone_preserves_tap() {
         let mut m = sm(SPACE_WIN);
         m.on_event(down(LogicalKey::Space));
-        assert_eq!(m.on_event(down(LogicalKey::SystemModifier)), Action::Forward);
-        assert_eq!(m.on_event(up(LogicalKey::SystemModifier)), Action::Forward);
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Shift)), Action::Forward);
         assert_eq!(
             m.on_event(up(LogicalKey::Space)),
-            emit(vec![
+            emit_tap(vec![
                 SyntheticEvent::KeyDown(NamedKey::Space),
                 SyntheticEvent::KeyUp(NamedKey::Space),
             ])
+        );
+    }
+
+    // Shift and Space both configured as triggers. Holding Space, then
+    // pressing Shift, then pressing "," must still fire Space+",".
+    // Shift is a modifier so it can't consume the Space layer.
+    #[test]
+    fn shift_while_space_pending_does_not_consume_layer() {
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [","], to_hotkey: [home] }
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        // Shift-down while Space is Pending: forwarded, state unchanged.
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Forward);
+        // "," still fires Space's explicit override.
+        assert_eq!(
+            m.on_event(down(named(NamedKey::Comma))),
+            emit(vec![
+                SyntheticEvent::KeyDown(NamedKey::Home),
+                SyntheticEvent::KeyUp(NamedKey::Home),
+            ])
+        );
+    }
+
+    // Modifier as a standalone trigger: tapping Shift alone emits the
+    // on_tap combo (Cmd+Space); holding Shift+L still produces a Shift-
+    // held capital L because modifier triggers default to a transparent
+    // layer of themselves.
+    #[test]
+    fn shift_as_standalone_trigger_tap_and_hold() {
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+"#;
+        let mut m = sm(yaml);
+
+        // Tap path.
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        assert_eq!(
+            m.on_event(up(LogicalKey::Shift)),
+            emit_tap(vec![
+                SyntheticEvent::ModifierDown(Modifier::Cmd),
+                SyntheticEvent::KeyDown(NamedKey::Space),
+                SyntheticEvent::KeyUp(NamedKey::Space),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+            ])
+        );
+
+        // Hold path — Shift+L.
+        m.on_event(down(LogicalKey::Shift));
+        assert_eq!(
+            m.on_event(down(alpha('L'))),
+            emit(vec![
+                SyntheticEvent::ModifierDown(Modifier::Shift),
+                SyntheticEvent::KeyDown(NamedKey::Alpha(b'L')),
+            ])
+        );
+        // Second L while still held: forwarded with Shift stamped.
+        assert_eq!(
+            m.on_event(up(alpha('L'))),
+            Action::ForwardWithModifier(Modifier::Shift)
+        );
+        assert_eq!(
+            m.on_event(down(alpha('L'))),
+            Action::ForwardWithModifier(Modifier::Shift)
+        );
+        // Shift-up releases the held modifier.
+        assert_eq!(
+            m.on_event(up(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Shift)])
+        );
+    }
+
+    #[test]
+    fn shift_qualified_rule_fires_only_when_shift_held() {
+        // Two rules for the same key: bare `[1]` and qualified `[shift, 1]`.
+        // Space+1 → switch_to_workspace; Space+Shift+1 → move_to_workspace.
+        // The lookup must route based on the physical Shift state on the
+        // incoming keydown.
+        let yaml = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [1]
+      switch_to_workspace: 1
+    - keys: [shift, 1]
+      move_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+
+        // Bare Space+1: unqualified rule fires.
+        m.on_event(down(LogicalKey::Space));
+        assert_eq!(
+            m.on_event(down(alpha('1'))),
+            emit(vec![SyntheticEvent::SwitchToWorkspace(1)])
+        );
+        assert_eq!(m.on_event(up(alpha('1'))), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+
+        // Space+Shift+1: qualified rule fires — the state machine sees the
+        // incoming `1` keydown with Shift in its modifier mask.
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+
+        m.on_event(down(LogicalKey::Space));
+        m.on_event(down(LogicalKey::Shift));
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('1'), shift)),
+            emit(vec![SyntheticEvent::MoveToWorkspace(1)])
+        );
+        assert_eq!(m.on_event(up(alpha('1'))), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Shift)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn qualified_rule_falls_back_to_unqualified_when_absent() {
+        // Only a bare rule exists for `1`. Pressing Space+Shift+1 — which
+        // has a Shift modifier — should still fire the unqualified rule
+        // (preserves pre-predicate behaviour so user YAMLs don't silently
+        // stop firing when the user happens to hold Shift).
+        let yaml = r#"
+space:
+  on_hold:
+    - keys: [1]
+      switch_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('1'), shift)),
+            emit(vec![SyntheticEvent::SwitchToWorkspace(1)])
         );
     }
 

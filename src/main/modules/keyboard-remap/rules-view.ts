@@ -33,10 +33,9 @@ export function buildRulesView(filePath: string): KeyboardRemapRulesView {
   }
 
   const triggers: KeyboardRemapTriggerView[] = []
-  for (const key of ['capslock', 'space'] as const) {
-    const block = (cfg as Record<string, unknown>)[key]
+  for (const [name, block] of Object.entries(cfg as Record<string, unknown>)) {
     if (!block || typeof block !== 'object') continue
-    const view = readTriggerBlock(key, block as Record<string, unknown>)
+    const view = readTriggerBlock(name, block as Record<string, unknown>)
     if (view) triggers.push(view)
   }
 
@@ -44,21 +43,36 @@ export function buildRulesView(filePath: string): KeyboardRemapRulesView {
 }
 
 function readTriggerBlock(
-  name: 'capslock' | 'space',
+  name: string,
   block: Record<string, unknown>
 ): KeyboardRemapTriggerView | null {
-  const toHotkey = block['to_hotkey']
-  if (!toHotkey || typeof toHotkey !== 'object') return null
-  const th = toHotkey as Record<string, unknown>
-
-  const onTap = formatTapSpec(th['on_tap'])
-  const hold = readHoldSpec(name, th['on_hold'])
+  const onTap = formatTapSpec(block['on_tap'])
+  const hold = readHoldSpec(name, block['on_hold'])
 
   return {
-    name: name === 'capslock' ? 'CapsLock' : 'Space',
+    name: displayTriggerName(name),
     onTap,
     onHoldSummary: hold.summary,
     combos: hold.combos
+  }
+}
+
+function displayTriggerName(raw: string): string {
+  const lower = raw.toLowerCase()
+  switch (lower) {
+    case 'capslock':
+    case 'caps_lock':
+    case 'caps-lock':
+      return 'CapsLock'
+    case 'pageup':
+    case 'pgup':
+      return 'PgUp'
+    case 'pagedown':
+    case 'pgdn':
+    case 'pgdown':
+      return 'PgDn'
+    default:
+      return capitalize(raw)
   }
 }
 
@@ -84,10 +98,17 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
   if (!Array.isArray(raw)) {
     return { summary: 'passthrough' }
   }
+  // A list of plain strings is the new transparent-modifier shape
+  // (`on_hold: [ctrl]`), not a rules list. Summarise it the same way as the
+  // scalar form.
+  if (raw.length > 0 && raw.every((e) => typeof e === 'string')) {
+    const names = (raw as string[]).map(formatModifier).join('+')
+    return { summary: `${names} (transparent layer)` }
+  }
 
   const combos: NonNullable<HoldResult['combos']> = []
   let fallback: string | undefined
-  let fallbackPlatform: string | undefined
+  let fallbackOs: string | undefined
 
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue
@@ -95,30 +116,39 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
     const keys = e['keys']
     const to = e['to_hotkey']
     const desc = typeof e['description'] === 'string' ? (e['description'] as string) : undefined
-    const platform = typeof e['platform'] === 'string' ? (e['platform'] as string) : undefined
+    const os = typeof e['os'] === 'string' ? (e['os'] as string) : undefined
 
     if (!Array.isArray(keys) || keys.length === 0) continue
-    const triggerKey = String(keys[0])
+    // Last element is the trigger key; any preceding elements are required
+    // modifier prefixes (`keys: [shift, 1]` → modifiers = [shift], key = 1).
+    const triggerKey = String(keys[keys.length - 1])
+    const modifierPrefix = keys.slice(0, -1).map(String)
 
     const resultStr = formatRuleAction(e, to)
 
     if (triggerKey.toLowerCase() === '_default') {
       fallback = resultStr
-      fallbackPlatform = platform
+      fallbackOs = os
       continue
     }
 
+    const triggerLabel = [
+      displayTriggerName(triggerName),
+      ...modifierPrefix.map(formatModifier),
+      formatKey(triggerKey)
+    ].join('+')
+
     combos.push({
-      trigger: `${capitalize(triggerName)}+${formatKey(triggerKey)}`,
+      trigger: triggerLabel,
       result: resultStr,
       description: desc,
-      platform
+      os
     })
   }
 
   let summary = `explicit layer (${combos.length} ${combos.length === 1 ? 'rule' : 'rules'})`
   if (fallback) {
-    const pfx = fallbackPlatform ? ` on ${fallbackPlatform}` : ''
+    const pfx = fallbackOs ? ` on ${fallbackOs}` : ''
     summary += ` · fallback ${fallback}${pfx}`
   }
 

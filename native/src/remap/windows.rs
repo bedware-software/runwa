@@ -23,9 +23,9 @@ use parking_lot::Mutex;
 use smallvec::SmallVec;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
-    VK_CAPITAL, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-    VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    VIRTUAL_KEY, VK_CAPITAL, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
+    VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
@@ -33,7 +33,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use super::rules::{Modifier, NamedKey, ResolvedRules, SyntheticEvent};
+use super::rules::{Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
@@ -199,7 +199,15 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     };
 
     let key = vk_to_logical(info.vkCode);
-    let ev = RawEvent { kind, key };
+    let ev = RawEvent {
+        kind,
+        key,
+        // Physical modifier snapshot via `GetAsyncKeyState`, which reports
+        // real-time key state regardless of thread/message-queue state.
+        // Needed so `keys: [shift, 1]` rules can match against the user's
+        // held Shift at the moment 1 was pressed.
+        modifiers: current_modifier_mask(),
+    };
 
     // Short critical section: only hold while calling the state machine.
     let action = {
@@ -218,7 +226,11 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         // is a macOS-specific concept that Windows collapses into Forward.
         Action::ForwardWithModifier(_) => CallNextHookEx(None, code, wparam, lparam),
         Action::Suppress => LRESULT(1),
-        Action::Emit(events) => {
+        // On Windows the tap-vs-interruption distinction doesn't matter —
+        // SendInput doesn't stamp per-event modifier flags, each KEYBDINPUT
+        // carries its own state. Both `EmitTap` and `Emit` share the same
+        // injector path.
+        Action::EmitTap(events) | Action::Emit(events) => {
             // Inject all events synchronously. SendInput runs fast and
             // enqueues the events — the injected events will re-enter this
             // hook with the INJECT_TAG and be skipped.
@@ -255,15 +267,26 @@ fn vk_to_logical(vk: u32) -> LogicalKey {
         return LogicalKey::Space;
     }
     // Shift / Ctrl / Alt / Win — including L/R variants and the unsided
-    // VKs some apps send. Always pass through without consuming the layer.
-    const MOD_VKS: &[VIRTUAL_KEY] = &[
-        VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
-        VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
-        VK_MENU, VK_LMENU, VK_RMENU,
-        VK_LWIN, VK_RWIN,
-    ];
-    if MOD_VKS.iter().any(|m| m.0 as u32 == vk) {
-        return LogicalKey::SystemModifier;
+    // VKs some apps send. Each maps to a specific `LogicalKey` variant
+    // so users can configure any of them as a top-level trigger; when
+    // unconfigured, the state machine forwards them transparently so the
+    // physical modifier still applies to the next key.
+    const SHIFT_VKS: &[VIRTUAL_KEY] = &[VK_SHIFT, VK_LSHIFT, VK_RSHIFT];
+    const CTRL_VKS: &[VIRTUAL_KEY] = &[VK_CONTROL, VK_LCONTROL, VK_RCONTROL];
+    const ALT_VKS: &[VIRTUAL_KEY] = &[VK_MENU, VK_LMENU, VK_RMENU];
+    const WIN_VKS: &[VIRTUAL_KEY] = &[VK_LWIN, VK_RWIN];
+    if SHIFT_VKS.iter().any(|m| m.0 as u32 == vk) {
+        return LogicalKey::Shift;
+    }
+    if CTRL_VKS.iter().any(|m| m.0 as u32 == vk) {
+        return LogicalKey::Ctrl;
+    }
+    if ALT_VKS.iter().any(|m| m.0 as u32 == vk) {
+        return LogicalKey::Alt;
+    }
+    if WIN_VKS.iter().any(|m| m.0 as u32 == vk) {
+        // Treated as `Cmd` in the state machine — cross-platform alias.
+        return LogicalKey::Cmd;
     }
     if (VK_A..=VK_Z).contains(&vk) {
         return LogicalKey::Named(NamedKey::Alpha((b'A' + (vk - VK_A) as u8) as u8));
@@ -367,6 +390,32 @@ fn modifier_to_vk(m: Modifier) -> VIRTUAL_KEY {
         Modifier::Shift => VK_LSHIFT,
         Modifier::Cmd | Modifier::Win => VK_LWIN,
     }
+}
+
+/// Snapshot current physical modifier state via `GetAsyncKeyState`. The
+/// high bit being set means the key is currently down. Queries both L/R
+/// variants for each modifier since either side can be pressed.
+fn current_modifier_mask() -> ModifierMask {
+    let mut m = ModifierMask::EMPTY;
+    unsafe {
+        if is_down(VK_SHIFT) || is_down(VK_LSHIFT) || is_down(VK_RSHIFT) {
+            m.insert(Modifier::Shift);
+        }
+        if is_down(VK_CONTROL) || is_down(VK_LCONTROL) || is_down(VK_RCONTROL) {
+            m.insert(Modifier::Ctrl);
+        }
+        if is_down(VK_MENU) || is_down(VK_LMENU) || is_down(VK_RMENU) {
+            m.insert(Modifier::Alt);
+        }
+        if is_down(VK_LWIN) || is_down(VK_RWIN) {
+            m.insert(Modifier::Cmd);
+        }
+    }
+    m
+}
+
+unsafe fn is_down(vk: VIRTUAL_KEY) -> bool {
+    (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0
 }
 
 // ---------------------------------------------------------------------------

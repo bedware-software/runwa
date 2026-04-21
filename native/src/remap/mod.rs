@@ -20,6 +20,9 @@ pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub mod macos_move_window;
+
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
