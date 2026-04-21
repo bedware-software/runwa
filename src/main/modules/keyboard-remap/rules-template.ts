@@ -71,7 +71,9 @@ shift:
 space:
   on_tap: [space]
   on_hold:
-    - { keys: [w], to_hotkey: [ctrl, alt, s] }
+    - { keys: [w], to_hotkey: [ctrl, alt, w] }
+    - { keys: [a], to_hotkey: [ctrl, alt, a] }
+    - { keys: [s], to_hotkey: [ctrl, alt, s] }
 
     - { keys: [h], to_hotkey: [left] }
     - { keys: [j], to_hotkey: [down] }
