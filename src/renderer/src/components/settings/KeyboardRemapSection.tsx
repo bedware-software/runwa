@@ -174,28 +174,28 @@ function LabeledRow({
 
 /**
  * `on_hold:` rendering follows the three shapes the YAML supports:
- *   - `transparent`: single modifier chip + "(transparent layer)" caption
+ *   - `transparent`: the modifier chip alone (no caption — there's no
+ *                    other meaningful hold interpretation, so it'd be
+ *                    noise)
  *   - `explicit`:    "Hold:" label, then a vertical list of combos
  *                    (including any `_default` row so the UI mirrors the
  *                    file 1:1 — no hidden "fallback X on macos" summary)
- *   - `passthrough`: literal "passthrough" caption
+ *   - `passthrough`: nothing — it's the no-op default; rendering a
+ *                    "passthrough" row just pads the UI without telling
+ *                    the user anything they didn't already know from the
+ *                    absence of `on_hold:` in the YAML
  */
 function HoldBlock({ trigger }: { trigger: KeyboardRemapTriggerView }) {
   if (trigger.onHoldKind === 'transparent') {
     return (
       <LabeledRow label="Hold">
         {trigger.onHoldModifier && <Hotkey value={trigger.onHoldModifier} />}
-        <span className="text-muted-foreground">(transparent layer)</span>
       </LabeledRow>
     )
   }
 
   if (trigger.onHoldKind === 'passthrough') {
-    return (
-      <LabeledRow label="Hold">
-        <span className="text-muted-foreground">passthrough</span>
-      </LabeledRow>
-    )
+    return null
   }
 
   // Explicit list — show the header plain (no "N rules" count / fallback
