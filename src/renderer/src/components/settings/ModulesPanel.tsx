@@ -49,14 +49,6 @@ export function ModulePanel({ moduleId }: Props) {
           <p className="text-xs text-muted-foreground mt-0.5">
             {module.description}
           </p>
-          {module.prefix && (
-            <div className="text-xs text-muted-foreground mt-1">
-              Prefix:{' '}
-              <code className="bg-secondary text-foreground font-mono px-1 py-0.5 rounded">
-                {module.prefix}
-              </code>
-            </div>
-          )}
         </div>
       </div>
 

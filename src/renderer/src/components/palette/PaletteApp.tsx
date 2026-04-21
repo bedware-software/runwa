@@ -18,6 +18,7 @@ export function PaletteApp() {
   const selectPrev = usePaletteStore((s) => s.selectPrev)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
+  const unscope = usePaletteStore((s) => s.unscope)
 
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
@@ -68,7 +69,20 @@ export function PaletteApp() {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Escape') {
       e.preventDefault()
-      void window.electronAPI.paletteHide()
+      // Escape inside a scoped module returns to the home-screen picker
+      // instead of dismissing — matches Alfred / Raycast convention. A
+      // second Escape (now unscoped) dismisses the palette.
+      if (activeModuleId) {
+        unscope()
+      } else {
+        void window.electronAPI.paletteHide()
+      }
+      return
+    }
+    if (e.key === 'Backspace' && query === '' && activeModuleId) {
+      // Backspace on an empty query while scoped also returns to the picker.
+      e.preventDefault()
+      unscope()
       return
     }
     if (e.key === 'ArrowDown') {
@@ -132,7 +146,7 @@ export function PaletteApp() {
             Select <kbd><CornerDownLeft size={11} strokeWidth={2.5} /></kbd>
           </span>
           <span className="flex items-center gap-1">
-            Dismiss <kbd>Esc</kbd>
+            {activeModuleId ? 'Back' : 'Dismiss'} <kbd>Esc</kbd>
           </span>
         </div>
         <button

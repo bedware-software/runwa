@@ -14,6 +14,13 @@ import { settingsStore } from '../settings-store'
 
 const MAX_RESULTS = 100
 
+/**
+ * Synthetic actionKind used by the module-picker items the registry injects
+ * on the home screen. The registry owns execute for these — no module sees
+ * them. Kept here (not in shared/) because it's a registry-internal protocol.
+ */
+const SCOPE_ACTION_KIND = 'registry:scope-to-module'
+
 /** Build a fresh config object from a module's declared default values. */
 function defaultConfigFromManifest(
   m: PaletteModule
@@ -30,7 +37,7 @@ function defaultConfigFromManifest(
  *  - module registry (hard-coded at startup)
  *  - enabled/hotkey cache (store = truth, registry caches for the session)
  *  - in-flight search controllers (for cancellation)
- *  - prefix-based query routing
+ *  - home-screen module picker + scoped search routing
  */
 class ModuleRegistry {
   private modules = new Map<ModuleId, PaletteModule>()
@@ -90,30 +97,43 @@ class ModuleRegistry {
     return results
   }
 
-  private parsePrefix(query: string): {
-    scopeModuleId?: ModuleId
-    strippedQuery: string
-  } {
-    const trimmed = query.trimStart()
-    const spaceIdx = trimmed.indexOf(' ')
-    if (spaceIdx <= 0) return { strippedQuery: query }
-    const maybePrefix = trimmed.slice(0, spaceIdx)
-    const rest = trimmed.slice(spaceIdx + 1)
+  /**
+   * Build the module-picker items shown on the unscoped home screen. One
+   * entry per enabled search-kind module; executing an entry scopes the
+   * palette into that module (handled in `execute()`). If a query is
+   * present, filter by substring on the module's display name.
+   */
+  private buildPickerItems(query: string): PaletteItem[] {
+    const trimmed = query.trim().toLowerCase()
+    const items: PaletteItem[] = []
+    let i = 0
     for (const m of this.modules.values()) {
-      if (m.manifest.prefix && m.manifest.prefix === maybePrefix) {
-        const enabled =
-          this.moduleSettingsCache.get(m.manifest.id)?.enabled ??
-          m.manifest.defaultEnabled
-        if (enabled) {
-          return { scopeModuleId: m.manifest.id, strippedQuery: rest }
-        }
-      }
+      // Only search-kind modules are user-facing launchers — services stay
+      // settings-only.
+      if (m.manifest.kind !== 'search') continue
+      const enabled =
+        this.moduleSettingsCache.get(m.manifest.id)?.enabled ??
+        m.manifest.defaultEnabled
+      if (!enabled) continue
+      if (trimmed && !m.manifest.name.toLowerCase().includes(trimmed)) continue
+      items.push({
+        id: `picker:${m.manifest.id}`,
+        moduleId: m.manifest.id,
+        title: m.manifest.name,
+        subtitle: m.manifest.description,
+        iconHint: m.manifest.icon,
+        actionKind: SCOPE_ACTION_KIND,
+        action: { moduleId: m.manifest.id },
+        // Small monotonic scores preserve registration order so the picker
+        // renders in the same sequence the user sees in the settings sidebar.
+        score: i++ / 10000
+      })
     }
-    return { strippedQuery: query }
+    return items
   }
 
   async search(req: SearchRequest): Promise<SearchResult> {
-    const { requestId, query, scopeModuleId: forcedScope } = req
+    const { requestId, query, scopeModuleId } = req
 
     // Belt-and-suspenders: auto-abort older in-flight requests.
     for (const [id, ctrl] of this.activeControllers.entries()) {
@@ -123,65 +143,50 @@ class ModuleRegistry {
       }
     }
 
-    let scopeModuleId: ModuleId | undefined = forcedScope
-    let effectiveQuery = query
+    // Unscoped path: return the module picker. No per-module searches run
+    // on the home screen. Scoping is explicit: either a direct-launch
+    // hotkey or clicking a picker entry.
     if (!scopeModuleId) {
-      const parsed = this.parsePrefix(query)
-      scopeModuleId = parsed.scopeModuleId
-      effectiveQuery = parsed.strippedQuery
-    } else {
-      // Direct-launch hotkey already scoped us to a module; still strip
-      // a matching prefix at the start of the query if present.
-      const parsed = this.parsePrefix(query)
-      if (parsed.scopeModuleId === scopeModuleId) {
-        effectiveQuery = parsed.strippedQuery
+      return {
+        requestId,
+        items: this.buildPickerItems(query)
       }
     }
 
-    const modules: PaletteModule[] = scopeModuleId
-      ? this.modules.has(scopeModuleId)
-        ? [this.modules.get(scopeModuleId)!]
-        : []
-      : [...this.modules.values()].filter((m) => {
-          const s = this.moduleSettingsCache.get(m.manifest.id)
-          return s?.enabled ?? m.manifest.defaultEnabled
-        })
+    const scopedModule = this.modules.get(scopeModuleId)
+    if (!scopedModule) {
+      return { requestId, items: [], resolvedModuleId: scopeModuleId }
+    }
 
     const controller = new AbortController()
     this.activeControllers.set(requestId, controller)
 
     try {
-      const perModule = await Promise.all(
-        modules.map(async (m) => {
-          try {
-            const items = await m.search(effectiveQuery, controller.signal, {
-              config: this.buildConfig(m)
-            })
-            return items.map<PaletteItem>((it) => ({
-              ...it,
-              moduleId: m.manifest.id
-            }))
-          } catch (err) {
-            if ((err as Error)?.name !== 'AbortError') {
-              console.warn(
-                `[registry] module ${m.manifest.id} search failed:`,
-                err
-              )
-            }
-            return [] as PaletteItem[]
-          }
+      let items: PaletteItem[] = []
+      try {
+        const raw = await scopedModule.search(query, controller.signal, {
+          config: this.buildConfig(scopedModule)
         })
-      )
+        items = raw.map<PaletteItem>((it) => ({
+          ...it,
+          moduleId: scopedModule.manifest.id
+        }))
+      } catch (err) {
+        if ((err as Error)?.name !== 'AbortError') {
+          console.warn(
+            `[registry] module ${scopedModule.manifest.id} search failed:`,
+            err
+          )
+        }
+      }
 
-      const merged = perModule.flat()
-      merged.sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
-      const capped = merged.slice(0, MAX_RESULTS)
+      items.sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
+      const capped = items.slice(0, MAX_RESULTS)
 
       return {
         requestId,
         items: capped,
-        resolvedModuleId: scopeModuleId,
-        strippedQuery: scopeModuleId ? effectiveQuery : undefined
+        resolvedModuleId: scopeModuleId
       }
     } finally {
       this.activeControllers.delete(requestId)
@@ -197,6 +202,19 @@ class ModuleRegistry {
   }
 
   async execute(item: PaletteItem): Promise<ExecuteResult> {
+    // Registry-synthesized picker entry — scope into the module instead of
+    // running a module execute. Keep the palette open so the user sees the
+    // module's own results immediately.
+    if (item.actionKind === SCOPE_ACTION_KIND) {
+      const action = item.action as { moduleId?: unknown }
+      const targetId =
+        typeof action?.moduleId === 'string' ? action.moduleId : undefined
+      if (!targetId || !this.modules.has(targetId)) {
+        return { dismissPalette: false, error: `unknown picker target: ${String(targetId)}` }
+      }
+      return { dismissPalette: false, scopeToModuleId: targetId }
+    }
+
     const m = this.modules.get(item.moduleId)
     if (!m) {
       return { dismissPalette: false, error: `unknown module: ${item.moduleId}` }

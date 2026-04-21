@@ -6,6 +6,7 @@ const MANIFEST: ModuleManifest = {
   id: 'keyboard-remap',
   name: 'Keyboard Remap',
   icon: 'keyboard',
+  kind: 'service',
   description:
     'System-wide keyboard layer. CapsLock → Ctrl (tap = Escape); Space → modifier layer (tap = space). Mirrors AutoHotkey / Karabiner-Elements basics in one cross-platform place.',
   defaultEnabled: true,

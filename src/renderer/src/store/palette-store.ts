@@ -20,7 +20,6 @@ interface PaletteState {
   query: string
   items: PaletteItem[]
   resolvedModuleId?: ModuleId
-  strippedQuery?: string
   activeModuleId?: ModuleId // pre-selected via direct-launch hotkey
   selectedIndex: number
   isLoading: boolean
@@ -33,6 +32,8 @@ interface PaletteState {
   executeSelected: () => Promise<void>
   reset: () => void
   onPaletteShow: (initialModuleId?: ModuleId) => void
+  /** Clear the scoped-module state and return to the home-screen picker. */
+  unscope: () => void
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -88,10 +89,45 @@ export const usePaletteStore = create<PaletteState>()(
       const item = items[selectedIndex]
       if (!item) return
       try {
-        await window.electronAPI.modulesExecute(item)
+        const result = await window.electronAPI.modulesExecute(item)
+        // Scope-into-module: the registry handed back a target module id.
+        // Reset state as if the palette had just opened with that module
+        // pre-selected — existing direct-launch code path, minus the
+        // window-show side effects.
+        if (result?.scopeToModuleId) {
+          if (debounceTimer !== null) {
+            clearTimeout(debounceTimer)
+            debounceTimer = null
+          }
+          set((s) => {
+            s.activeModuleId = result.scopeToModuleId
+            s.query = ''
+            s.items = []
+            s.selectedIndex = 0
+            s.resolvedModuleId = undefined
+            s.isLoading = true
+          })
+          void runSearch('', get, set)
+        }
       } catch (err) {
         console.warn('[palette] execute failed', err)
       }
+    },
+
+    unscope: () => {
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer)
+        debounceTimer = null
+      }
+      set((s) => {
+        s.activeModuleId = undefined
+        s.resolvedModuleId = undefined
+        s.query = ''
+        s.items = []
+        s.selectedIndex = 0
+        s.isLoading = true
+      })
+      void runSearch('', get, set)
     },
 
     reset: () => {
@@ -100,7 +136,6 @@ export const usePaletteStore = create<PaletteState>()(
         s.items = []
         s.selectedIndex = 0
         s.resolvedModuleId = undefined
-        s.strippedQuery = undefined
         s.activeModuleId = undefined
         s.isLoading = false
       })
@@ -117,7 +152,6 @@ export const usePaletteStore = create<PaletteState>()(
         s.items = []
         s.selectedIndex = 0
         s.resolvedModuleId = undefined
-        s.strippedQuery = undefined
         s.activeModuleId = initialModuleId
         s.isLoading = true
         s.query = ''
@@ -163,7 +197,6 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
     set((s) => {
       s.items = result.items
       s.resolvedModuleId = result.resolvedModuleId
-      s.strippedQuery = result.strippedQuery
       s.selectedIndex = 0
       s.isLoading = false
     })

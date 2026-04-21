@@ -844,3 +844,19 @@ pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
     }
   }
 }
+
+/// Zero-based index of the currently active virtual desktop. Uses the
+/// `winvd` wrapper around Windows 11's undocumented
+/// `IVirtualDesktopManagerInternal` COM interface — same dependency the
+/// keyboard-remap module uses for workspace switching. On failure (older
+/// Windows 10 builds or COM hiccups) returns 0, which degrades the tray
+/// icon to "desktop 1" rather than crashing the poll loop.
+pub fn get_current_desktop_number() -> napi::Result<u32> {
+  match winvd::get_current_desktop() {
+    Ok(d) => match d.get_index() {
+      Ok(idx) => Ok(idx),
+      Err(_) => Ok(0),
+    },
+    Err(_) => Ok(0),
+  }
+}

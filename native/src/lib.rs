@@ -129,6 +129,21 @@ pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
   }
 }
 
+/// Zero-based index of the currently active virtual desktop. Windows-only —
+/// on macOS / Linux, returns 0 (no equivalent abstraction; macOS Spaces
+/// don't expose a stable ordinal via public APIs).
+#[napi]
+pub fn get_current_desktop_number() -> napi::Result<u32> {
+  #[cfg(target_os = "windows")]
+  {
+    return windows_impl::get_current_desktop_number();
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    Ok(0)
+  }
+}
+
 #[napi]
 pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
   #[cfg(target_os = "windows")]

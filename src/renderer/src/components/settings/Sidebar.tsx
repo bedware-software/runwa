@@ -3,6 +3,7 @@ import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
+import type { ModuleMeta } from '@shared/types'
 
 export type SettingsTab = 'general' | `module:${string}`
 
@@ -44,60 +45,99 @@ export function Sidebar({ current, onChange }: Props) {
       </nav>
 
       {modules.length > 0 && (
-        <div className="border-t border-border mt-3 pt-3">
-          <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider px-2 mb-2">
-            Modules
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {modules.map((m) => {
-              const Icon = iconFromHint(m.icon)
-              const active = current === `module:${m.id}`
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onChange(`module:${m.id}`)}
-                  className={cn(
-                    'flex items-center gap-2 h-8 px-2 rounded-md transition-colors',
-                    active
-                      ? 'bg-accent text-accent-foreground'
-                      : 'hover:bg-accent/50'
-                  )}
-                >
-                  <Icon
-                    size={14}
-                    className={cn(
-                      'shrink-0 transition-colors',
-                      active
-                        ? 'text-accent-foreground'
-                        : m.enabled
-                          ? 'text-muted-foreground'
-                          : 'text-muted-foreground/40'
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      'flex-1 text-left text-sm truncate transition-colors',
-                      active
-                        ? 'text-accent-foreground'
-                        : m.enabled
-                          ? 'text-muted-foreground'
-                          : 'text-muted-foreground/40'
-                    )}
-                  >
-                    {m.name}
-                  </span>
-                  <SidebarToggle
-                    checked={m.enabled}
-                    onChange={(v) => void setEnabled(m.id, v)}
-                  />
-                </button>
-              )
-            })}
-          </div>
+        <div className="border-t border-border mt-3 pt-3 flex flex-col gap-3">
+          {/*
+            Two-level grouping: "Searches" are modules that appear in the
+            home-screen picker (App Search, Window Switcher, future
+            Files/Calculator/…). "Other" is background services and
+            hotkey-only utilities that never show up in the palette list
+            (Keyboard Remap, Groq Transcription). Preserving registration
+            order within each group means adding a new module keeps its
+            position predictable.
+          */}
+          <ModuleGroup
+            label="Searches"
+            modules={modules.filter((m) => m.kind === 'search')}
+            current={current}
+            onChange={onChange}
+            onToggle={(id, v) => void setEnabled(id, v)}
+          />
+          <ModuleGroup
+            label="Other"
+            modules={modules.filter((m) => m.kind !== 'search')}
+            current={current}
+            onChange={onChange}
+            onToggle={(id, v) => void setEnabled(id, v)}
+          />
         </div>
       )}
     </aside>
+  )
+}
+
+interface ModuleGroupProps {
+  label: string
+  modules: ModuleMeta[]
+  current: SettingsTab
+  onChange: (tab: SettingsTab) => void
+  onToggle: (moduleId: string, enabled: boolean) => void
+}
+
+function ModuleGroup({ label, modules, current, onChange, onToggle }: ModuleGroupProps) {
+  if (modules.length === 0) return null
+  return (
+    <div>
+      <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider px-2 mb-2">
+        {label}
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {modules.map((m) => {
+          const Icon = iconFromHint(m.icon)
+          const active = current === `module:${m.id}`
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onChange(`module:${m.id}`)}
+              className={cn(
+                'flex items-center gap-2 h-8 px-2 rounded-md transition-colors',
+                active
+                  ? 'bg-accent text-accent-foreground'
+                  : 'hover:bg-accent/50'
+              )}
+            >
+              <Icon
+                size={14}
+                className={cn(
+                  'shrink-0 transition-colors',
+                  active
+                    ? 'text-accent-foreground'
+                    : m.enabled
+                      ? 'text-muted-foreground'
+                      : 'text-muted-foreground/40'
+                )}
+              />
+              <span
+                className={cn(
+                  'flex-1 text-left text-sm truncate transition-colors',
+                  active
+                    ? 'text-accent-foreground'
+                    : m.enabled
+                      ? 'text-muted-foreground'
+                      : 'text-muted-foreground/40'
+                )}
+              >
+                {m.name}
+              </span>
+              <SidebarToggle
+                checked={m.enabled}
+                onChange={(v) => onToggle(m.id, v)}
+              />
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

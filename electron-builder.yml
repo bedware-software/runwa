@@ -19,6 +19,11 @@ extraResources:
       - package.json
   - from: resources/icon.png
     to: icon.png
+  # Per-desktop-number tray icons (1.ico…10.ico, +.ico) in two themes
+  # (black-on-white for dark taskbars, white-on-black for light taskbars).
+  # Used by the tray manager to reflect the current virtual desktop.
+  - from: resources/tray-icons
+    to: tray-icons
 asarUnpack:
   - "**/*.node"
   - native/**
