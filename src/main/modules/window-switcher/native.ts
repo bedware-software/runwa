@@ -44,6 +44,7 @@ interface NativeAddon {
   getForegroundWindow(): string
   forceForegroundWindow(id: string): boolean
   isWindowOnCurrentDesktop(id: string): boolean
+  getCurrentDesktopNumber(): number
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
   getWindowIcon(id: string): NativeWindowIcon | null
@@ -122,6 +123,15 @@ export function forceForegroundWindow(id: string): boolean {
 
 export function isWindowOnCurrentDesktop(id: string): boolean {
   return loadAddon().isWindowOnCurrentDesktop(id)
+}
+
+/**
+ * Zero-based index of the currently active virtual desktop. Windows-only;
+ * other platforms return 0. Callers that display a 1-based number (tray
+ * icon, UI) should add 1 themselves.
+ */
+export function getCurrentDesktopNumber(): number {
+  return loadAddon().getCurrentDesktopNumber()
 }
 
 export function focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult {

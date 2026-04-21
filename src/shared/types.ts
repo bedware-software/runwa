@@ -62,11 +62,22 @@ export type ModuleConfigField =
   | ModuleConfigFieldText
   | ModuleConfigFieldAction
 
+/**
+ * What the module *is*, from the palette's point of view.
+ *  - 'search': the module produces a searchable list (Window Switcher, App
+ *    Search, future Files/Calculator/Clipboard…). Appears in the home-screen
+ *    picker and can be scoped into.
+ *  - 'service': background utility with no palette surface (Keyboard Remap)
+ *    or a hotkey-only trigger (Groq Transcription). Settings-sidebar-only —
+ *    never shown in the home picker.
+ */
+export type ModuleKind = 'search' | 'service'
+
 export interface ModuleManifest {
   id: ModuleId
   name: string
   icon: string // lucide icon name
-  prefix?: string // e.g. 'win' — scopes the query to this module when typed as the first word
+  kind: ModuleKind
   description: string
   defaultEnabled: boolean
   supportsDirectLaunch: boolean
@@ -114,15 +125,21 @@ export interface SearchRequest {
 export interface SearchResult {
   requestId: number
   items: PaletteItem[]
-  /** Set if the registry auto-detected a prefix match or scopeModuleId was used. */
+  /** Set when the search was scoped to a specific module. */
   resolvedModuleId?: ModuleId
-  /** Query with the matched prefix stripped, if applicable. */
-  strippedQuery?: string
 }
 
 export interface ExecuteResult {
   dismissPalette: boolean
   error?: string
+  /**
+   * If set, the renderer should NOT dismiss the palette and instead enter
+   * scoped mode for this module (clear query, re-run search). Used by the
+   * synthetic module-picker entries the registry returns on the home screen
+   * — selecting "App Search" sets scopeToModuleId='app-search', dropping
+   * the user into app-search's own view.
+   */
+  scopeToModuleId?: ModuleId
 }
 
 export type Theme = 'light' | 'dark' | 'system'

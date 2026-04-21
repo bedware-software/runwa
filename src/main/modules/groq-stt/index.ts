@@ -37,9 +37,9 @@ const MANIFEST: ModuleManifest = {
   id: MODULE_ID,
   name: 'Groq Transcription',
   icon: 'mic',
-  // No `prefix` on purpose — this module is hotkey-only and has no
-  // palette results, so a prefix would just scope queries to an empty
-  // result set and confuse the user.
+  // Hotkey-only utility — no palette-searchable surface, so it's a
+  // service-kind module (never shown in the home picker).
+  kind: 'service',
   description:
     'Hold (or toggle) a hotkey to record your voice; Groq Whisper transcribes it and the result lands on your clipboard.',
   defaultEnabled: false,

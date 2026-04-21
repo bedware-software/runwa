@@ -1,16 +1,23 @@
 import { moduleRegistry } from './registry'
 import { createWindowSwitcherModule } from './window-switcher'
-import { createGroqSttModule } from './groq-stt'
+import { createAppSearchModule } from './app-search'
 import { createKeyboardRemapModule } from './keyboard-remap'
+import { createGroqSttModule } from './groq-stt'
 
 /**
  * Hard-coded module registration. Adding a new module is a one-file change:
  *   1. Create src/main/modules/<id>/index.ts exporting a factory
  *   2. Import it here and call moduleRegistry.register(...)
+ *
+ * Registration order is what both the palette home-screen picker and the
+ * settings sidebar show. User-facing launchers first (app-search,
+ * window-switcher), then the background service (keyboard-remap), then the
+ * hotkey-only utility (groq-stt) at the bottom.
  */
 export async function registerModules(): Promise<void> {
+  moduleRegistry.register(createAppSearchModule())
   moduleRegistry.register(createWindowSwitcherModule())
-  moduleRegistry.register(createGroqSttModule())
   moduleRegistry.register(createKeyboardRemapModule())
-  // Future: apps, files, calculator, clipboard, web search, …
+  moduleRegistry.register(createGroqSttModule())
+  // Future: files, calculator, clipboard, web search, …
 }

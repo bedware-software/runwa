@@ -17,7 +17,7 @@ const MANIFEST: ModuleManifest = {
   id: 'window-switcher',
   name: 'Window Switcher',
   icon: 'app-window',
-  prefix: 'win',
+  kind: 'search',
   description: 'Jump to any open window on your desktop — like PowerToys Window Walker.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
