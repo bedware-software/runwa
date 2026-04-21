@@ -115,7 +115,7 @@ fn run_move_sequence(n: u32) {
     // chromeless windows, dialogs).
     let target = match active_zoom_button_frame() {
         Some(zoom) => CGPoint {
-            x: zoom.origin.x + zoom.size.width + 10.0,
+            x: zoom.origin.x + zoom.size.width + 4.0,
             y: zoom.origin.y + zoom.size.height / 2.0,
         },
         None => CGPoint {

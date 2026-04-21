@@ -645,6 +645,11 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                     ],
                     flags,
                 );
+                // Shadow-track the switch so the tray (and anyone else
+                // calling `get_current_desktop_number`) can reflect the
+                // user's intent — macOS has no public Space-ordinal API.
+                // Convert YAML's 1-based N to our 0-based storage.
+                super::macos_desktop_tracker::set(n.saturating_sub(1));
                 continue;
             }
             SyntheticEvent::MoveToWorkspace(n) => {
@@ -652,7 +657,11 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 // mimic the manual gesture (grab title bar, switch Space,
                 // drop) on a detached thread. See
                 // `macos_move_window::move_active_window_to_workspace`.
-                super::macos_move_window::move_active_window_to_workspace(*n);
+                let n = *n;
+                super::macos_move_window::move_active_window_to_workspace(n);
+                // Move-to also ends up on the target Space, so track it
+                // the same way we track a plain switch.
+                super::macos_desktop_tracker::set(n.saturating_sub(1));
                 continue;
             }
         };

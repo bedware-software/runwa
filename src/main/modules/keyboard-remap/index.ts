@@ -10,11 +10,24 @@ const MANIFEST: ModuleManifest = {
   description:
     'System-wide keyboard layer. CapsLock → Ctrl (tap = Escape); Space → modifier layer (tap = space). Mirrors AutoHotkey / Karabiner-Elements basics in one cross-platform place.',
   defaultEnabled: true,
-  supportsDirectLaunch: false
+  supportsDirectLaunch: false,
   // Rules file (path, edit, reload, parsed hotkey list) is rendered by a
-  // dedicated KeyboardRemapSection in the renderer — can't express in the
-  // generic `configFields` schema.
+  // dedicated KeyboardRemapSection in the renderer. The config schema below
+  // only covers toggles that fit the generic checkbox/radio/text fields.
+  configFields: [
+    {
+      type: 'checkbox',
+      key: 'showDesktopNumberInTray',
+      label: 'Show virtual-desktop number in tray icon',
+      description:
+        'Replaces the tray icon with a numbered glyph reflecting the current virtual desktop. Windows uses the real desktop ordinal; on macOS there is no public Space ordinal so the number stays at 1.',
+      defaultValue: true
+    }
+  ]
 }
+
+export const SHOW_DESKTOP_NUMBER_IN_TRAY_KEY = 'showDesktopNumberInTray'
+export const SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT = true
 
 export function createKeyboardRemapModule(): PaletteModule {
   return {

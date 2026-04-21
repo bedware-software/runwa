@@ -4,25 +4,29 @@ import { paletteWindow } from './palette-window'
 import { settingsWindow } from './settings-window'
 import { resetCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { getCurrentDesktopNumber } from './modules/window-switcher/native'
+import { settingsStore } from './settings-store'
+import {
+  SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT,
+  SHOW_DESKTOP_NUMBER_IN_TRAY_KEY
+} from './modules/keyboard-remap'
 
 /**
  * System tray icon. On Windows, the icon reflects the current virtual
  * desktop number (1..10, `+` for 11+). Two icon themes — `black-on-white`
  * and `white-on-black` — swap based on the OS light/dark preference so the
- * glyph stays readable against whatever taskbar color is in effect.
+ * glyph stays readable against whatever taskbar/menu-bar color is in
+ * effect.
  *
  * Detection strategy:
- *  - Desktop: polled every 500ms via the native addon (`winvd` crate).
- *    There is a push-style `RegisterPostMessageHook` we could wire in
- *    later, but it needs a native window handle to receive the message
- *    and the polling cost is negligible (single COM call per tick).
- *  - Theme: `nativeTheme.shouldUseDarkColors` + its `updated` event. This
- *    reads the same `AppsUseLightTheme` registry value the AHK version of
- *    the script relied on.
- *
- * On non-Windows platforms the number is meaningless (macOS Spaces don't
- * expose an ordinal; Linux varies by WM) — we fall back to the static
- * `icon.png` used pre-iteration-2.
+ *  - Desktop: polled every 500ms via the native addon. On Windows the
+ *    `winvd` crate returns the real ordinal; on macOS / Linux the native
+ *    addon returns 0 (Spaces have no public ordinal API), so the icon
+ *    stays on "1" regardless of the current Space. Still useful: users
+ *    get the same runwa glyph in the menu bar, and the theme-based
+ *    light/dark swap still works.
+ *  - Theme: `nativeTheme.shouldUseDarkColors` + its `updated` event.
+ *    Reads `AppsUseLightTheme` on Windows and the `AppleInterfaceStyle`
+ *    default on macOS.
  */
 
 const DESKTOP_POLL_INTERVAL_MS = 500
@@ -32,36 +36,52 @@ class TrayManager {
   private tray: Tray | null = null
   private pollTimer: NodeJS.Timeout | null = null
   private themeListener: (() => void) | null = null
+  private settingsListener: (() => void) | null = null
   private lastDesktop = -1
   private lastDark: boolean | null = null
+  private lastShowNumber: boolean | null = null
 
   init(): void {
-    const isWindows = process.platform === 'win32'
-
-    const initialIcon = isWindows
-      ? this.iconForDesktop(this.readDesktopNumber(), nativeTheme.shouldUseDarkColors)
-      : this.fallbackIcon()
+    const initialDesktop = this.readDesktopNumber()
+    const initialDark = nativeTheme.shouldUseDarkColors
+    const initialShowNumber = this.readShowNumberSetting()
+    const initialIcon = this.resolveIcon(initialDesktop, initialDark, initialShowNumber)
 
     this.tray = new Tray(initialIcon)
-    this.tray.setToolTip('runwa')
+    this.tray.setToolTip(this.tooltipFor(initialDesktop, initialShowNumber))
     this.refreshMenu()
 
     // Left-click on tray icon toggles the palette (Windows/Linux convention).
     this.tray.on('click', () => paletteWindow.toggle())
 
-    if (isWindows) {
-      // Prime state so the first poll tick recognises changes correctly.
-      this.lastDesktop = this.readDesktopNumber()
-      this.lastDark = nativeTheme.shouldUseDarkColors
+    // Prime state so the first poll tick recognises changes correctly.
+    this.lastDesktop = initialDesktop
+    this.lastDark = initialDark
+    this.lastShowNumber = initialShowNumber
 
-      // Poll for desktop changes. Cheap — one native COM call per tick.
-      this.pollTimer = setInterval(() => this.tick(), DESKTOP_POLL_INTERVAL_MS)
+    // Poll for desktop changes. Cheap — one native call per tick. On
+    // non-Windows platforms this always reads 0, so the branch never
+    // fires, but we keep the timer running so there's a single code path
+    // across platforms.
+    this.pollTimer = setInterval(() => this.tick(), DESKTOP_POLL_INTERVAL_MS)
 
-      // Theme change fires when the user flips Settings → Colors → Mode.
-      const listener = (): void => this.onThemeOrDesktopChanged()
-      nativeTheme.on('updated', listener)
-      this.themeListener = (): void => nativeTheme.off('updated', listener)
+    // Theme change fires when the user flips system light/dark mode.
+    const themeListener = (): void => this.applyIcon()
+    nativeTheme.on('updated', themeListener)
+    this.themeListener = (): void => nativeTheme.off('updated', themeListener)
+
+    // React to the keyboard-remap module's "show desktop number" toggle
+    // being flipped in settings, so the tray switches between the
+    // numbered glyph and the plain runwa mark without needing a restart.
+    const settingsListener = (): void => {
+      const next = this.readShowNumberSetting()
+      if (next !== this.lastShowNumber) {
+        this.lastShowNumber = next
+        this.applyIcon()
+      }
     }
+    settingsStore.on('change', settingsListener)
+    this.settingsListener = (): void => settingsStore.off('change', settingsListener)
   }
 
   dispose(): void {
@@ -72,6 +92,10 @@ class TrayManager {
     if (this.themeListener) {
       this.themeListener()
       this.themeListener = null
+    }
+    if (this.settingsListener) {
+      this.settingsListener()
+      this.settingsListener = null
     }
     this.tray?.destroy()
     this.tray = null
@@ -109,17 +133,62 @@ class TrayManager {
     const desktop = this.readDesktopNumber()
     if (desktop !== this.lastDesktop) {
       this.lastDesktop = desktop
-      this.onThemeOrDesktopChanged()
+      this.applyIcon()
     }
   }
 
-  private onThemeOrDesktopChanged(): void {
+  /**
+   * Render whatever icon the current (desktop, theme, show-number) tuple
+   * resolves to, plus the matching tooltip. Cheap — called on each poll
+   * tick that detects a change, on theme updates, and on the module's
+   * settings toggle.
+   */
+  private applyIcon(): void {
     if (!this.tray) return
     const dark = nativeTheme.shouldUseDarkColors
     this.lastDark = dark
-    const icon = this.iconForDesktop(this.lastDesktop, dark)
+    const showNumber = this.lastShowNumber ?? SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT
+    const icon = this.resolveIcon(this.lastDesktop, dark, showNumber)
     this.tray.setImage(icon)
-    this.tray.setToolTip(`runwa — desktop ${this.lastDesktop + 1}`)
+    this.tray.setToolTip(this.tooltipFor(this.lastDesktop, showNumber))
+  }
+
+  /**
+   * Pick an icon based on whether the user wants the numbered desktop
+   * glyph or the plain runwa mark. The numbered path still honours the
+   * light/dark theme swap — the fallback just returns the static PNG.
+   */
+  private resolveIcon(
+    zeroBasedDesktop: number,
+    dark: boolean,
+    showNumber: boolean
+  ): Electron.NativeImage {
+    if (!showNumber) return this.fallbackIcon()
+    return this.iconForDesktop(zeroBasedDesktop, dark)
+  }
+
+  /**
+   * Tooltip text. On Windows we include the current desktop ordinal when
+   * the numbered icon is active — on other platforms or when the user
+   * disabled the number, we just say "runwa".
+   */
+  private tooltipFor(zeroBasedDesktop: number, showNumber: boolean): string {
+    if (showNumber && process.platform === 'win32') {
+      return `runwa — desktop ${zeroBasedDesktop + 1}`
+    }
+    return 'runwa'
+  }
+
+  /**
+   * Read the `showDesktopNumberInTray` toggle off the keyboard-remap
+   * module's config. Falls back to the manifest default if the setting
+   * isn't written yet (fresh install) or has the wrong type (hand-edited
+   * JSON).
+   */
+  private readShowNumberSetting(): boolean {
+    const cfg = settingsStore.get().modules['keyboard-remap']?.config
+    const v = cfg?.[SHOW_DESKTOP_NUMBER_IN_TRAY_KEY]
+    return typeof v === 'boolean' ? v : SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT
   }
 
   private readDesktopNumber(): number {
@@ -146,7 +215,13 @@ class TrayManager {
     const humanNum = zeroBased + 1
     const fileBase = humanNum > MAX_NUMBERED_DESKTOP ? '+' : String(humanNum)
     const themeDir = dark ? 'black-on-white' : 'white-on-black'
-    const iconPath = path.join(this.iconsRoot(), themeDir, `${fileBase}.ico`)
+    // Windows reads .ico natively (multi-resolution). Electron's
+    // `nativeImage.createFromPath` on macOS can't decode the 4-bit indexed
+    // .ico variants we ship, so we keep PNG copies alongside for every
+    // icon and pick the format per-platform. PNG is also a safer bet on
+    // Linux.
+    const ext = process.platform === 'win32' ? 'ico' : 'png'
+    const iconPath = path.join(this.iconsRoot(), themeDir, `${fileBase}.${ext}`)
     const img = nativeImage.createFromPath(iconPath)
     if (img.isEmpty()) {
       console.warn(`[tray] icon missing at ${iconPath} — falling back to app icon`)

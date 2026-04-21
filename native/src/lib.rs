@@ -129,16 +129,25 @@ pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
   }
 }
 
-/// Zero-based index of the currently active virtual desktop. Windows-only —
-/// on macOS / Linux, returns 0 (no equivalent abstraction; macOS Spaces
-/// don't expose a stable ordinal via public APIs).
+/// Zero-based index of the currently active virtual desktop. Windows
+/// reads this from the real `winvd` ordinal. macOS has no public API for
+/// Space ordinals, so we track our own by snooping
+/// `switch_to_workspace` / `move_to_workspace` rule actions the user
+/// fires through the keyboard remap — the number is passed in the rule,
+/// so every runwa-initiated switch updates the tracker. Switches made
+/// via the system's own Ctrl+N shortcut (outside runwa) aren't observed
+/// and won't be reflected. Linux / other: always 0.
 #[napi]
 pub fn get_current_desktop_number() -> napi::Result<u32> {
   #[cfg(target_os = "windows")]
   {
     return windows_impl::get_current_desktop_number();
   }
-  #[cfg(not(target_os = "windows"))]
+  #[cfg(target_os = "macos")]
+  {
+    return Ok(remap::macos_desktop_tracker::get());
+  }
+  #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
     Ok(0)
   }

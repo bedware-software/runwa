@@ -23,6 +23,9 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub mod macos_move_window;
 
+#[cfg(target_os = "macos")]
+pub mod macos_desktop_tracker;
+
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
