@@ -80,8 +80,6 @@ space:
 
     - { keys: [","], to_hotkey: [home] }
     - { keys: [.],   to_hotkey: [end] }
-    - { keys: [u],   to_hotkey: [pageup] }
-    - { keys: [p],   to_hotkey: [pagedown] }
 
     - { os: windows, keys: [q], to_hotkey: [alt, f4] }
 

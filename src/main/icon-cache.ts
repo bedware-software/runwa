@@ -1,5 +1,11 @@
 import { app, nativeImage } from 'electron'
+import { execFile } from 'child_process'
+import fsPromises from 'fs/promises'
+import path from 'path'
+import { promisify } from 'util'
 import { getWindowIcon } from './modules/window-switcher/native'
+
+const execFileAsync = promisify(execFile)
 
 /**
  * Icon resolution, two layers:
@@ -79,9 +85,84 @@ const inflight = new Map<string, Promise<string | null>>()
 
 async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> {
   if (process.platform === 'darwin') {
+    // Prefer a direct read from the bundle's Info.plist + Resources/*.icns —
+    // QuickLook-backed `createThumbnailFromPath` fails silently for roughly
+    // half the apps in /Applications (XPC timeouts, missing generators,
+    // unsigned/quarantined bundles, etc.) and we end up falling back to the
+    // generic app icon. `resolveMacBundleIcon` returns a real `nativeImage`
+    // whenever the bundle declares an .icns file — which is the common case
+    // for pretty much every app that isn't asset-catalog-only.
+    const direct = await resolveMacBundleIcon(exePath)
+    if (direct && !direct.isEmpty()) return direct
     return nativeImage.createThumbnailFromPath(exePath, { width: 64, height: 64 })
   }
   return app.getFileIcon(exePath, { size: 'normal' })
+}
+
+/**
+ * macOS: resolve a .app bundle's icon from `Contents/Info.plist` +
+ * `Contents/Resources/<icon>.icns`. Returns `null` when the bundle doesn't
+ * declare a loadable .icns (e.g. asset-catalog-only apps introduced in
+ * Xcode 12+) so the caller falls back to QuickLook.
+ */
+async function resolveMacBundleIcon(
+  bundlePath: string
+): Promise<Electron.NativeImage | null> {
+  const infoPlist = path.join(bundlePath, 'Contents', 'Info.plist')
+  const iconName = await readBundleIconKey(infoPlist)
+  if (!iconName) return null
+
+  // CFBundleIconFile is sometimes written with the extension, sometimes
+  // without. Try the declared name first, then force `.icns`, then `.png`.
+  const resources = path.join(bundlePath, 'Contents', 'Resources')
+  const base = iconName.endsWith('.icns') ? iconName.slice(0, -5) : iconName
+  const candidates = [
+    path.join(resources, iconName),
+    path.join(resources, `${base}.icns`),
+    path.join(resources, `${base}.png`)
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      await fsPromises.access(candidate)
+    } catch {
+      continue
+    }
+    const img = nativeImage.createFromPath(candidate)
+    if (img.isEmpty()) continue
+    // .icns images contain many resolutions; the 32-pt palette tile renders
+    // at ~64px on Retina, so normalise to 64×64 to keep cached data URLs
+    // from ballooning (the largest .icns rep can be 1024×1024).
+    return img.resize({ width: 64, height: 64, quality: 'best' })
+  }
+  return null
+}
+
+/**
+ * Returns the `CFBundleIconFile` value (falling back to `CFBundleIconName`)
+ * from an Info.plist. Binary or XML plist formats are both handled by
+ * `plutil -extract`. Spawning plutil is acceptable because each cache entry
+ * is resolved once and inflight-deduped; the warm batch fans out in
+ * parallel via `Promise.all`.
+ */
+async function readBundleIconKey(infoPlist: string): Promise<string | null> {
+  for (const key of ['CFBundleIconFile', 'CFBundleIconName']) {
+    try {
+      const { stdout } = await execFileAsync('/usr/bin/plutil', [
+        '-extract',
+        key,
+        'raw',
+        '-o',
+        '-',
+        infoPlist
+      ])
+      const trimmed = stdout.trim()
+      if (trimmed.length > 0) return trimmed
+    } catch {
+      // Key missing / plist unreadable — try next key, then give up.
+    }
+  }
+  return null
 }
 
 export async function getIconDataUrl(exePath: string | undefined): Promise<string | null> {

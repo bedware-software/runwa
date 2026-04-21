@@ -2,6 +2,7 @@ import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'reac
 import { X, Keyboard, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { keyEventToAccelerator } from '@/lib/hotkey'
+import { Hotkey } from '../ui/Kbd'
 
 interface Props {
   value: string
@@ -79,11 +80,7 @@ export function HotkeyRecorder({ value, onChange, defaultValue }: Props) {
           </span>
         ) : value ? (
           <>
-            <span className="flex items-center gap-1 text-xs">
-              {value.split('+').map((key) => (
-                <kbd key={key}>{key}</kbd>
-              ))}
-            </span>
+            <Hotkey value={value} />
             <button
               type="button"
               onClick={(e) => {

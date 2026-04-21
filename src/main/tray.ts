@@ -1,4 +1,5 @@
 import { app, Menu, MenuItemConstructorOptions, nativeImage, nativeTheme, Tray } from 'electron'
+import { readFileSync } from 'fs'
 import path from 'path'
 import { paletteWindow } from './palette-window'
 import { settingsWindow } from './settings-window'
@@ -215,19 +216,38 @@ class TrayManager {
     const humanNum = zeroBased + 1
     const fileBase = humanNum > MAX_NUMBERED_DESKTOP ? '+' : String(humanNum)
     const themeDir = dark ? 'black-on-white' : 'white-on-black'
-    // Windows reads .ico natively (multi-resolution). Electron's
-    // `nativeImage.createFromPath` on macOS can't decode the 4-bit indexed
-    // .ico variants we ship, so we keep PNG copies alongside for every
-    // icon and pick the format per-platform. PNG is also a safer bet on
-    // Linux.
-    const ext = process.platform === 'win32' ? 'ico' : 'png'
-    const iconPath = path.join(this.iconsRoot(), themeDir, `${fileBase}.${ext}`)
-    const img = nativeImage.createFromPath(iconPath)
+    // One 44×44 PNG per number per theme — single source, no Retina
+    // sibling file, no Windows-specific .ico. On macOS we read the bytes
+    // ourselves and hand them to `createFromBuffer` with width/height 22
+    // and scaleFactor 2 so the 44px image reports itself as a 22pt @2x
+    // asset (correct menu-bar size, sharp on Retina). On Windows/Linux
+    // `createFromPath` loads the raw 44×44 and the tray shell downscales
+    // to fit the notification slot.
+    const iconPath = path.join(this.iconsRoot(), themeDir, `${fileBase}.png`)
+    const img =
+      process.platform === 'darwin'
+        ? this.loadAt2x(iconPath)
+        : nativeImage.createFromPath(iconPath)
     if (img.isEmpty()) {
       console.warn(`[tray] icon missing at ${iconPath} — falling back to app icon`)
       return this.fallbackIcon()
     }
     return img
+  }
+
+  /** macOS helper: load a 44×44 PNG as a 22pt @2x native image. */
+  private loadAt2x(iconPath: string): Electron.NativeImage {
+    try {
+      const buffer = readFileSync(iconPath)
+      return nativeImage.createFromBuffer(buffer, {
+        width: 22,
+        height: 22,
+        scaleFactor: 2
+      })
+    } catch (err) {
+      console.warn(`[tray] failed to read ${iconPath}:`, err)
+      return nativeImage.createEmpty()
+    }
   }
 
   private fallbackIcon(): Electron.NativeImage {

@@ -125,12 +125,13 @@ export function createAppSearchModule(): PaletteModule {
       const trimmed = query.trim()
 
       // Empty query (always scoped — the home-screen picker never calls us
-      // unscoped): alphabetical full list, lightly warm-loaded icons for
-      // the first page of results so the visible rows don't flash to the
-      // lucide fallback.
+      // unscoped): alphabetical full list. Warm every app's icon so rows
+      // below the fold don't show the Lucide fallback when the user
+      // scrolls. The warm set is deduped and cached for the life of the
+      // process, so the cost is paid only on first open — subsequent
+      // opens get instant data-URLs out of the map.
       if (trimmed === '') {
-        const visibleHead = apps.slice(0, 30).map((a) => a.filePath)
-        await warmIconCache(visibleHead)
+        await warmIconCache(apps.map((a) => a.filePath))
         if (signal.aborted) return []
         return apps.map((a, i) => toItem(a, i / 10000))
       }

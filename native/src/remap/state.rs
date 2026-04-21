@@ -209,6 +209,22 @@ impl StateMachine {
                 }
             }
 
+            // Non-modifier trigger preempts a modifier trigger in Pending.
+            // Example: user holds Shift (a configured trigger) and then
+            // presses Space (also a trigger). Intent is to use Space's
+            // layer with Shift as a physical modifier, NOT Shift's tap or
+            // transparent-modifier-layer. Switch the primary trigger to
+            // Space and let its rules fire on subsequent keys — the
+            // ModifierMask snapshot carries Shift on those events via
+            // GetAsyncKeyState (Windows) / CGEventFlags (macOS), so
+            // `keys: [shift, n]` matches regardless of press order.
+            (State::Pending { trigger: ts }, EventKind::KeyDown, Some(te), Some(_))
+                if ts != te && ts.is_modifier() && !te.is_modifier() =>
+            {
+                self.state = State::Pending { trigger: te };
+                Action::Suppress
+            }
+
             // -----------------------------------------------------------
             // Non-current-trigger key events.
             //
@@ -833,6 +849,41 @@ space:
         assert_eq!(
             m.on_event(down_with_mods(alpha('1'), shift)),
             emit(vec![SyntheticEvent::SwitchToWorkspace(1)])
+        );
+    }
+
+    #[test]
+    fn modifier_trigger_preempted_by_nonmodifier_trigger() {
+        // Shift is a trigger (its tap emits Cmd+Space); Space is also a
+        // trigger with a modifier-qualified rule. Press order Shift → Space
+        // → 1 should fire Space's `[shift, 1]` override the same way the
+        // natural order Space → Shift → 1 does. Without the pre-emption
+        // arm, Shift's transparent-Shift layer wins and 1 emits Shift+1.
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [shift, 1]
+      move_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+
+        // Shift first — enters Pending(Shift).
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+
+        // Space second — pre-empts Shift, enters Pending(Space). Shift's
+        // tap is abandoned; the physical Shift is still held in hardware
+        // and will show up on the subsequent 1 keydown's mods mask.
+        assert_eq!(m.on_event(down(LogicalKey::Space)), Action::Suppress);
+
+        // 1 with Shift held — Space's qualified rule fires.
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('1'), shift)),
+            emit(vec![SyntheticEvent::MoveToWorkspace(1)])
         );
     }
 

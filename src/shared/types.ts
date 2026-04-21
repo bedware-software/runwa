@@ -205,9 +205,13 @@ export interface KeyboardRemapTriggerView {
   name: string
   /** Formatted `on_tap` output (e.g. "Escape", "Ctrl+C"), or undefined. */
   onTap?: string
-  /** One-line summary of the hold behaviour. */
-  onHoldSummary: string
-  /** Per-combo rules from `on_hold:`, when using the explicit-list form. */
+  /** Shape of the `on_hold:` block — determines how the renderer draws it. */
+  onHoldKind: 'transparent' | 'explicit' | 'passthrough'
+  /** For `transparent` only: the modifier name that is chip-rendered
+   *  alongside the "(transparent layer)" caption (e.g. "Ctrl", "Shift"). */
+  onHoldModifier?: string
+  /** For `explicit` only: per-combo rules, including any `_default` row
+   *  so the UI mirrors the YAML list 1:1 (no hidden fallback). */
   combos?: KeyboardRemapComboView[]
 }
 

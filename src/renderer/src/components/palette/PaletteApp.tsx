@@ -6,6 +6,7 @@ import { keyEventToAccelerator } from '@/lib/hotkey'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
+import { Kbd, Hotkey } from '../ui/Kbd'
 
 export function PaletteApp() {
   const query = usePaletteStore((s) => s.query)
@@ -140,13 +141,13 @@ export function PaletteApp() {
       <div className="h-10 px-3 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1">
-            Navigate <kbd><ArrowUpDown size={11} strokeWidth={2.5} /></kbd>
+            Navigate <Kbd><ArrowUpDown size={11} strokeWidth={2.5} /></Kbd>
           </span>
           <span className="flex items-center gap-1">
-            Select <kbd><CornerDownLeft size={11} strokeWidth={2.5} /></kbd>
+            Select <Kbd><CornerDownLeft size={11} strokeWidth={2.5} /></Kbd>
           </span>
           <span className="flex items-center gap-1">
-            {activeModuleId ? 'Back' : 'Dismiss'} <kbd>Esc</kbd>
+            {activeModuleId ? 'Back' : 'Dismiss'} <Hotkey value="Esc" />
           </span>
         </div>
         <button
@@ -156,10 +157,7 @@ export function PaletteApp() {
         >
           <SettingsIcon size={11} />
           Settings
-          {openSettingsHotkey &&
-            openSettingsHotkey.split('+').map((key) => (
-              <kbd key={key}>{key}</kbd>
-            ))}
+          <Hotkey value={openSettingsHotkey} />
         </button>
       </div>
     </div>

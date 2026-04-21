@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import type { KeyboardRemapRulesView } from '@shared/types'
+import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { Hotkey } from '../ui/Kbd'
 import { PermissionSection } from './PermissionSection'
 
 /**
@@ -139,32 +140,15 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
           <div key={t.name} className="flex flex-col gap-2 px-4 py-3">
             <div className="text-xs font-semibold text-foreground">{t.name}</div>
             <div className="flex flex-col gap-1 text-xs">
-              <RuleLine label="Tap" value={t.onTap ?? '—'} />
-              <RuleLine label="Hold" value={t.onHoldSummary} />
+              <LabeledRow label="Tap">
+                {t.onTap ? (
+                  <Hotkey value={t.onTap} />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </LabeledRow>
+              <HoldBlock trigger={t} />
             </div>
-            {t.combos && t.combos.length > 0 && (
-              <div className="flex flex-col gap-1.5 pl-4 mt-1 border-l-2 border-border">
-                {t.combos.map((c, i) => (
-                  <div key={`${c.trigger}-${i}`} className="flex flex-col gap-0.5">
-                    <div className="flex items-baseline gap-2 text-xs">
-                      <Kbd>{c.trigger}</Kbd>
-                      <span className="text-muted-foreground">→</span>
-                      <Kbd>{c.result}</Kbd>
-                      {c.os && (
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {c.os}
-                        </span>
-                      )}
-                    </div>
-                    {c.description && (
-                      <div className="text-[11px] text-muted-foreground">
-                        {c.description}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -172,20 +156,92 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
   )
 }
 
-function RuleLine({ label, value }: { label: string; value: string }) {
+function LabeledRow({
+  label,
+  children
+}: {
+  label: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex items-baseline gap-2">
+    <div className="flex items-center gap-2">
       <span className="text-muted-foreground w-10 shrink-0">{label}</span>
       <span className="text-muted-foreground">→</span>
-      <span className="text-foreground">{value}</span>
+      {children}
     </div>
   )
 }
 
-function Kbd({ children }: { children: React.ReactNode }) {
+/**
+ * `on_hold:` rendering follows the three shapes the YAML supports:
+ *   - `transparent`: single modifier chip + "(transparent layer)" caption
+ *   - `explicit`:    "Hold:" label, then a vertical list of combos
+ *                    (including any `_default` row so the UI mirrors the
+ *                    file 1:1 — no hidden "fallback X on macos" summary)
+ *   - `passthrough`: literal "passthrough" caption
+ */
+function HoldBlock({ trigger }: { trigger: KeyboardRemapTriggerView }) {
+  if (trigger.onHoldKind === 'transparent') {
+    return (
+      <LabeledRow label="Hold">
+        {trigger.onHoldModifier && <Hotkey value={trigger.onHoldModifier} />}
+        <span className="text-muted-foreground">(transparent layer)</span>
+      </LabeledRow>
+    )
+  }
+
+  if (trigger.onHoldKind === 'passthrough') {
+    return (
+      <LabeledRow label="Hold">
+        <span className="text-muted-foreground">passthrough</span>
+      </LabeledRow>
+    )
+  }
+
+  // Explicit list — show the header plain (no "N rules" count / fallback
+  // text) and the rules list below, matching the YAML shape.
   return (
-    <code className="bg-secondary text-foreground font-mono px-1.5 py-0.5 rounded text-[11px]">
-      {children}
-    </code>
+    <>
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground w-10 shrink-0">Hold</span>
+        <span className="text-muted-foreground">→</span>
+      </div>
+      {trigger.combos && trigger.combos.length > 0 && (
+        <div className="flex flex-col gap-1.5 pl-4 mt-1 border-l-2 border-border">
+          {trigger.combos.map((c, i) => (
+            <div key={`${c.trigger}-${i}`} className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2 text-xs">
+                <Hotkey value={c.trigger} />
+                <span className="text-muted-foreground">→</span>
+                <ActionDisplay result={c.result} />
+                {c.os && (
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {c.os}
+                  </span>
+                )}
+              </div>
+              {c.description && (
+                <div className="text-[11px] text-muted-foreground">
+                  {c.description}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
+}
+
+/**
+ * Right-hand side of a rule: either a hotkey combo (chips) or an action
+ * description like "→ Desktop 3" (plain text — not a keystroke, so
+ * chipping it doesn't make sense).
+ */
+function ActionDisplay({ result }: { result: string }) {
+  const isAction = result.startsWith('→')
+  if (isAction) {
+    return <span className="text-foreground">{result}</span>
+  }
+  return <Hotkey value={result} />
 }

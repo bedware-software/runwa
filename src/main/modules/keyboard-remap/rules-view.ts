@@ -52,7 +52,8 @@ function readTriggerBlock(
   return {
     name: displayTriggerName(name),
     onTap,
-    onHoldSummary: hold.summary,
+    onHoldKind: hold.kind,
+    onHoldModifier: hold.modifier,
     combos: hold.combos
   }
 }
@@ -84,31 +85,36 @@ function formatTapSpec(raw: unknown): string | undefined {
 }
 
 interface HoldResult {
-  summary: string
+  kind: 'transparent' | 'explicit' | 'passthrough'
+  /** Populated for `transparent`. Raw modifier name ("Ctrl") so the
+   *  renderer can chip-render it alongside the "(transparent layer)"
+   *  caption, same way config mirrors what's in the YAML. */
+  modifier?: string
+  /** Populated for `explicit`. Includes any `_default` row — the view
+   *  follows the YAML 1:1 so users see the same list they wrote. */
   combos?: KeyboardRemapTriggerView['combos']
 }
 
 function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
   if (raw == null) {
-    return { summary: 'passthrough' }
+    return { kind: 'passthrough' }
   }
   if (typeof raw === 'string') {
-    return { summary: `${formatModifier(raw)} (transparent layer)` }
+    return { kind: 'transparent', modifier: formatModifier(raw) }
   }
   if (!Array.isArray(raw)) {
-    return { summary: 'passthrough' }
+    return { kind: 'passthrough' }
   }
-  // A list of plain strings is the new transparent-modifier shape
-  // (`on_hold: [ctrl]`), not a rules list. Summarise it the same way as the
-  // scalar form.
+  // A list of plain strings is the transparent-modifier shape
+  // (`on_hold: [ctrl]`), not a rules list. Render the single entry as a
+  // chip-able modifier name; the multi-element shape is rejected by the
+  // Rust parser so we only handle length-1 here.
   if (raw.length > 0 && raw.every((e) => typeof e === 'string')) {
     const names = (raw as string[]).map(formatModifier).join('+')
-    return { summary: `${names} (transparent layer)` }
+    return { kind: 'transparent', modifier: names }
   }
 
   const combos: NonNullable<HoldResult['combos']> = []
-  let fallback: string | undefined
-  let fallbackOs: string | undefined
 
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue
@@ -126,17 +132,14 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
 
     const resultStr = formatRuleAction(e, to)
 
-    if (triggerKey.toLowerCase() === '_default') {
-      fallback = resultStr
-      fallbackOs = os
-      continue
-    }
-
-    const triggerLabel = [
-      displayTriggerName(triggerName),
-      ...modifierPrefix.map(formatModifier),
-      formatKey(triggerKey)
-    ].join('+')
+    // `_default` is kept as a regular combo row so the UI mirrors the
+    // YAML file's order and shape — no hidden "fallback: X" summary, just
+    // the same list the user wrote.
+    const isDefault = triggerKey.toLowerCase() === '_default'
+    const chord = isDefault
+      ? '…'
+      : formatTokenList([...modifierPrefix, triggerKey])
+    const triggerLabel = `${displayTriggerName(triggerName)}+${chord}`
 
     combos.push({
       trigger: triggerLabel,
@@ -146,13 +149,7 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
     })
   }
 
-  let summary = `explicit layer (${combos.length} ${combos.length === 1 ? 'rule' : 'rules'})`
-  if (fallback) {
-    const pfx = fallbackOs ? ` on ${fallbackOs}` : ''
-    summary += ` · fallback ${fallback}${pfx}`
-  }
-
-  return { summary, combos }
+  return { kind: 'explicit', combos }
 }
 
 function formatRuleAction(
@@ -167,6 +164,12 @@ function formatRuleAction(
   if (Array.isArray(toHotkey)) return formatTokenList(toHotkey.map(String))
   return '?'
 }
+
+// rules-view.ts emits platform-neutral English token names joined with `+`
+// ("Space+Shift+1", "Ctrl+Alt+S"). Platform-specific display (mac glyphs,
+// chip-per-key rendering) happens in the renderer's `lib/hotkey-display.ts`
+// so the same conversion runs for every hotkey surface (palette footer,
+// HotkeyRecorder, per-module hotkeys, keyboard-remap rules).
 
 function formatTokenList(tokens: string[]): string {
   return tokens.map(formatKey).join('+')
