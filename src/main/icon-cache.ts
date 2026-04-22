@@ -207,12 +207,31 @@ async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> 
     }
 
     // Last-ditch fallbacks, also used by the PIDL-only shortcuts that
-    // bypassed the block above: try the shell on the .lnk, then the
-    // native extractor. These often succeed where per-candidate attempts
-    // fail because Windows does the full IShellLink resolution internally.
+    // bypassed the block above:
+    //   1. Electron's shell-routed `app.getFileIcon` on the .lnk — uses
+    //      SHGetFileInfo, resolves simple shortcuts.
+    //   2. `createThumbnailFromPath` — routes through IThumbnailProvider
+    //      (a different Windows API). Rescues PIDL-only shortcuts that
+    //      `readShortcutLink` refused to parse (Windows Media Player
+    //      Legacy, some shell namespace items). IThumbnailProvider caches
+    //      per-file but doesn't care whether we can read the binary —
+    //      it returns whatever the shell would show in Explorer.
+    //   3. Native ExtractIconExW on the .lnk — only useful if the
+    //      shortcut itself has an icon resource embedded; cheap to try.
     const lnkImg = await tryGetFileIconMultiSize(exePath)
     logDebug('getFileIcon(lnk)', { empty: lnkImg == null || lnkImg.isEmpty() })
     if (lnkImg && !lnkImg.isEmpty()) return lnkImg
+
+    try {
+      const thumb = await nativeImage.createThumbnailFromPath(exePath, {
+        width: 32,
+        height: 32
+      })
+      logDebug('thumbnail(lnk)', { empty: thumb.isEmpty(), size: thumb.getSize() })
+      if (!thumb.isEmpty()) return thumb
+    } catch (err) {
+      logDebug('thumbnail(lnk) threw', err)
+    }
 
     const nativeLnkImg = loadNativeFileIcon(exePath, 0)
     logDebug('nativeExtract(lnk)', { empty: nativeLnkImg == null || nativeLnkImg.isEmpty() })
