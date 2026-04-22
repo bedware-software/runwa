@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AppInfo,
   ElectronAPI,
   KeyboardRemapRulesView,
   ModuleMeta,
@@ -18,6 +19,9 @@ import type {
 } from '@shared/types'
 
 const api: ElectronAPI = {
+  // Environment snapshot (packaged? platform?).
+  getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+
   // Modules
   modulesList: (): Promise<ModuleMeta[]> => ipcRenderer.invoke('modules:list'),
   modulesSearch: (req: SearchRequest): Promise<SearchResult> =>

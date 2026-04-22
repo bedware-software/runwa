@@ -8,6 +8,7 @@ import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
 import { ContextMenu, revealAction, setAliasAction } from './ContextMenu'
 import { AliasInputModal } from './AliasInputModal'
+import { FooterHint } from './FooterHint'
 import { Kbd, Hotkey } from '../ui/Kbd'
 
 export function PaletteApp() {
@@ -222,37 +223,33 @@ export function PaletteApp() {
         onOpenContextMenu={openContextMenuForRow}
       />
 
-      <div className="h-10 px-3 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            Navigate <Kbd><ArrowUpDown size={11} strokeWidth={2.5} /></Kbd>
-          </span>
-          <span className="flex items-center gap-1">
-            Select <Kbd><CornerDownLeft size={11} strokeWidth={2.5} /></Kbd>
-          </span>
+      <div className="h-10 px-2 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
+        <div className="flex items-center gap-1">
+          <FooterHint
+            label="Navigate"
+            keys={<Kbd><ArrowUpDown size={11} strokeWidth={2.5} /></Kbd>}
+          />
+          <FooterHint
+            label="Select"
+            keys={<Kbd><CornerDownLeft size={11} strokeWidth={2.5} /></Kbd>}
+          />
           {canOpenMenu && (
-            <span className="flex items-center gap-1">
-              Context menu <Hotkey value="Ctrl+K" />
-            </span>
+            <FooterHint label="Context menu" keys={<Hotkey value="Ctrl+K" />} />
           )}
           {activeModuleId === 'app-search' && (
-            <span className="flex items-center gap-1">
-              Rescan <Hotkey value="Ctrl+R" />
-            </span>
+            <FooterHint label="Rescan" keys={<Hotkey value="Ctrl+R" />} />
           )}
-          <span className="flex items-center gap-1">
-            {activeModuleId ? 'Back' : 'Dismiss'} <Hotkey value="Esc" />
-          </span>
+          <FooterHint
+            label={activeModuleId ? 'Back' : 'Dismiss'}
+            keys={<Hotkey value="Esc" />}
+          />
         </div>
-        <button
-          type="button"
-          className="flex items-center gap-1 hover:text-foreground transition-colors"
+        <FooterHint
+          leading={<SettingsIcon size={11} />}
+          label="Settings"
+          keys={<Hotkey value={openSettingsHotkey} />}
           onClick={() => void window.electronAPI.openSettings()}
-        >
-          <SettingsIcon size={11} />
-          Settings
-          <Hotkey value={openSettingsHotkey} />
-        </button>
+        />
       </div>
 
       <ContextMenu

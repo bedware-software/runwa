@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Download, RefreshCw, Trash2 } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings-store'
-import { DEFAULT_SETTINGS, type Theme, type UpdateStatus } from '@shared/types'
+import {
+  DEFAULT_SETTINGS,
+  type AppInfo,
+  type Theme,
+  type UpdateStatus
+} from '@shared/types'
 import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
 import { ConfirmDialog } from '../ConfirmDialog'
@@ -85,6 +90,8 @@ export function GeneralPanel() {
         </div>
       </section>
 
+      <StartupSection />
+
       <UpdateSection />
 
       <section className="pt-4 border-t border-destructive/30">
@@ -126,6 +133,127 @@ export function GeneralPanel() {
         onConfirm={handleWipeAllData}
         onCancel={() => setWipeConfirmOpen(false)}
       />
+    </div>
+  )
+}
+
+/**
+ * OS-integration toggles — "Start at login" and Windows-only "Run as
+ * administrator". Both are registered in user-scope OS state (HKCU or
+ * macOS LoginItems) by the main-process `startup-integration` module
+ * on every settings change.
+ *
+ * Disabled in dev (`app.isPackaged === false`) because writing the
+ * real registry / LoginItem entries would point at
+ * `node_modules/electron/dist/electron.exe`, which isn't what the user
+ * actually wants auto-started or elevated. The tooltip on each row
+ * explains why.
+ */
+function StartupSection() {
+  const startAtLogin = useSettingsStore(
+    (s) => s.settings?.startAtLogin ?? DEFAULT_SETTINGS.startAtLogin
+  )
+  const runAsAdmin = useSettingsStore(
+    (s) => s.settings?.runAsAdmin ?? DEFAULT_SETTINGS.runAsAdmin
+  )
+  const setStartAtLogin = useSettingsStore((s) => s.setStartAtLogin)
+  const setRunAsAdmin = useSettingsStore((s) => s.setRunAsAdmin)
+
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void window.electronAPI.getAppInfo().then((v) => {
+      if (!cancelled) setInfo(v)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const devMode = info ? !info.isPackaged : false
+  const isWindows = info?.platform === 'win32'
+  const devHint = 'Only takes effect in packaged installs.'
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-foreground mb-1">Startup</h2>
+      <p className="text-xs text-muted-foreground mb-3">
+        Automate how runwa comes up with your system.
+      </p>
+      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+        <ToggleRow
+          title="Start at login"
+          description="Launch runwa automatically when you sign in. Starts hidden in the tray."
+          checked={startAtLogin}
+          disabled={devMode}
+          disabledHint={devMode ? devHint : undefined}
+          onChange={(v) => void setStartAtLogin(v)}
+        />
+        {isWindows && (
+          <ToggleRow
+            title="Run as administrator"
+            description="Relaunch runwa elevated on every start. Needed for global hotkeys / keyboard remap to work inside other elevated apps (Task Manager, elevated terminals). Triggers a UAC prompt each launch."
+            checked={runAsAdmin}
+            disabled={devMode}
+            disabledHint={devMode ? devHint : undefined}
+            onChange={(v) => void setRunAsAdmin(v)}
+          />
+        )}
+      </div>
+    </section>
+  )
+}
+
+interface ToggleRowProps {
+  title: string
+  description: string
+  checked: boolean
+  disabled?: boolean
+  disabledHint?: string
+  onChange: (v: boolean) => void
+}
+
+function ToggleRow({
+  title,
+  description,
+  checked,
+  disabled,
+  disabledHint,
+  onChange
+}: ToggleRowProps) {
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-between gap-4 px-4 py-3',
+        disabled && 'opacity-60'
+      )}
+      title={disabled ? disabledHint : undefined}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          if (disabled) return
+          onChange(!checked)
+        }}
+        disabled={disabled}
+        className={cn(
+          'w-10 h-6 rounded-full transition-colors relative shrink-0',
+          checked ? 'bg-primary' : 'bg-muted',
+          disabled && 'cursor-not-allowed'
+        )}
+        aria-pressed={checked}
+      >
+        <div
+          className={cn(
+            'w-5 h-5 rounded-full bg-background absolute top-0.5 transition-transform',
+            checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+          )}
+        />
+      </button>
     </div>
   )
 }

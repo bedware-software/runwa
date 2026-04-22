@@ -288,6 +288,16 @@ export interface PermissionFlags {
 export type PermissionStatus = PermissionFlags | null
 
 /**
+ * Minimal environment snapshot surfaced to the renderer once at hydrate.
+ * Drives toggles that only make sense for packaged installs (Start at
+ * login, Run as administrator) and platform-specific UI rows.
+ */
+export interface AppInfo {
+  isPackaged: boolean
+  platform: NodeJS.Platform
+}
+
+/**
  * GitHub Releases-backed auto-update state machine, as observed from
  * the renderer. The main process is the source of truth — the
  * Settings panel subscribes via `onUpdateStatus` and shows a matching
@@ -315,6 +325,11 @@ export type UpdateStatus =
  * implementation of this on window.electronAPI.
  */
 export interface ElectronAPI {
+  // Environment snapshot — read once at hydrate. Used by the General
+  // settings panel to gate "Start at login" / "Run as administrator"
+  // rows based on packaged-state and platform.
+  getAppInfo: () => Promise<AppInfo>
+
   // Modules
   modulesList: () => Promise<ModuleMeta[]>
   modulesSearch: (req: SearchRequest) => Promise<SearchResult>

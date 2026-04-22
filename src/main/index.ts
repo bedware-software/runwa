@@ -13,6 +13,7 @@ import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
+import { syncStartupIntegrations } from './startup-integration'
 import {
   requestScreenRecordingPermission,
   isScreenRecordingGranted,
@@ -127,6 +128,22 @@ app.whenReady().then(async () => {
   //     Releases publish target configured in electron-builder.yml and
   //     schedules periodic re-checks. No-op in unpackaged dev runs.
   initAutoUpdater()
+
+  // 10a. Apply the "Start at login" / "Run as administrator" toggles
+  //      from settings to the OS (registry / login items). Also
+  //      re-apply on every settings change so flipping a toggle in
+  //      the panel takes effect immediately without restart.
+  const current = settingsStore.get()
+  syncStartupIntegrations({
+    startAtLogin: current.startAtLogin,
+    runAsAdmin: current.runAsAdmin
+  })
+  settingsStore.on('change', (s) =>
+    syncStartupIntegrations({
+      startAtLogin: s.startAtLogin,
+      runAsAdmin: s.runAsAdmin
+    })
+  )
 
   // 11. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
