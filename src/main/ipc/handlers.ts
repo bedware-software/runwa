@@ -17,6 +17,7 @@ import { moduleRegistry } from '../modules/registry'
 import { paletteWindow } from '../palette-window'
 import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
+import { checkForUpdatesNow, getUpdateStatus } from '../auto-update'
 import {
   isAccessibilityTrusted,
   isScreenRecordingGranted,
@@ -94,6 +95,14 @@ export function registerIpcHandlers(): void {
       shell.showItemInFolder(p)
     }
   })
+
+  // Auto-update: trigger a manual check (button in Settings / tray) and
+  // expose the current status for renderers coming up mid-flight (e.g.
+  // user opens Settings while a background download is already running).
+  ipcMain.handle('app:checkForUpdates', async () => {
+    await checkForUpdatesNow()
+  })
+  ipcMain.handle('app:getUpdateStatus', async () => getUpdateStatus())
 
   // Keyboard remap — read-only view + reload for the settings panel.
   ipcMain.handle('keyboard-remap:getRules', async () =>

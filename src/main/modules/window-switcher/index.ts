@@ -100,18 +100,30 @@ export function createWindowSwitcherModule(): PaletteModule {
       // Title fallback: CGWindowList (both current-Space and all-Spaces
       // paths on macOS) returns blank `title` when Screen Recording
       // permission is absent. Fall back to the process name so the list
-      // isn't empty, then dedupe by (pid, effective title) — collapses N
-      // untitled windows of the same app to a single app-level row while
-      // keeping distinct rows when real per-window titles are available.
+      // isn't empty.
+      //
+      // Dedup is conditional: when the title fell back (was empty), we
+      // collapse N same-process rows into one — the user can't tell them
+      // apart anyway, so a single app-level entry is the right UI. Real
+      // per-window titles always produce distinct rows, even when two
+      // windows happen to share the same title (two Chrome tabs pinned
+      // to the same page, two VS Code windows on the same project, etc.);
+      // the HWND id stays unique, so clicking each one focuses its own
+      // window.
       const seen = new Set<string>()
       const all = listWindowsCached(currentDesktopOnly, hideSystemWindows)
         .filter((w) => w.pid !== ownPid)
         .map((w) => {
-          const effective = w.title.trim() || w.processName
-          return { ...w, title: effective }
+          const trimmed = w.title.trim()
+          return {
+            ...w,
+            title: trimmed || w.processName,
+            titleFellBack: trimmed.length === 0
+          }
         })
         .filter((w) => {
           if (w.title.length === 0) return false
+          if (!w.titleFellBack) return true
           const key = `${w.pid}\x00${w.title}`
           if (seen.has(key)) return false
           seen.add(key)

@@ -4,6 +4,16 @@ icon: resources/icon.png
 directories:
   output: release
   buildResources: build
+# electron-updater reads release metadata from the GitHub repo's public
+# releases API. `publish: never` in CI keeps us out of electron-builder's
+# own upload path — the workflow uploads artifacts (including the .yml
+# update manifests) via softprops/action-gh-release instead, so we keep
+# the "draft, review, hit publish" review step. electron-updater doesn't
+# care who uploaded the files, only that they're present on the release.
+publish:
+  provider: github
+  owner: bedware-software
+  repo: runwa
 files:
   - out/**
   - package.json
@@ -48,7 +58,14 @@ nsis:
   allowToChangeInstallationDirectory: true
 mac:
   target:
+    # `zip` is required alongside `dmg` for electron-updater's mac path:
+    # mounting a .dmg to replace the running app is awkward, so the
+    # updater downloads the .zip, unpacks the .app bundle, and relaunches.
     - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
       arch:
         - x64
         - arm64

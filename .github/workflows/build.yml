@@ -12,18 +12,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `artifact_path` globs pick up the installer + the
+          # electron-updater metadata files (.yml, .blockmap, and the
+          # mac-only .zip that the updater extracts from) — all of them
+          # need to land on the GitHub Release for auto-update to work.
           - os: windows-latest
             script: dist:win
             artifact_name: runwa-windows
-            artifact_path: release/*.exe
+            artifact_path: |
+              release/*.exe
+              release/*.exe.blockmap
+              release/latest.yml
           - os: macos-latest
             script: dist:mac
             artifact_name: runwa-macos
-            artifact_path: release/*.dmg
+            artifact_path: |
+              release/*.dmg
+              release/*.zip
+              release/*.blockmap
+              release/latest-mac.yml
           - os: ubuntu-latest
             script: dist:linux
             artifact_name: runwa-linux
-            artifact_path: release/*.AppImage
+            artifact_path: |
+              release/*.AppImage
+              release/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
 

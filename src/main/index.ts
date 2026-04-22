@@ -11,6 +11,7 @@ import { recorderWindow } from './modules/groq-stt/recorder-window'
 import { indicatorWindow } from './modules/groq-stt/indicator-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
+import { initAutoUpdater } from './auto-update'
 import {
   requestScreenRecordingPermission,
   isScreenRecordingGranted,
@@ -116,7 +117,12 @@ app.whenReady().then(async () => {
     }
   })
 
-  // 10. Fallback: if the activation hotkey couldn't be registered (another
+  // 10. Auto-update. Kicks off a background check against the GitHub
+  //     Releases publish target configured in electron-builder.yml and
+  //     schedules periodic re-checks. No-op in unpackaged dev runs.
+  initAutoUpdater()
+
+  // 11. Fallback: if the activation hotkey couldn't be registered (another
   //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
   //    settings window so the user can pick a working chord. Without this
   //    it's impossible to reach settings on first launch.

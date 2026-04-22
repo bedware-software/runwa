@@ -271,6 +271,29 @@ export interface PermissionFlags {
 export type PermissionStatus = PermissionFlags | null
 
 /**
+ * GitHub Releases-backed auto-update state machine, as observed from
+ * the renderer. The main process is the source of truth — the
+ * Settings panel subscribes via `onUpdateStatus` and shows a matching
+ * label / button state.
+ */
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'up-to-date'; currentVersion: string }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+  /**
+   * Auto-update isn't wired up for the running process — currently only
+   * set on unpackaged dev runs (`npm run dev`), where the running code
+   * IS the source so there's nothing to update. Lets the UI surface an
+   * explicit "disabled for this build" hint instead of silently sitting
+   * on `idle`.
+   */
+  | { state: 'disabled'; reason: 'dev-build' }
+
+/**
  * Narrow surface between renderer and main. The preload script exposes an
  * implementation of this on window.electronAPI.
  */
@@ -318,6 +341,11 @@ export interface ElectronAPI {
   // Keyboard remap — module-specific surface for the settings panel.
   keyboardRemapGetRules: () => Promise<KeyboardRemapRulesView>
   keyboardRemapReload: () => Promise<KeyboardRemapRulesView>
+
+  // Auto-update: getter + push-update subscription.
+  checkForUpdates: () => Promise<void>
+  getUpdateStatus: () => Promise<UpdateStatus>
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => () => void
 
   // macOS permission status for the General panel. Null on other OSes.
   permissionsGet: () => Promise<PermissionStatus>

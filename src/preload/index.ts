@@ -13,7 +13,8 @@ import type {
   SearchRequest,
   SearchResult,
   Settings,
-  ExecuteResult
+  ExecuteResult,
+  UpdateStatus
 } from '@shared/types'
 
 const api: ElectronAPI = {
@@ -79,6 +80,23 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('keyboard-remap:getRules'),
   keyboardRemapReload: (): Promise<KeyboardRemapRulesView> =>
     ipcRenderer.invoke('keyboard-remap:reload'),
+
+  // Auto-update: trigger a check + poll current state. Push updates
+  // stream over the `app:update-status` channel via the subscription
+  // helper below.
+  checkForUpdates: (): Promise<void> =>
+    ipcRenderer.invoke('app:checkForUpdates'),
+  getUpdateStatus: (): Promise<UpdateStatus> =>
+    ipcRenderer.invoke('app:getUpdateStatus'),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, status: UpdateStatus): void => {
+      cb(status)
+    }
+    ipcRenderer.on('app:update-status', listener)
+    return () => {
+      ipcRenderer.removeListener('app:update-status', listener)
+    }
+  },
 
   // macOS permissions — null on non-macOS platforms.
   permissionsGet: (): Promise<PermissionStatus> =>

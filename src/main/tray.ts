@@ -4,6 +4,7 @@ import path from 'path'
 import { paletteWindow } from './palette-window'
 import { settingsWindow } from './settings-window'
 import { resetCapsLockRemap } from './modules/keyboard-remap/hidutil'
+import { checkForUpdatesNow } from './auto-update'
 import { getCurrentDesktopNumber } from './modules/window-switcher/native'
 import { settingsStore } from './settings-store'
 import {
@@ -125,7 +126,19 @@ class TrayManager {
       )
     }
 
-    items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() })
+    items.push(
+      { type: 'separator' },
+      {
+        label: 'Check for updates',
+        // `checkForUpdatesNow` is a no-op in unpackaged dev runs, so the
+        // menu entry is always present but only does real work in a
+        // packaged install. The update flow notifies silently via a
+        // system Notification when downloaded; nothing more to do here.
+        click: () => void checkForUpdatesNow()
+      },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() }
+    )
 
     this.tray.setContextMenu(Menu.buildFromTemplate(items))
   }

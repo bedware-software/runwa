@@ -1,6 +1,6 @@
 {
   "name": "runwa",
-  "version": "0.1.27",
+  "version": "0.1.29",
   "description": "A cross-platform command palette launcher",
   "main": "./out/main/index.js",
   "author": "dmitr",
@@ -24,6 +24,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
     "fuse.js": "^7.0.0",
     "immer": "^11.0.0",
     "lucide-react": "^0.460.0",
