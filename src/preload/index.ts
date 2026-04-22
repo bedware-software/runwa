@@ -97,6 +97,7 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener('app:update-status', listener)
     }
   },
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('app:installUpdate'),
 
   // macOS permissions — null on non-macOS platforms.
   permissionsGet: (): Promise<PermissionStatus> =>

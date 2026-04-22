@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateStatus } from '@shared/types'
+import { killSiblingRunwaProcesses } from './process-utils'
 
 /**
  * GitHub Releases-backed auto-update.
@@ -134,4 +135,25 @@ async function checkNow(): Promise<void> {
     console.warn('[auto-update] checkForUpdates threw:', message)
     setStatus({ state: 'error', message })
   }
+}
+
+/**
+ * Trigger the downloaded update immediately. Kills any sibling runwa.exe
+ * processes first (wipe-data helpers, stuck older GUI instances — all
+ * of which hold file locks that make NSIS's uninstall step abort with
+ * "Failed to uninstall old application files"), then hands off to
+ * electron-updater's `quitAndInstall` which replaces the binary and
+ * relaunches. No-op in unpackaged dev runs and when no update is ready.
+ */
+export function installUpdateNow(): void {
+  if (!app.isPackaged) return
+  if (currentStatus.state !== 'downloaded') {
+    console.warn(
+      '[auto-update] installUpdateNow called without a downloaded update',
+      currentStatus
+    )
+    return
+  }
+  killSiblingRunwaProcesses()
+  autoUpdater.quitAndInstall(true, true)
 }

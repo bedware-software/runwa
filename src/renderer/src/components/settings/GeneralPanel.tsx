@@ -158,7 +158,13 @@ function UpdateSection() {
     void window.electronAPI.checkForUpdates()
   }
 
-  const { label, description, buttonLabel, spin, busy } = renderStatus(status)
+  const onInstall = (): void => {
+    void window.electronAPI.installUpdate()
+  }
+
+  const view = renderStatus(status)
+  const { label, description, buttonLabel, spin, busy } = view
+  const action = view.action ?? 'check'
 
   return (
     <section>
@@ -178,15 +184,17 @@ function UpdateSection() {
         </div>
         <button
           type="button"
-          onClick={onCheck}
+          onClick={action === 'install' ? onInstall : onCheck}
           disabled={busy}
           className={cn(
             'shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border transition-colors',
-            'bg-secondary text-secondary-foreground border-input hover:bg-accent',
+            action === 'install'
+              ? 'bg-primary text-primary-foreground border-primary hover:opacity-90'
+              : 'bg-secondary text-secondary-foreground border-input hover:bg-accent',
             busy && 'opacity-60 cursor-not-allowed hover:bg-secondary'
           )}
         >
-          {status.state === 'downloaded' ? (
+          {action === 'install' ? (
             <Download size={12} />
           ) : (
             <RefreshCw size={12} className={cn(spin && 'animate-spin')} />
@@ -204,6 +212,13 @@ interface StatusView {
   buttonLabel: string
   spin: boolean
   busy: boolean
+  /**
+   * What the button does when clicked. `'check'` runs the standard
+   * `checkForUpdates` RPC; `'install'` triggers the explicit
+   * `installUpdate` path (kill siblings + quitAndInstall). Default is
+   * `'check'`.
+   */
+  action?: 'check' | 'install'
 }
 
 function renderStatus(s: UpdateStatus): StatusView {
@@ -241,10 +256,12 @@ function renderStatus(s: UpdateStatus): StatusView {
     case 'downloaded':
       return {
         label: `v${s.version} ready to install`,
-        description: 'Quit and reopen runwa to apply the update.',
-        buttonLabel: 'Installs on next quit',
+        description:
+          'runwa will close, apply the update, and relaunch. Any background helpers from "Wipe all data" are terminated first so the installer can replace files cleanly.',
+        buttonLabel: 'Install now',
         spin: false,
-        busy: true
+        busy: false,
+        action: 'install'
       }
     case 'error':
       return {

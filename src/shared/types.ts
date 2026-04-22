@@ -346,6 +346,13 @@ export interface ElectronAPI {
   checkForUpdates: () => Promise<void>
   getUpdateStatus: () => Promise<UpdateStatus>
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => () => void
+  /**
+   * Force-install a downloaded update immediately. Pre-kills orphan
+   * runwa.exe processes that would otherwise make NSIS's uninstall
+   * step fail ("Failed to uninstall old application files"), then
+   * relaunches into the new version. No-op when no update is pending.
+   */
+  installUpdate: () => Promise<void>
 
   // macOS permission status for the General panel. Null on other OSes.
   permissionsGet: () => Promise<PermissionStatus>

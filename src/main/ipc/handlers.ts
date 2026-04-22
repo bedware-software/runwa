@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
 import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type {
   SearchRequest,
@@ -17,7 +17,7 @@ import { moduleRegistry } from '../modules/registry'
 import { paletteWindow } from '../palette-window'
 import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
-import { checkForUpdatesNow, getUpdateStatus } from '../auto-update'
+import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import {
   isAccessibilityTrusted,
   isScreenRecordingGranted,
@@ -103,6 +103,9 @@ export function registerIpcHandlers(): void {
     await checkForUpdatesNow()
   })
   ipcMain.handle('app:getUpdateStatus', async () => getUpdateStatus())
+  ipcMain.handle('app:installUpdate', async () => {
+    installUpdateNow()
+  })
 
   // Keyboard remap — read-only view + reload for the settings panel.
   ipcMain.handle('keyboard-remap:getRules', async () =>
@@ -200,6 +203,25 @@ export function registerIpcHandlers(): void {
 
     try {
       const pid = process.pid
+      // Lockfile guard: if a previous wipe helper is still running
+      // (recent dev testing, repeated clicks, etc.), skip spawning
+      // another. Rapid re-invocations otherwise pile up N detached
+      // Electron-as-Node processes that all hold locks on userData and
+      // confuse NSIS's uninstall step during a later auto-update.
+      const lockPath = path.join(app.getPath('temp'), 'runwa-wipe.lock')
+      try {
+        const existing = readFileSync(lockPath, 'utf8').trim()
+        const existingPid = Number.parseInt(existing, 10)
+        if (Number.isFinite(existingPid) && isProcessAlive(existingPid)) {
+          console.warn(
+            `[wipe-data] helper already running (pid=${existingPid}) — skipping duplicate spawn`
+          )
+          return
+        }
+      } catch {
+        // No lock yet — proceed.
+      }
+
       const scriptPath = path.join(
         app.getPath('temp'),
         `runwa-wipe-${pid}-${Date.now()}.js`
@@ -217,15 +239,26 @@ export function registerIpcHandlers(): void {
       // userData itself, rmSync bails with EBUSY on the top-level rmdir
       // and leaves the contents intact. Per-child deletion still wipes
       // the contents — the empty folder is functionally reset.
+      //
+      // Helper writes its own PID to `lockPath` and removes it on exit
+      // so a second wipe click during the 15-second wait can detect
+      // "already in flight" and bail instead of stacking helpers.
       const script = `
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const pid = ${pid};
 const target = ${JSON.stringify(userDataDir)};
+const lockPath = ${JSON.stringify(lockPath)};
 const relaunchExec = ${JSON.stringify(relaunchExec)};
 const relaunchArgs = ${JSON.stringify(relaunchArgs)};
 const relaunchEnv = ${JSON.stringify(relaunchEnv)};
+
+try { fs.writeFileSync(lockPath, String(process.pid)) } catch {}
+function removeLock() { try { fs.unlinkSync(lockPath) } catch {} }
+process.on('exit', removeLock);
+process.on('SIGINT', () => { removeLock(); process.exit(0) });
+process.on('SIGTERM', () => { removeLock(); process.exit(0) });
 
 function alive(p) {
   try { process.kill(p, 0); return true } catch { return false }
@@ -261,6 +294,7 @@ async function wipeContents(dir) {
     spawn(relaunchExec, relaunchArgs, { detached: true, stdio: 'ignore', env: relaunchEnv }).unref()
   } catch {}
   try { fs.unlinkSync(__filename) } catch {}
+  removeLock();
 })()
 `
       writeFileSync(scriptPath, script, 'utf8')
@@ -298,6 +332,20 @@ async function wipeContents(dir) {
   ipcMain.on('palette:endMove', () => {
     paletteWindow.endMove()
   })
+}
+
+/**
+ * Cheap liveness check — `process.kill(pid, 0)` throws when the target
+ * is gone. Used by the wipe-data lockfile guard to distinguish a stale
+ * lockfile from one belonging to an in-flight helper.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Broadcast settings changes to every open renderer. */
