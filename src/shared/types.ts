@@ -198,6 +198,21 @@ export interface Settings {
    */
   openSettingsHotkey: string
   theme: Theme
+  /**
+   * Launch runwa automatically when the user logs into their OS session.
+   * Cross-platform (Electron's `app.setLoginItemSettings` handles both
+   * Windows HKCU\...\Run and macOS LoginItems). Only meaningful in
+   * packaged installs; settings UI greys out the toggle in dev.
+   */
+  startAtLogin: boolean
+  /**
+   * Windows-only: mark the installed executable with the `RUNASADMIN`
+   * AppCompat flag in `HKCU\...\AppCompatFlags\Layers`, so every launch
+   * triggers a UAC elevation prompt. Needed when the user wants runwa's
+   * global hotkeys / keyboard remap / window-switcher APIs to work in
+   * apps that themselves run elevated (UAC-split session rules).
+   */
+  runAsAdmin: boolean
   /** User-resized dimensions of the palette window. Absent = use hard-coded default. */
   paletteSize?: PaletteSize
   modules: Record<ModuleId, ModuleSettings>
@@ -207,6 +222,8 @@ export const DEFAULT_SETTINGS: Settings = {
   activationHotkey: 'Ctrl+Alt+S',
   openSettingsHotkey: 'Ctrl+,',
   theme: 'system',
+  startAtLogin: false,
+  runAsAdmin: false,
   modules: {}
 }
 
