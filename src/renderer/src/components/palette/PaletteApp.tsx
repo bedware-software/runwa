@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowUpDown, CornerDownLeft, Settings as SettingsIcon } from 'lucide-react'
 import { usePaletteStore } from '@/store/palette-store'
 import { useSettingsStore } from '@/store/settings-store'
@@ -6,12 +6,14 @@ import { keyEventToAccelerator } from '@/lib/hotkey'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
+import { ContextMenu, revealAction } from './ContextMenu'
 import { Kbd, Hotkey } from '../ui/Kbd'
 
 export function PaletteApp() {
   const query = usePaletteStore((s) => s.query)
   const items = usePaletteStore((s) => s.items)
   const selectedIndex = usePaletteStore((s) => s.selectedIndex)
+  const isLoading = usePaletteStore((s) => s.isLoading)
   const resolvedModuleId = usePaletteStore((s) => s.resolvedModuleId)
   const activeModuleId = usePaletteStore((s) => s.activeModuleId)
   const setQuery = usePaletteStore((s) => s.setQuery)
@@ -20,6 +22,7 @@ export function PaletteApp() {
   const executeSelected = usePaletteStore((s) => s.executeSelected)
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
   const unscope = usePaletteStore((s) => s.unscope)
+  const refresh = usePaletteStore((s) => s.refresh)
 
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
@@ -31,6 +34,24 @@ export function PaletteApp() {
   const isHydrated = useSettingsStore((s) => s.isHydrated)
 
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Ctrl+K context-menu open state. Local to this component because the
+  // menu is purely UI — no other layer cares whether it's open.
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const selectedItem = items[selectedIndex]
+  const contextActions = useMemo(
+    () =>
+      selectedItem?.revealPath ? [revealAction(selectedItem.revealPath)] : [],
+    [selectedItem?.revealPath]
+  )
+  const canOpenMenu = contextActions.length > 0
+
+  // Close the menu if the selection moves to a row without reveal actions
+  // (e.g. user navigated to a UWP entry in app-search).
+  useEffect(() => {
+    if (!canOpenMenu) setMenuOpen(false)
+  }, [canOpenMenu])
 
   // Initial hydration
   useEffect(() => {
@@ -68,6 +89,33 @@ export function PaletteApp() {
   }, [isHydrated, setQuery])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    // While the context menu is open it owns the keyboard — its own
+    // document-level capture handler runs before this one and stops
+    // propagation. The early-return here is belt-and-suspenders so a
+    // React synthetic event can't fall through and re-trigger select/
+    // dismiss logic.
+    if (menuOpen) return
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && canOpenMenu) {
+      e.preventDefault()
+      setMenuOpen(true)
+      return
+    }
+    // Ctrl+R inside app-search: drop the main-process enumeration cache and
+    // re-run the current search. preventDefault so the browser's built-in
+    // "reload page" doesn't fire inside Electron's webContents.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.key.toLowerCase() === 'r' &&
+      activeModuleId === 'app-search'
+    ) {
+      e.preventDefault()
+      void (async () => {
+        await window.electronAPI.modulesAction('app-search', 'rescan')
+        refresh()
+      })()
+      return
+    }
     if (e.key === 'Escape') {
       e.preventDefault()
       // Escape inside a scoped module returns to the home-screen picker
@@ -119,7 +167,7 @@ export function PaletteApp() {
 
   return (
     <div
-      className="h-full bg-popover text-popover-foreground flex flex-col rounded-md border border-border overflow-hidden"
+      className="relative h-full bg-popover text-popover-foreground flex flex-col rounded-md border border-border overflow-hidden"
       onKeyDown={onKeyDown}
     >
       <div className="px-3 py-2 border-b border-border flex items-center gap-2 [-webkit-app-region:drag]">
@@ -136,7 +184,7 @@ export function PaletteApp() {
         {activeMod && <ModeBadge name={activeMod.name} />}
       </div>
 
-      <ResultsList items={items} selectedIndex={selectedIndex} />
+      <ResultsList items={items} selectedIndex={selectedIndex} isLoading={isLoading} />
 
       <div className="h-10 px-3 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
         <div className="flex items-center gap-3">
@@ -146,6 +194,16 @@ export function PaletteApp() {
           <span className="flex items-center gap-1">
             Select <Kbd><CornerDownLeft size={11} strokeWidth={2.5} /></Kbd>
           </span>
+          {canOpenMenu && (
+            <span className="flex items-center gap-1">
+              Context menu <Hotkey value="Ctrl+K" />
+            </span>
+          )}
+          {activeModuleId === 'app-search' && (
+            <span className="flex items-center gap-1">
+              Rescan <Hotkey value="Ctrl+R" />
+            </span>
+          )}
           <span className="flex items-center gap-1">
             {activeModuleId ? 'Back' : 'Dismiss'} <Hotkey value="Esc" />
           </span>
@@ -160,6 +218,12 @@ export function PaletteApp() {
           <Hotkey value={openSettingsHotkey} />
         </button>
       </div>
+
+      <ContextMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        actions={contextActions}
+      />
     </div>
   )
 }

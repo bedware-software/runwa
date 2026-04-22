@@ -202,6 +202,26 @@ pub fn get_window_icon(id: String) -> napi::Result<Option<WindowIcon>> {
   }
 }
 
+/// Windows-only fallback when Electron's `app.getFileIcon` returns an
+/// empty image — `ExtractIconExW` pulls the icon resource straight off
+/// the file (exe / dll / ico), bypassing `SHGetFileInfo`'s thumbnail
+/// cache which is sparse for installer-shipped shortcuts.
+#[napi]
+pub fn get_file_icon(
+  path: String,
+  icon_index: Option<i32>,
+) -> napi::Result<Option<WindowIcon>> {
+  #[cfg(target_os = "windows")]
+  {
+    return windows_impl::get_file_icon(&path, icon_index.unwrap_or(0));
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = (path, icon_index);
+    Ok(None)
+  }
+}
+
 /// macOS-only: true if this process has been granted Accessibility in
 /// System Settings → Privacy & Security → Accessibility. Always true on
 /// other platforms (no equivalent gate exists there).

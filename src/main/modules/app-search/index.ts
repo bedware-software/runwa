@@ -85,15 +85,21 @@ export function createAppSearchModule(): PaletteModule {
     id: entry.id,
     title: entry.name,
     subtitle: entry.uwpAppId ? 'Store app' : entry.filePath,
-    // Icon resolution:
-    //  - Files with a real path: reuse the warmed exe-icon cache (works for
-    //    .lnk on Windows because app.getFileIcon resolves the target, and
-    //    for .app on macOS because icon-cache routes those through
-    //    createThumbnailFromPath).
-    //  - UWP entries: no path to pass to getFileIcon, so fall back to the
-    //    Lucide `rocket` glyph. Richer UWP logo extraction is a later pass.
+    // Icon resolution, in priority order:
+    //  1. `iconPath` when set — UWP entries resolve their
+    //     `Square44x44Logo.*.png` at enumeration time, and icon-cache routes
+    //     plain PNGs through `nativeImage.createFromPath`.
+    //  2. `filePath` — Start-Menu .lnk / .exe / .url / .appref-ms on Windows,
+    //     `.app` bundles on macOS.
+    //  3. Lucide `rocket` glyph fallback — either UWP entry with no Assets
+    //     folder match, or Win32 path that getFileIcon couldn't resolve.
     iconHint:
-      getIconDataUrlSync(entry.filePath) ?? 'rocket',
+      getIconDataUrlSync(entry.iconPath ?? entry.filePath) ?? 'rocket',
+    // Ctrl+K context menu's "Show in file explorer" target. Only Win32
+    // entries carry a usable filesystem path; UWP entries are addressed by
+    // AUMID and have no stable folder to open, so we leave revealPath
+    // undefined for them (the menu hotkey then becomes a no-op per row).
+    revealPath: entry.filePath,
     actionKind: 'launch-app',
     action: { entryId: entry.id } satisfies LaunchAction,
     score
@@ -131,7 +137,7 @@ export function createAppSearchModule(): PaletteModule {
       // process, so the cost is paid only on first open — subsequent
       // opens get instant data-URLs out of the map.
       if (trimmed === '') {
-        await warmIconCache(apps.map((a) => a.filePath))
+        await warmIconCache(apps.map((a) => a.iconPath ?? a.filePath))
         if (signal.aborted) return []
         return apps.map((a, i) => toItem(a, i / 10000))
       }
@@ -147,7 +153,7 @@ export function createAppSearchModule(): PaletteModule {
 
       // Warm icons only for the matched subset — enumerating all 100+ apps'
       // icons every keystroke is wasteful when only ~10 will render.
-      await warmIconCache(matches.map((r) => r.item.filePath))
+      await warmIconCache(matches.map((r) => r.item.iconPath ?? r.item.filePath))
       if (signal.aborted) return []
 
       return matches.map((r) => toItem(r.item, r.score ?? 1))
@@ -168,6 +174,14 @@ export function createAppSearchModule(): PaletteModule {
       const ok = await launchApp(entry)
       if (!ok) invalidateAppCache()
       return { dismissPalette: ok }
+    },
+
+    // Hotkey-driven actions. The palette's Ctrl+R handler (only wired while
+    // app-search is the active scope) dispatches `rescan` here — invalidates
+    // the enumeration cache so the subsequent automatic re-search picks up
+    // newly-installed apps without waiting for a process restart.
+    async onAction(key) {
+      if (key === 'rescan') invalidateAppCache()
     }
   }
 }

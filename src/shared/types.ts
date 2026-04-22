@@ -107,6 +107,14 @@ export interface PaletteItem {
   subtitle?: string
   /** Lucide icon name or data URL. Iteration 1 uses lucide names only. */
   iconHint?: string
+  /**
+   * Absolute filesystem path the context menu's "Show in file explorer"
+   * action targets. When set, the palette surfaces a Ctrl+K context menu
+   * for this item; when undefined, the hotkey is a no-op for this row.
+   * App-search populates it with the .lnk / .exe / .app path; UWP entries
+   * leave it undefined (no stable filesystem target for the user to open).
+   */
+  revealPath?: string
   /** Per-module action discriminator. Re-validated by the owning module on execute. */
   actionKind: string
   /** Opaque payload, owned by the module. Renderer never interprets this. */
@@ -262,6 +270,9 @@ export interface ElectronAPI {
   // Palette window control
   paletteHide: () => Promise<void>
   openSettings: () => Promise<void>
+
+  // Context-menu action: reveal an absolute path in Explorer / Finder.
+  revealInFolder: (absolutePath: string) => Promise<void>
 
   // Signal that the renderer has fresh results — main waits before showing.
   paletteReady: () => void

@@ -79,6 +79,16 @@ export function registerIpcHandlers(): void {
     settingsWindow.open()
   })
 
+  // Context-menu helper: reveal an absolute path in the system file
+  // manager. `shell.showItemInFolder` is effectively a no-op when the
+  // path doesn't exist or isn't absolute, so we don't have to validate
+  // defensively — a broken path just fails silently on the user's side.
+  ipcMain.handle('app:reveal-in-folder', async (_e, p: string) => {
+    if (typeof p === 'string' && p.length > 0) {
+      shell.showItemInFolder(p)
+    }
+  })
+
   // Keyboard remap — read-only view + reload for the settings panel.
   ipcMain.handle('keyboard-remap:getRules', async () =>
     keyboardRemapService.getRulesView()

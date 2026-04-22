@@ -47,6 +47,10 @@ const api: ElectronAPI = {
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),
   openSettings: (): Promise<void> => ipcRenderer.invoke('palette:openSettings'),
 
+  // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
+  revealInFolder: (absolutePath: string): Promise<void> =>
+    ipcRenderer.invoke('app:reveal-in-folder', absolutePath),
+
   // Signal main that the renderer has fresh results and is ready to be shown.
   paletteReady: (): void => {
     ipcRenderer.send('palette:ready')

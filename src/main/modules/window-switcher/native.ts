@@ -48,6 +48,7 @@ interface NativeAddon {
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
   getWindowIcon(id: string): NativeWindowIcon | null
+  getFileIcon(path: string, iconIndex?: number): NativeWindowIcon | null
   isAccessibilityTrusted(): boolean
   requestAccessibilityPermission(): boolean
   isScreenRecordingGranted(): boolean
@@ -150,6 +151,17 @@ export function describeWindow(id: string): NativeWindow | null {
  */
 export function getWindowIcon(id: string): NativeWindowIcon | null {
   return loadAddon().getWindowIcon(id)
+}
+
+/**
+ * Extract an icon resource directly from a file on disk (.exe / .dll /
+ * .ico / .lnk). Windows-only; returns `null` on other platforms or when
+ * the path has no icon at the given index. Used as a last-resort when
+ * Electron's `app.getFileIcon` returns empty (sparse SHGetFileInfo cache
+ * for installer-shipped shortcuts).
+ */
+export function getFileIcon(filePath: string, iconIndex = 0): NativeWindowIcon | null {
+  return loadAddon().getFileIcon(filePath, iconIndex)
 }
 
 /**

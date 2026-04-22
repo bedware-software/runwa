@@ -1,9 +1,9 @@
-import { app, nativeImage } from 'electron'
+import { app, nativeImage, shell, type ShortcutDetails } from 'electron'
 import { execFile } from 'child_process'
 import fsPromises from 'fs/promises'
 import path from 'path'
 import { promisify } from 'util'
-import { getWindowIcon } from './modules/window-switcher/native'
+import { getWindowIcon, getFileIcon as nativeGetFileIcon } from './modules/window-switcher/native'
 
 const execFileAsync = promisify(execFile)
 
@@ -83,6 +83,24 @@ export function getWindowIconDataUrl(hwndId: string): string | null {
 const cache = new Map<string, string | null>()
 const inflight = new Map<string, Promise<string | null>>()
 
+// Raster image formats the OS hands us in "just open the file" form — mostly
+// UWP `Square44x44Logo.*.png` and the occasional explicit `.lnk icon =
+// foo.ico` or Assets jpg. `app.getFileIcon` returns the file-type shell icon
+// for these (useless, always the same PNG glyph), so we load them directly.
+const DIRECT_IMAGE_EXTENSIONS = /\.(png|jpe?g|ico)$/i
+
+// `%VAR%\sub\path` → fully-resolved filesystem path. Windows .lnk stores
+// env-var-templated paths verbatim (`%windir%\explorer.exe`), and both
+// Electron's `app.getFileIcon` and Win32 `ExtractIconExW` need them
+// expanded up front. `process.env` on Windows is case-insensitive in Node,
+// so `%ProgramFiles%` and `%PROGRAMFILES%` both resolve.
+function expandWinEnv(p: string): string {
+  return p.replace(/%([^%]+)%/g, (match, name: string) => {
+    const v = process.env[name]
+    return typeof v === 'string' && v.length > 0 ? v : match
+  })
+}
+
 async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> {
   if (process.platform === 'darwin') {
     // Prefer a direct read from the bundle's Info.plist + Resources/*.icns —
@@ -96,7 +114,162 @@ async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> 
     if (direct && !direct.isEmpty()) return direct
     return nativeImage.createThumbnailFromPath(exePath, { width: 64, height: 64 })
   }
+
+  // Raster image paths (UWP logos, .lnk explicit icon, .ico files): load
+  // directly and resize to the tile size. `app.getFileIcon` on these would
+  // just return the generic file-type shell icon.
+  if (DIRECT_IMAGE_EXTENSIONS.test(exePath)) {
+    const img = nativeImage.createFromPath(exePath)
+    if (!img.isEmpty()) {
+      return img.resize({ width: 32, height: 32, quality: 'best' })
+    }
+    // Fall through to getFileIcon in case the path existed but the image
+    // decoder choked on the file — `getFileIcon` at least returns the
+    // filetype glyph in that case.
+  }
+
+  // Windows .lnk: `app.getFileIcon` on a shortcut often returns the generic
+  // "shortcut" overlay or an empty image rather than the target's real icon.
+  // We ask Windows for the shortcut's declared `icon`/`target` paths via
+  // `shell.readShortcutLink` and try each in turn across the three icon
+  // sizes Electron supports (some paths return an image at 'large' even
+  // when 'normal' is empty — SHGetFileInfo's cache can be sparse).
+  // Classic failure mode is an MSI-installed `.lnk` whose icon resource
+  // lives under `C:\Windows\Installer\{GUID}\Foo.exe`; when that path is
+  // unreadable we fall back to the real `target` under `Program Files`.
+  if (process.platform === 'win32' && exePath.toLowerCase().endsWith('.lnk')) {
+    const debug = /adguard/i.test(path.basename(exePath))
+    const logDebug = (...args: unknown[]): void => {
+      if (debug) console.log('[icon-cache][lnk-debug]', path.basename(exePath), ...args)
+    }
+
+    let info: ShortcutDetails | null = null
+    try {
+      info = shell.readShortcutLink(exePath)
+      logDebug('readShortcutLink OK', info)
+    } catch (err) {
+      // PIDL-only shortcuts (Control Panel, Run, Windows Media Player
+      // Legacy, some reparse-point-based items) aren't representable as
+      // `IShellLinkW::GetPath`-resolvable data, so Electron's parser
+      // bails. SHGetFileInfo on the .lnk path itself can still produce
+      // the real icon, so we just fall through to that below.
+      logDebug('readShortcutLink threw', err)
+    }
+
+    if (info) {
+      // Expand `%SYSTEMROOT%`, `%PROGRAMFILES%`, etc. — Electron hands back
+      // the raw `IconLocation` string as stored in the .lnk, and many
+      // shell-provided shortcuts (File Explorer, Settings, Control Panel
+      // applets) use unexpanded env-var paths like `%windir%\explorer.exe`.
+      const iconPath = info.icon ? expandWinEnv(info.icon) : ''
+      const targetPath = info.target ? expandWinEnv(info.target) : ''
+
+      const candidates: Array<{ path: string; iconIndex: number }> = []
+      if (iconPath.length > 0) {
+        candidates.push({ path: iconPath, iconIndex: info.iconIndex ?? 0 })
+      }
+      // PIDL-based shortcuts (File Explorer, This PC, Recycle Bin) leave
+      // `target` empty because the target is a shell namespace item, not a
+      // filesystem path. `info.icon` carries the real icon source — nothing
+      // to add as a second candidate.
+      if (targetPath.length > 0 && targetPath !== iconPath) {
+        candidates.push({ path: targetPath, iconIndex: 0 })
+      }
+      logDebug('candidates', candidates)
+
+      for (const { path: candidate, iconIndex } of candidates) {
+        if (DIRECT_IMAGE_EXTENSIONS.test(candidate)) {
+          const img = nativeImage.createFromPath(candidate)
+          logDebug('createFromPath', candidate, { empty: img.isEmpty() })
+          if (!img.isEmpty()) return img.resize({ width: 32, height: 32, quality: 'best' })
+          continue
+        }
+        // Native `ExtractIconExW` goes straight to the icon resource
+        // at the requested index, bypassing SHGetFileInfo's shell cache
+        // which is lossy / returns a generic file-type glyph for many
+        // installer-shipped icons (AdGuard, AdGuard VPN, …). Try it first
+        // so branded icons show up as themselves rather than as the
+        // generic cog. Falls back to Electron's shell-routed variant if
+        // the resource can't be extracted directly.
+        const nativeImg = loadNativeFileIcon(candidate, iconIndex)
+        logDebug('nativeExtract', candidate, `idx=${iconIndex}`, {
+          empty: nativeImg == null || nativeImg.isEmpty(),
+          size: nativeImg?.getSize()
+        })
+        if (nativeImg && !nativeImg.isEmpty()) return nativeImg
+        const img = await tryGetFileIconMultiSize(candidate)
+        logDebug('getFileIcon', candidate, {
+          empty: img == null || img.isEmpty(),
+          size: img?.getSize()
+        })
+        if (img && !img.isEmpty()) return img
+      }
+    }
+
+    // Last-ditch fallbacks, also used by the PIDL-only shortcuts that
+    // bypassed the block above: try the shell on the .lnk, then the
+    // native extractor. These often succeed where per-candidate attempts
+    // fail because Windows does the full IShellLink resolution internally.
+    const lnkImg = await tryGetFileIconMultiSize(exePath)
+    logDebug('getFileIcon(lnk)', { empty: lnkImg == null || lnkImg.isEmpty() })
+    if (lnkImg && !lnkImg.isEmpty()) return lnkImg
+
+    const nativeLnkImg = loadNativeFileIcon(exePath, 0)
+    logDebug('nativeExtract(lnk)', { empty: nativeLnkImg == null || nativeLnkImg.isEmpty() })
+    if (nativeLnkImg && !nativeLnkImg.isEmpty()) return nativeLnkImg
+
+    // Still nothing — diagnostic dump so triage can happen from terminal.
+    console.warn('[icon-cache] .lnk resolved to empty icon', { lnk: exePath, info })
+  }
+
   return app.getFileIcon(exePath, { size: 'normal' })
+}
+
+/**
+ * Windows-only helper that walks the three `app.getFileIcon` sizes in
+ * preference order. Some installer-shipped icons come back empty at
+ * `size: 'normal'` but render at `'large'` or `'small'` — probably
+ * SHGetFileInfo's per-size icon cache being sparse for freshly-installed
+ * apps. Returns the first non-empty image, resized to our tile dimension
+ * so the caller doesn't have to care.
+ */
+async function tryGetFileIconMultiSize(p: string): Promise<Electron.NativeImage | null> {
+  for (const size of ['normal', 'large', 'small'] as const) {
+    try {
+      const img = await app.getFileIcon(p, { size })
+      if (!img.isEmpty()) {
+        return size === 'normal' ? img : img.resize({ width: 32, height: 32, quality: 'best' })
+      }
+    } catch {
+      // continue to next size
+    }
+  }
+  return null
+}
+
+/**
+ * Native `ExtractIconExW`-backed extractor. Catches the case where the
+ * file has a real icon resource but `app.getFileIcon`'s shell cache is
+ * empty (installer-shipped MSI shortcuts like AdGuard).
+ */
+function loadNativeFileIcon(p: string, iconIndex: number): Electron.NativeImage | null {
+  try {
+    const raw = nativeGetFileIcon(p, iconIndex)
+    if (!raw) return null
+    const img = nativeImage.createFromBitmap(raw.bgra, {
+      width: raw.width,
+      height: raw.height
+    })
+    if (img.isEmpty()) return null
+    // Resize for the 32 px tile — `hicon_to_bgra` returns whatever the
+    // source HICON's cursor size was (typically 32×32, but large icons
+    // can be 48×48 or higher).
+    if (raw.width === 32 && raw.height === 32) return img
+    return img.resize({ width: 32, height: 32, quality: 'best' })
+  } catch (err) {
+    console.warn(`[icon-cache] native getFileIcon(${p}) threw:`, err)
+    return null
+  }
 }
 
 /**

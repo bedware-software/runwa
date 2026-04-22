@@ -649,6 +649,65 @@ pub fn get_window_icon(id: &str) -> napi::Result<Option<WindowIcon>> {
   }
 }
 
+/// Extract the icon at `icon_index` from a file on disk (.exe / .dll /
+/// .ico / .lnk). Uses `ExtractIconExW`, the same API Explorer-class
+/// consumers use for shortcut `IconLocation` resolution. Returns None if
+/// the path doesn't expose an icon at that index — callers on the TS
+/// side then fall through to their lucide fallback.
+///
+/// Why this exists alongside Electron's `app.getFileIcon`: the Electron
+/// path routes through `SHGetFileInfo` whose per-size icon cache is
+/// sparse for installer-shipped shortcuts (AdGuard, and similar
+/// MSI-packaged apps). `ExtractIconExW` pulls the resource directly from
+/// the file, bypassing that cache entirely.
+pub fn get_file_icon(path: &str, icon_index: i32) -> napi::Result<Option<WindowIcon>> {
+  use windows::core::PCWSTR;
+  use windows::Win32::UI::Shell::ExtractIconExW;
+  use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+
+  let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+  unsafe {
+    let mut large: [HICON; 1] = [HICON::default()];
+    let mut small: [HICON; 1] = [HICON::default()];
+    let count = ExtractIconExW(
+      PCWSTR(wide.as_ptr()),
+      icon_index,
+      Some(large.as_mut_ptr()),
+      Some(small.as_mut_ptr()),
+      1,
+    );
+
+    // `0xFFFFFFFF` signals "no icons" and anything less than 1 means none
+    // were extracted for our slot. Check the HICONs themselves because
+    // ExtractIconExW can return a non-zero count while still leaving the
+    // large slot null for files that only have small-size icons.
+    let hicon = if count >= 1 && !large[0].is_invalid() {
+      large[0]
+    } else if !small[0].is_invalid() {
+      small[0]
+    } else {
+      // Clean up whatever did come back (unlikely but cheap).
+      if !large[0].is_invalid() {
+        let _ = DestroyIcon(large[0]);
+      }
+      if !small[0].is_invalid() {
+        let _ = DestroyIcon(small[0]);
+      }
+      return Ok(None);
+    };
+
+    // We own HICONs handed back by ExtractIconExW and MUST destroy them —
+    // unlike `find_window_icon`'s WM_GETICON path which borrows the
+    // taskbar icon from the target window.
+    let result = hicon_to_bgra(hicon);
+    let _ = DestroyIcon(large[0]);
+    if !small[0].is_invalid() && small[0] != large[0] {
+      let _ = DestroyIcon(small[0]);
+    }
+    result
+  }
+}
+
 /// Walk icon sources in descending quality until we get a non-null HICON.
 ///
 /// We do not own the returned HICON — `WM_GETICON` and `GetClassLongPtr`

@@ -34,6 +34,12 @@ interface PaletteState {
   onPaletteShow: (initialModuleId?: ModuleId) => void
   /** Clear the scoped-module state and return to the home-screen picker. */
   unscope: () => void
+  /**
+   * Re-run the current search immediately (no debounce) — used by Ctrl+R
+   * in the app-search scope after the rescan IPC has invalidated the main
+   * process's enumeration cache.
+   */
+  refresh: () => void
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -112,6 +118,23 @@ export const usePaletteStore = create<PaletteState>()(
       } catch (err) {
         console.warn('[palette] execute failed', err)
       }
+    },
+
+    refresh: () => {
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer)
+        debounceTimer = null
+      }
+      // Clear items so ResultsList flips to its loading state — without
+      // this the stale results stay on screen until the refreshed search
+      // lands, which hides the rescan's progress from the user. Mirrors
+      // the onPaletteShow / unscope reset pattern.
+      set((s) => {
+        s.items = []
+        s.selectedIndex = 0
+        s.isLoading = true
+      })
+      void runSearch(get().query, get, set)
     },
 
     unscope: () => {

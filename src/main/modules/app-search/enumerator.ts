@@ -7,12 +7,18 @@ import path from 'path'
  * A launchable installed app. One of `filePath` or `uwpAppId` is set:
  *  - filePath: classic shortcut / exe / .app bundle — launch via shell.openPath
  *  - uwpAppId: AUMID for UWP/Store apps — launch via `explorer.exe shell:AppsFolder\<AUMID>`
+ *
+ * `iconPath`, when set, overrides the icon source. Used for UWP entries
+ * where the launch handle (AUMID) isn't a filesystem path `app.getFileIcon`
+ * can read — we resolve the package's `Square44x44Logo.*.png` at enumerate
+ * time and feed that directly to the icon cache.
  */
 export interface AppEntry {
   id: string
   name: string
   filePath?: string
   uwpAppId?: string
+  iconPath?: string
   source: 'start-menu' | 'uwp' | 'desktop' | 'applications' | 'custom'
 }
 
@@ -120,16 +126,18 @@ async function walkWindowsDirs(
 }
 
 /**
- * Enumerate Store/UWP apps via `Get-StartApps`. The cmdlet returns every app
- * that appears in the user's Start Menu, including Win32 shortcuts — we
- * filter to AUMIDs (contain `!`) so classic apps come from the Start Menu
- * walk (which gives us usable .lnk paths for icon extraction) and this path
- * contributes only the UWP/AppX entries that wouldn't otherwise be found.
+ * Enumerate Store/UWP apps via `Get-StartApps` + `Get-AppxPackage`, joined
+ * on the Package Family Name portion of the AUMID. For each entry we also
+ * resolve a logo file — Windows ships the real icon as per-scale PNGs
+ * inside the package's `Assets` folder (e.g.
+ * `Square44x44Logo.targetsize-32.png`); we pick the best match so
+ * `nativeImage.createFromPath` has something to load on the TS side.
+ *
+ * One PowerShell round trip for everything — `Get-AppxPackage` alone takes
+ * ~1s on a typical box, so we pay that once per enumeration cache window.
  */
 async function enumerateWindowsUwp(): Promise<AppEntry[]> {
-  const json = await runPowerShell(
-    'Get-StartApps | ConvertTo-Json -Compress'
-  )
+  const json = await runPowerShell(UWP_ENUMERATION_SCRIPT)
   if (!json) return []
   let parsed: unknown
   try {
@@ -137,9 +145,10 @@ async function enumerateWindowsUwp(): Promise<AppEntry[]> {
   } catch {
     return []
   }
-  const rows: Array<{ Name?: string; AppID?: string }> = Array.isArray(parsed)
-    ? (parsed as Array<{ Name?: string; AppID?: string }>)
-    : [parsed as { Name?: string; AppID?: string }]
+  const rows: Array<{ Name?: string; AppID?: string; Logo?: string | null }> =
+    Array.isArray(parsed)
+      ? (parsed as Array<{ Name?: string; AppID?: string; Logo?: string | null }>)
+      : [parsed as { Name?: string; AppID?: string; Logo?: string | null }]
   const out: AppEntry[] = []
   for (const row of rows) {
     if (!row?.Name || !row?.AppID) continue
@@ -152,11 +161,92 @@ async function enumerateWindowsUwp(): Promise<AppEntry[]> {
       id: `uwp:${row.AppID}`,
       name: row.Name,
       uwpAppId: row.AppID,
+      iconPath: row.Logo ?? undefined,
       source: 'uwp'
     })
   }
   return out
 }
+
+/**
+ * Joins Start-Menu-visible AUMIDs with `Get-AppxPackage` install locations,
+ * reads each package's `AppxManifest.xml` to find the per-Application
+ * `Square44x44Logo` attribute (the base filename — something like
+ * `Assets\CalculatorAppList.png`), then picks the best scale variant from
+ * the Assets folder. Regex-on-XML is fine here: we only pull one well-known
+ * attribute out of a doc with a stable shape, and the namespace-aware
+ * XPath alternative is uglier than the worst-case regex noise.
+ *
+ * Scale preference: targetsize-32 (matches our 32 px tile exactly), then
+ * targetsize-48, then scale-100 / scale-200 / targetsize-24, finally any
+ * variant that isn't `contrast-*` or `altform-*` (high-contrast /
+ * unplated icons skew weird in a normal palette row).
+ */
+const UWP_ENUMERATION_SCRIPT = `
+$ErrorActionPreference = 'SilentlyContinue'
+$apps = Get-StartApps | Where-Object { $_.AppID -like '*!*' }
+
+$installLocations = @{}
+foreach ($p in Get-AppxPackage) {
+    if ($p.InstallLocation) {
+        $installLocations[[string]$p.PackageFamilyName] = [string]$p.InstallLocation
+    }
+}
+
+function Get-LogoBase($installLocation, $appIdPart) {
+    $manifestPath = Join-Path $installLocation 'AppxManifest.xml'
+    if (-not (Test-Path -LiteralPath $manifestPath)) { return $null }
+    $content = Get-Content -LiteralPath $manifestPath -Raw
+    if (-not $content) { return $null }
+    # Prefer the block for this specific Application; fall back to the first
+    # one if we can't find a match (single-app packages, weird Id casing, …).
+    # Single-quoted PS literals keep the regex readable — no backslash-soup.
+    $escaped = [regex]::Escape($appIdPart)
+    $appPattern = '<Application\\s[^>]*Id="' + $escaped + '"[^>]*>.*?</Application>'
+    $appBlock = [regex]::Match($content, $appPattern, 'Singleline')
+    if (-not $appBlock.Success) {
+        $appBlock = [regex]::Match($content, '<Application\\s[^>]*>.*?</Application>', 'Singleline')
+    }
+    if (-not $appBlock.Success) { return $null }
+    $logoMatch = [regex]::Match($appBlock.Value, 'Square44x44Logo="([^"]+)"')
+    if ($logoMatch.Success) { return $logoMatch.Groups[1].Value }
+    return $null
+}
+
+function Resolve-Logo($installLocation, $appIdPart) {
+    if (-not $installLocation) { return $null }
+    $logoBase = Get-LogoBase $installLocation $appIdPart
+    if (-not $logoBase) { $logoBase = 'Assets\\Square44x44Logo.png' }
+    $logoAbs = Join-Path $installLocation $logoBase
+    $logoDir = Split-Path -Parent $logoAbs
+    $logoStem = [System.IO.Path]::GetFileNameWithoutExtension($logoAbs)
+    if (-not (Test-Path -LiteralPath $logoDir)) { return $null }
+    $candidates = Get-ChildItem -LiteralPath $logoDir -Filter "$logoStem*" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch 'contrast' -and $_.Name -notmatch 'altform' }
+    if (-not $candidates) { return $null }
+    # Match against "targetsize-32." etc. — the literal dot in filenames makes
+    # '.' safe here; no Assets/-level collisions expected.
+    foreach ($pattern in @('targetsize-32.', 'targetsize-48.', 'scale-100.', 'scale-200.', 'targetsize-24.', 'targetsize-96.')) {
+        $m = $candidates | Where-Object { $_.Name -match $pattern } | Select-Object -First 1
+        if ($m) { return $m.FullName }
+    }
+    return ($candidates | Select-Object -First 1).FullName
+}
+
+$results = foreach ($app in $apps) {
+    $parts = $app.AppID.Split('!')
+    $pfn = $parts[0]
+    $appIdPart = $parts[1]
+    $installLocation = $installLocations[$pfn]
+    $logo = Resolve-Logo $installLocation $appIdPart
+    [PSCustomObject]@{
+        Name = $app.Name
+        AppID = $app.AppID
+        Logo = $logo
+    }
+}
+$results | ConvertTo-Json -Compress -Depth 3
+`.trim()
 
 function runPowerShell(command: string): Promise<string | null> {
   return new Promise((resolve) => {
@@ -247,11 +337,19 @@ async function enumerateCustomPaths(paths: string[]): Promise<AppEntry[]> {
 }
 
 // ─── Public entry point + cache ────────────────────────────────────────────
-
-const CACHE_TTL_MS = 60_000
+//
+// Single-shot cache: the first `enumerateApps` call pays the enumeration
+// cost (Get-AppxPackage is the expensive bit, ~1s), every subsequent call
+// returns the memoised result. The cache is invalidated in exactly two
+// ways:
+//   1. The toggle set changes (Start Menu / UWP / Desktop / custom paths)
+//      — a different cache key forces a fresh walk automatically.
+//   2. The user presses Ctrl+R inside the app-search scope — the module's
+//      onAction handler calls `invalidateAppCache()` explicitly.
+// No time-based TTL: installed apps don't change often, and silently
+// re-enumerating every minute is both expensive and unhelpful.
 
 interface CacheEntry {
-  t: number
   apps: AppEntry[]
 }
 
@@ -268,8 +366,7 @@ function cacheKey(opts: EnumerateOptions): string {
 
 export async function enumerateApps(opts: EnumerateOptions): Promise<AppEntry[]> {
   const key = cacheKey(opts)
-  const now = Date.now()
-  if (cache && cache.key === key && now - cache.entry.t < CACHE_TTL_MS) {
+  if (cache && cache.key === key) {
     return cache.entry.apps
   }
 
@@ -301,7 +398,7 @@ export async function enumerateApps(opts: EnumerateOptions): Promise<AppEntry[]>
   const deduped = dedupeByName(collected)
   deduped.sort((a, b) => a.name.localeCompare(b.name))
 
-  cache = { key, entry: { t: now, apps: deduped } }
+  cache = { key, entry: { apps: deduped } }
   return deduped
 }
 
