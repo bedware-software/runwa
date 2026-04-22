@@ -29,16 +29,16 @@ export function Kbd({
         // font no vertical compensation. The 4/2 split pulls the
         // glyph down to the geometric centre of the chip.
         //
-        // `min-w-[16px]` = chip height (4 + 10 font + 2 = 16 px) so
+        // `min-w-[17px]` = chip height (4 + 11 font + 2 = 17 px) so
         // single-character chips render as squares; multi-character
         // chips ("Ctrl", "Esc") outgrow the min-width and become
         // rectangles naturally.
-        'inline-flex items-center justify-center pt-[4px] pb-[2px] px-[3px] rounded-md min-w-[16px]',
+        'inline-flex items-center justify-center pt-[4px] pb-[2px] px-[3px] rounded-md min-w-[17px]',
         // Popover bg sits slightly above the toolbar for surface
-        // contrast. Regular weight keeps the chip quiet; the 10 px
-        // font is one step below the surrounding hint label so the
-        // chip feels subordinate rather than shouting.
-        'bg-popover text-foreground font-mono font-normal text-[10px] leading-none',
+        // contrast. Regular weight keeps the chip quiet; 11 px font
+        // is one step below the 12 px hint label so the chip feels
+        // subordinate rather than shouting.
+        'bg-popover text-foreground font-mono font-normal text-[11px] leading-none',
         // Visible border + a whisper of even glow (no vertical
         // offset) — the glow lifts the chip just enough to read as a
         // discrete surface without the bottom-heavy 3D-button look.

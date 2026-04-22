@@ -223,15 +223,15 @@ export function PaletteApp() {
         onOpenContextMenu={openContextMenuForRow}
       />
 
-      <div className="h-10 px-2 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
+      <div className="h-10 px-2 flex items-center justify-between border-t border-border bg-toolbar text-[12px] font-medium text-muted-foreground shrink-0">
         <div className="flex items-center gap-1">
           <FooterHint
             label="Navigate"
-            keys={<Kbd><ArrowUpDown size={11} strokeWidth={2.5} /></Kbd>}
+            keys={<Kbd><ArrowUpDown size={12} strokeWidth={1.5} /></Kbd>}
           />
           <FooterHint
             label="Select"
-            keys={<Kbd><CornerDownLeft size={11} strokeWidth={2.5} /></Kbd>}
+            keys={<Kbd><CornerDownLeft size={12} strokeWidth={1.5} /></Kbd>}
           />
           {canOpenMenu && (
             <FooterHint label="Context menu" keys={<Hotkey value="Ctrl+K" />} />
@@ -245,7 +245,7 @@ export function PaletteApp() {
           />
         </div>
         <FooterHint
-          leading={<SettingsIcon size={11} />}
+          leading={<SettingsIcon size={12} strokeWidth={1.5} />}
           label="Settings"
           keys={<Hotkey value={openSettingsHotkey} />}
           onClick={() => void window.electronAPI.openSettings()}
