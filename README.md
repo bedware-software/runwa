@@ -22,8 +22,6 @@ A cross-platform command palette launcher inspired by [PowerToys Command Palette
 - **Hotkey system** — global activation chord (default `Super+Alt+Space`) plus per-module direct-launch hotkeys.
 - **Module registry** — prefix routing, request cancellation, firewalled providers.
 
-**Roadmap:** Apps launcher · Files/folders search · Calculator · Bookmarks · Clipboard history · Time/date · System commands · Web search · Windows Services · Terminal profiles · Registry · WinGet lookup · Windows Settings pages · Dock
-
 ## Tech stack
 
 Electron 41 · React 19 · TypeScript (strict) · Vite · Tailwind CSS v4 · Zustand · Fuse.js · Rust (napi-rs native addon)
