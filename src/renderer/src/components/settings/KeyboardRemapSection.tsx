@@ -216,7 +216,7 @@ function HoldBlock({ trigger }: { trigger: KeyboardRemapTriggerView }) {
                 <ActionDisplay result={c.result} />
                 {c.os && (
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {c.os}
+                    {`${c.os}-only`}
                   </span>
                 )}
               </div>
@@ -235,11 +235,13 @@ function HoldBlock({ trigger }: { trigger: KeyboardRemapTriggerView }) {
 
 /**
  * Right-hand side of a rule: either a hotkey combo (chips) or an action
- * description like "→ Desktop 3" (plain text — not a keystroke, so
- * chipping it doesn't make sense).
+ * description like "switch to Desktop 3" (plain text — not a keystroke,
+ * so chipping it doesn't make sense). Hotkey strings are `+`-joined
+ * token names with no spaces (`Ctrl+Alt+S`, `F1`), so presence of any
+ * whitespace flags the value as action text.
  */
 function ActionDisplay({ result }: { result: string }) {
-  const isAction = result.startsWith('→')
+  const isAction = /\s/.test(result)
   if (isAction) {
     return <span className="text-foreground">{result}</span>
   }

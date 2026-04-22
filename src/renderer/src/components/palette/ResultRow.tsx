@@ -8,6 +8,7 @@ interface Props {
   isSelected: boolean
   onMouseEnter?: () => void
   onClick?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
 /**
@@ -28,7 +29,7 @@ function isImageUrl(hint: string | undefined): hint is string {
   return !!hint && hint.startsWith('data:')
 }
 
-export function ResultRow({ item, isSelected, onMouseEnter, onClick }: Props) {
+export function ResultRow({ item, isSelected, onMouseEnter, onClick, onContextMenu }: Props) {
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
@@ -36,6 +37,7 @@ export function ResultRow({ item, isSelected, onMouseEnter, onClick }: Props) {
     <div
       onMouseEnter={onMouseEnter}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={cn(
         'flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
         isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
@@ -67,7 +69,22 @@ export function ResultRow({ item, isSelected, onMouseEnter, onClick }: Props) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{item.title}</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-medium truncate">{item.title}</span>
+          {item.alias && (
+            <kbd
+              className={cn(
+                'shrink-0 px-1.5 py-0.5 rounded font-mono text-[11px] font-medium border',
+                isSelected
+                  ? 'border-accent-foreground/30 text-accent-foreground bg-accent-foreground/10'
+                  : 'border-border text-muted-foreground bg-secondary'
+              )}
+              title={`Alias: ${item.alias}`}
+            >
+              {item.alias}
+            </kbd>
+          )}
+        </div>
         {item.subtitle && (
           <div
             className={cn(

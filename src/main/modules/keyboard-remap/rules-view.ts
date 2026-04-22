@@ -132,10 +132,12 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
 
     const resultStr = formatRuleAction(e, to)
 
-    // `_default` is kept as a regular combo row so the UI mirrors the
-    // YAML file's order and shape — no hidden "fallback: X" summary, just
-    // the same list the user wrote.
-    const isDefault = triggerKey.toLowerCase() === '_default'
+    // The fallback-combo sentinel (`any`, or the legacy `_default`) is
+    // kept as a regular combo row so the UI mirrors the YAML file's
+    // order and shape — no hidden "fallback: X" summary, just the same
+    // list the user wrote.
+    const triggerKeyLower = triggerKey.toLowerCase()
+    const isDefault = triggerKeyLower === 'any' || triggerKeyLower === '_default'
     const chord = isDefault
       ? '…'
       : formatTokenList([...modifierPrefix, triggerKey])
@@ -157,9 +159,9 @@ function formatRuleAction(
   toHotkey: unknown
 ): string {
   const sw = entry['switch_to_workspace']
-  if (typeof sw === 'number') return `→ Desktop ${sw}`
+  if (typeof sw === 'number') return `switch to Desktop ${sw}`
   const mv = entry['move_to_workspace']
-  if (typeof mv === 'number') return `→ move to Desktop ${mv}`
+  if (typeof mv === 'number') return `move to Desktop ${mv}`
   if (typeof toHotkey === 'string') return formatTokenList([toHotkey])
   if (Array.isArray(toHotkey)) return formatTokenList(toHotkey.map(String))
   return '?'

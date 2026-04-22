@@ -35,7 +35,7 @@
  *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
  *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
  *
- *   A rule with keys: [_default] + to_hotkey: [<modifier>] sets the
+ *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
  *   Exact modifier match wins over the bare form: if both `[1]` and
  *   `[shift, 1]` exist, Space+1 fires the first and Space+Shift+1 fires
@@ -43,19 +43,6 @@
  *   rule if one exists (so `keys: [w]` still fires on Shift+W).
  */
 export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
-# Edit and save; reload from Settings → Modules → Keyboard Remap, no app restart needed.
-#
-# Available tokens (case-insensitive):
-#   modifiers:   ctrl alt shift cmd win  (aliases: control, option/opt, command/meta, super)
-#   letters:     a-z
-#   digits:      0-9
-#   named:       escape(esc) space tab enter(return) delete(backspace) f1-f12
-#   navigation:  left right up down home end pageup(pgup) pagedown(pgdn)
-#   punctuation: literals \` - = [ ] \\ ; ' , . /  (YAML-special ones must be quoted:
-#                keys: [","]  keys: ["\`"]  keys: ["\\\\"]  keys: ["["])
-#                or use word aliases: backtick, minus, equals, lbracket, rbracket,
-#                backslash, semicolon, quote, comma, period, slash.
-#
 # Each on_hold rule carries exactly ONE action:
 #   to_hotkey: [mod, ..., key]      emit this key combo
 #   switch_to_workspace: N          jump to virtual desktop N (1-indexed)
@@ -83,10 +70,6 @@ space:
     - { keys: [","], to_hotkey: [home] }
     - { keys: [.],   to_hotkey: [end] }
 
-    - { os: windows, keys: [q], to_hotkey: [alt, f4] }
-
-    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
-
     - { keys: [1], switch_to_workspace: 1 }
     - { keys: [2], switch_to_workspace: 2 }
     - { keys: [3], switch_to_workspace: 3 }
@@ -97,11 +80,6 @@ space:
     - { keys: [8], switch_to_workspace: 8 }
     - { keys: [9], switch_to_workspace: 9 }
 
-    # Move active window to virtual desktop N and follow.
-    # Windows: native winvd COM API.
-    # macOS: title-bar-drag trick (cursor flashes briefly). Requires
-    # "Switch to Desktop N" shortcuts enabled in System Settings →
-    # Keyboard → Shortcuts → Mission Control.
     - { keys: [shift, 1], move_to_workspace: 1 }
     - { keys: [shift, 2], move_to_workspace: 2 }
     - { keys: [shift, 3], move_to_workspace: 3 }
@@ -112,5 +90,7 @@ space:
     - { keys: [shift, 8], move_to_workspace: 8 }
     - { keys: [shift, 9], move_to_workspace: 9 }
 
-    - { os: macos, keys: [_default], to_hotkey: [cmd] }
+    - { os: windows, keys: [q], to_hotkey: [alt, f4] }
+    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
+    - { os: macos, keys: [any], to_hotkey: [cmd] }
 `

@@ -63,9 +63,20 @@ class ModuleRegistry {
       return
     }
     this.modules.set(id, module)
+    // Seed the direct-launch hotkey from the manifest default on fresh
+    // installs. `ensureModuleDefaults` only writes when the entry is
+    // missing (first registration of this module id), so existing users
+    // keep their bindings — in particular, anyone who deliberately cleared
+    // a hotkey stays cleared instead of having it resurrected on restart.
+    const directLaunchSeed =
+      module.manifest.supportsDirectLaunch &&
+      module.manifest.defaultDirectLaunchHotkey
+        ? { directLaunchHotkey: module.manifest.defaultDirectLaunchHotkey }
+        : {}
     settingsStore.ensureModuleDefaults(id, {
       enabled: module.manifest.defaultEnabled,
-      config: defaultConfigFromManifest(module)
+      config: defaultConfigFromManifest(module),
+      ...directLaunchSeed
     })
   }
 
@@ -91,10 +102,16 @@ class ModuleRegistry {
         ...m.manifest,
         enabled: s.enabled,
         directLaunchHotkey: s.directLaunchHotkey,
-        config: this.buildConfig(m)
+        config: this.buildConfig(m),
+        aliases: { ...(s.aliases ?? {}) }
       })
     }
     return results
+  }
+
+  /** Fresh snapshot of a module's aliases map for SearchContext. */
+  private buildAliases(m: PaletteModule): Record<string, string> {
+    return { ...(this.moduleSettingsCache.get(m.manifest.id)?.aliases ?? {}) }
   }
 
   /**
@@ -165,7 +182,8 @@ class ModuleRegistry {
       let items: PaletteItem[] = []
       try {
         const raw = await scopedModule.search(query, controller.signal, {
-          config: this.buildConfig(scopedModule)
+          config: this.buildConfig(scopedModule),
+          aliases: this.buildAliases(scopedModule)
         })
         items = raw.map<PaletteItem>((it) => ({
           ...it,

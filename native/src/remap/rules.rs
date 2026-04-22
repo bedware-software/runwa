@@ -424,27 +424,31 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 let (mods_tokens, trigger_token) = rule.keys.split_at(rule.keys.len() - 1);
                 let trigger_raw = trigger_token[0].as_str();
 
-                if trigger_raw.eq_ignore_ascii_case("_default") {
+                // The fallback-combo sentinel. `any` is the canonical form;
+                // `_default` is accepted as a legacy alias so existing
+                // user YAMLs keep parsing. Same semantics either way.
+                if trigger_raw.eq_ignore_ascii_case("any")
+                    || trigger_raw.eq_ignore_ascii_case("_default")
+                {
                     if !mods_tokens.is_empty() {
                         return Err(format!(
-                            "rule '{}': [_default] cannot be prefixed with modifiers",
+                            "rule '{}': [any] cannot be prefixed with modifiers",
                             rule.description.as_deref().unwrap_or("<unnamed>"),
                         ));
                     }
-                    // _default only makes sense with to_hotkey = single modifier.
                     let to = rule.to_hotkey.as_deref().ok_or_else(|| {
-                        "rule with keys: [_default] must use `to_hotkey: [<modifier>]`".to_string()
+                        "rule with keys: [any] must use `to_hotkey: [<modifier>]`".to_string()
                     })?;
                     if to.len() != 1 {
                         return Err(format!(
-                            "rule with keys: [_default] must have to_hotkey = a single modifier, got {to:?}"
+                            "rule with keys: [any] must have to_hotkey = a single modifier, got {to:?}"
                         ));
                     }
                     match parse_modifier(to[0].as_str()) {
                         Some(m) => fallback = Some(m),
                         None => {
                             return Err(format!(
-                                "rule with keys: [_default] has unknown modifier '{}'",
+                                "rule with keys: [any] has unknown modifier '{}'",
                                 to[0].as_str()
                             ))
                         }

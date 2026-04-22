@@ -82,10 +82,11 @@ export interface ModuleManifest {
   defaultEnabled: boolean
   supportsDirectLaunch: boolean
   /**
-   * Recommended direct-launch hotkey. Surfaced in the settings UI as the
-   * reset-to-default target; NOT auto-registered on first launch (so we
-   * don't spring surprise global shortcuts on users). Only meaningful
-   * when `supportsDirectLaunch` is true.
+   * Default direct-launch hotkey. Seeded into the stored settings the
+   * first time this module is registered (fresh install only — existing
+   * users keep their current binding, including explicitly-cleared
+   * ones). Also surfaced in the settings UI as the reset-to-default
+   * target. Only meaningful when `supportsDirectLaunch` is true.
    */
   defaultDirectLaunchHotkey?: string
   /** Declarative config schema — the settings UI renders fields from this. */
@@ -97,6 +98,8 @@ export interface ModuleMeta extends ModuleManifest {
   directLaunchHotkey?: string // Electron Accelerator string, e.g. 'Ctrl+Alt+W'
   /** Current values for configFields, merged with defaults. */
   config: Record<string, ModuleConfigValue>
+  /** User-assigned aliases keyed by module-specific stable ids. */
+  aliases: Record<string, string>
 }
 
 export interface PaletteItem {
@@ -115,6 +118,21 @@ export interface PaletteItem {
    * leave it undefined (no stable filesystem target for the user to open).
    */
   revealPath?: string
+  /**
+   * If true, the palette immediately executes this item as soon as the
+   * search result lands — no highlight-and-Enter step. Used by app-search's
+   * "launch immediately on alias" mode: typing the full alias launches
+   * the app without further input. Modules should only set this for
+   * explicit, user-opted-in triggers; a stray `autoExecute: true` on an
+   * unexpected row would feel like the palette's running itself.
+   */
+  autoExecute?: boolean
+  /**
+   * User-assigned alias for this item (app-search only today). Rendered
+   * as a trailing chip in the palette row and can short-circuit search
+   * when matching the typed query — see app-search's `aliasMode` config.
+   */
+  alias?: string
   /** Per-module action discriminator. Re-validated by the owning module on execute. */
   actionKind: string
   /** Opaque payload, owned by the module. Renderer never interprets this. */
@@ -157,6 +175,12 @@ export interface ModuleSettings {
   directLaunchHotkey?: string
   /** Opaque bag of config values keyed by ModuleConfigField.key. */
   config?: Record<string, ModuleConfigValue>
+  /**
+   * Per-item aliases keyed by the module's stable entry id (e.g. app-search
+   * uses `start-menu:<path>` / `uwp:<AUMID>` / etc.). Modules that don't
+   * surface aliases simply leave this empty.
+   */
+  aliases?: Record<string, string>
 }
 
 export interface PaletteSize {
@@ -265,6 +289,15 @@ export interface ElectronAPI {
   settingsSetModuleConfig: (
     moduleId: ModuleId,
     configPatch: Record<string, ModuleConfigValue>
+  ) => Promise<Settings>
+  /**
+   * Set or clear an alias on a module's item. Empty/null alias removes
+   * the entry; non-empty overwrites. Trimmed / lowercased server-side.
+   */
+  settingsSetModuleAlias: (
+    moduleId: ModuleId,
+    itemId: string,
+    alias: string | null
   ) => Promise<Settings>
 
   // Palette window control

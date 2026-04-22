@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Tag } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -153,5 +153,22 @@ export function revealAction(path: string): ContextMenuAction {
     onActivate: () => {
       void window.electronAPI.revealInFolder(path)
     }
+  }
+}
+
+/**
+ * "Set alias…" action — caller owns the modal opening. We expose a
+ * labelled variant so the menu reads "Change alias" once one already
+ * exists (common expectation in palette / launcher apps).
+ */
+export function setAliasAction(
+  hasExisting: boolean,
+  openModal: () => void
+): ContextMenuAction {
+  return {
+    id: 'set-alias',
+    label: hasExisting ? 'Change alias…' : 'Set alias…',
+    Icon: Tag,
+    onActivate: openModal
   }
 }

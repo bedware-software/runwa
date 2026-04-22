@@ -6,7 +6,8 @@ import { keyEventToAccelerator } from '@/lib/hotkey'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
-import { ContextMenu, revealAction } from './ContextMenu'
+import { ContextMenu, revealAction, setAliasAction } from './ContextMenu'
+import { AliasInputModal } from './AliasInputModal'
 import { Kbd, Hotkey } from '../ui/Kbd'
 
 export function PaletteApp() {
@@ -23,6 +24,7 @@ export function PaletteApp() {
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
   const unscope = usePaletteStore((s) => s.unscope)
   const refresh = usePaletteStore((s) => s.refresh)
+  const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
 
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
@@ -35,17 +37,46 @@ export function PaletteApp() {
 
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Ctrl+K context-menu open state. Local to this component because the
-  // menu is purely UI — no other layer cares whether it's open.
+  // Ctrl+K context-menu open state + alias-input modal state. Both are
+  // pure UI; no other layer observes them.
   const [menuOpen, setMenuOpen] = useState(false)
+  const [aliasModalOpen, setAliasModalOpen] = useState(false)
+
+  const setModuleAlias = useSettingsStore((s) => s.setModuleAlias)
 
   const selectedItem = items[selectedIndex]
-  const contextActions = useMemo(
-    () =>
-      selectedItem?.revealPath ? [revealAction(selectedItem.revealPath)] : [],
-    [selectedItem?.revealPath]
-  )
+  // Alias actions are app-search-specific today — the module owns the
+  // stable entry id schema. Other modules can join the party by surfacing
+  // their own module id + alias-capable rows.
+  const canSetAlias = selectedItem?.moduleId === 'app-search'
+  const contextActions = useMemo(() => {
+    const actions = []
+    if (selectedItem?.revealPath) actions.push(revealAction(selectedItem.revealPath))
+    if (canSetAlias) {
+      actions.push(
+        setAliasAction(Boolean(selectedItem?.alias), () => {
+          setMenuOpen(false)
+          setAliasModalOpen(true)
+        })
+      )
+    }
+    return actions
+  }, [selectedItem?.revealPath, selectedItem?.alias, canSetAlias])
   const canOpenMenu = contextActions.length > 0
+
+  const openContextMenuForRow = (index: number): void => {
+    // Right-click should both "select" the row and open the menu; callers
+    // that click on a row without any applicable action get nothing
+    // (avoids an instant open-close flicker from the canOpenMenu effect
+    // below). app-search rows always have at least the "Set alias…"
+    // action, so the menu opens even for UWP entries without revealPath.
+    const target = items[index]
+    const hasAction =
+      target && (target.revealPath || target.moduleId === 'app-search')
+    if (!hasAction) return
+    setSelectedIndex(index)
+    setMenuOpen(true)
+  }
 
   // Close the menu if the selection moves to a row without reveal actions
   // (e.g. user navigated to a UWP entry in app-search).
@@ -89,12 +120,12 @@ export function PaletteApp() {
   }, [isHydrated, setQuery])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    // While the context menu is open it owns the keyboard — its own
-    // document-level capture handler runs before this one and stops
-    // propagation. The early-return here is belt-and-suspenders so a
-    // React synthetic event can't fall through and re-trigger select/
-    // dismiss logic.
-    if (menuOpen) return
+    // While the context menu or the alias-input modal is open, they own
+    // the keyboard — their own document-level capture handlers run first
+    // and stop propagation for the keys they care about. The early-return
+    // here is belt-and-suspenders so arrow/enter/escape keys don't
+    // double-fire palette-level behaviour while the overlay is up.
+    if (menuOpen || aliasModalOpen) return
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && canOpenMenu) {
       e.preventDefault()
@@ -184,7 +215,12 @@ export function PaletteApp() {
         {activeMod && <ModeBadge name={activeMod.name} />}
       </div>
 
-      <ResultsList items={items} selectedIndex={selectedIndex} isLoading={isLoading} />
+      <ResultsList
+        items={items}
+        selectedIndex={selectedIndex}
+        isLoading={isLoading}
+        onOpenContextMenu={openContextMenuForRow}
+      />
 
       <div className="h-10 px-3 flex items-center justify-between border-t border-border bg-toolbar text-[11px] font-medium text-muted-foreground shrink-0">
         <div className="flex items-center gap-3">
@@ -224,6 +260,24 @@ export function PaletteApp() {
         onClose={() => setMenuOpen(false)}
         actions={contextActions}
       />
+
+      {selectedItem && selectedItem.moduleId === 'app-search' && (
+        <AliasInputModal
+          open={aliasModalOpen}
+          itemTitle={selectedItem.title}
+          initialValue={selectedItem.alias ?? ''}
+          onClose={() => setAliasModalOpen(false)}
+          onSave={(alias) => {
+            // Main's `patchModuleAlias` handles empty-string = clear, so
+            // we can hand the raw input straight through. refresh() so
+            // the alias chip renders (or disappears) immediately.
+            void setModuleAlias('app-search', selectedItem.id, alias || null).then(
+              () => refresh()
+            )
+            setAliasModalOpen(false)
+          }}
+        />
+      )}
     </div>
   )
 }

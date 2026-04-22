@@ -91,6 +91,37 @@ class SettingsStore extends EventEmitter {
   }
 
   /**
+   * Set or clear a single alias on a module. `alias` is trimmed +
+   * lowercased; passing null (or an empty string after trimming) removes
+   * the entry entirely so the stored map stays compact.
+   */
+  patchModuleAlias(moduleId: ModuleId, itemId: string, alias: string | null): Settings {
+    const s = this.ensureInit()
+    const current = this.get()
+    const currentMod: ModuleSettings = current.modules[moduleId] ?? { enabled: false }
+    const aliases = { ...(currentMod.aliases ?? {}) }
+    const normalised = typeof alias === 'string' ? alias.trim().toLowerCase() : ''
+    if (normalised.length === 0) {
+      delete aliases[itemId]
+    } else {
+      aliases[itemId] = normalised
+    }
+    const next: Settings = {
+      ...current,
+      modules: {
+        ...current.modules,
+        [moduleId]: {
+          ...currentMod,
+          aliases
+        }
+      }
+    }
+    s.store = next
+    this.emit('change', next)
+    return next
+  }
+
+  /**
    * Called by each module on registration. Seeds the module's entry if
    * missing, and back-fills any config keys declared on the manifest but not
    * yet stored (so upgrading runwa that adds a new config field picks up the

@@ -42,6 +42,12 @@ const api: ElectronAPI = {
     configPatch: Record<string, ModuleConfigValue>
   ): Promise<Settings> =>
     ipcRenderer.invoke('settings:setModuleConfig', moduleId, configPatch),
+  settingsSetModuleAlias: (
+    moduleId: ModuleId,
+    itemId: string,
+    alias: string | null
+  ): Promise<Settings> =>
+    ipcRenderer.invoke('settings:setModuleAlias', moduleId, itemId, alias),
 
   // Palette / settings window control
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),

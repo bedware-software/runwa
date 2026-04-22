@@ -26,6 +26,11 @@ interface SettingsState {
     moduleId: ModuleId,
     configPatch: Record<string, ModuleConfigValue>
   ) => Promise<void>
+  setModuleAlias: (
+    moduleId: ModuleId,
+    itemId: string,
+    alias: string | null
+  ) => Promise<void>
   applyServerSettings: (settings: Settings) => void
 }
 
@@ -98,6 +103,32 @@ export const useSettingsStore = create<SettingsState>()(
         if (idx >= 0) {
           s.modules[idx].directLaunchHotkey = hotkey
         }
+      })
+    },
+
+    setModuleAlias: async (
+      moduleId: ModuleId,
+      itemId: string,
+      alias: string | null
+    ) => {
+      const updated = await window.electronAPI.settingsSetModuleAlias(
+        moduleId,
+        itemId,
+        alias
+      )
+      set((s) => {
+        s.settings = updated
+        const idx = s.modules.findIndex((m) => m.id === moduleId)
+        if (idx < 0) return
+        const mod = s.modules[idx]
+        const aliases = { ...(mod.aliases ?? {}) }
+        const normalised = typeof alias === 'string' ? alias.trim().toLowerCase() : ''
+        if (normalised.length === 0) {
+          delete aliases[itemId]
+        } else {
+          aliases[itemId] = normalised
+        }
+        mod.aliases = aliases
       })
     },
 

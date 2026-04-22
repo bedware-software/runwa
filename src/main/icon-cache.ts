@@ -1,5 +1,5 @@
 import { app, nativeImage, shell, type ShortcutDetails } from 'electron'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import fsPromises from 'fs/promises'
 import path from 'path'
 import { promisify } from 'util'
@@ -149,11 +149,14 @@ async function resolveIconImage(exePath: string): Promise<Electron.NativeImage> 
       logDebug('readShortcutLink OK', info)
     } catch (err) {
       // PIDL-only shortcuts (Control Panel, Run, Windows Media Player
-      // Legacy, some reparse-point-based items) aren't representable as
-      // `IShellLinkW::GetPath`-resolvable data, so Electron's parser
-      // bails. SHGetFileInfo on the .lnk path itself can still produce
-      // the real icon, so we just fall through to that below.
+      // Legacy, some reparse-point-based items) make Electron's parser
+      // bail out. WScript.Shell (the classic COM interface) handles the
+      // same files fine — shell out via PowerShell to get target + icon.
+      // Slow (~300 ms PS cold-start) but only paid once per shortcut
+      // before the icon-cache memoises the data URL for the session.
       logDebug('readShortcutLink threw', err)
+      info = await resolveLnkViaPowerShell(exePath)
+      logDebug('resolveLnkViaPowerShell ->', info)
     }
 
     if (info) {
@@ -264,6 +267,68 @@ async function tryGetFileIconMultiSize(p: string): Promise<Electron.NativeImage 
     }
   }
   return null
+}
+
+/**
+ * Fallback shortcut parser for .lnks that Electron's
+ * `shell.readShortcutLink` refuses to parse (PIDL-only targets, some
+ * legacy installer-generated shortcuts). Shells out to WScript.Shell via
+ * PowerShell — slow, but reliable. The returned shape matches Electron's
+ * `ShortcutDetails` so downstream code can treat both parsers uniformly.
+ *
+ * Only invoked when Electron's parser threw, so the ~300 ms cost is
+ * paid only for the handful of broken shortcuts a typical Start Menu
+ * contains; icon-cache memoises the resulting data URL so subsequent
+ * lookups for the same .lnk are free.
+ */
+async function resolveLnkViaPowerShell(lnkPath: string): Promise<ShortcutDetails | null> {
+  // Single-quote escape for PowerShell's string literal.
+  const escaped = lnkPath.replace(/'/g, "''")
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut('${escaped}')
+if (-not $s) { exit 1 }
+$iconLoc = [string]$s.IconLocation
+$iconPath = $iconLoc
+$iconIndex = 0
+if ($iconLoc -match ',(-?\\d+)$') {
+  $iconIndex = [int]$Matches[1]
+  $iconPath = $iconLoc.Substring(0, $iconLoc.LastIndexOf(','))
+}
+@{ target = [string]$s.TargetPath; icon = $iconPath; iconIndex = $iconIndex; description = [string]$s.Description } | ConvertTo-Json -Compress
+  `.trim()
+
+  const out = await new Promise<string | null>((resolve) => {
+    const proc = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { windowsHide: true }
+    )
+    let stdout = ''
+    proc.stdout.on('data', (c) => (stdout += c.toString()))
+    proc.on('error', () => resolve(null))
+    proc.on('close', (code) => resolve(code === 0 ? stdout.trim() : null))
+  })
+
+  if (!out) return null
+  try {
+    const parsed = JSON.parse(out) as {
+      target?: string
+      icon?: string
+      iconIndex?: number
+      description?: string
+    }
+    return {
+      target: parsed.target || '',
+      icon: parsed.icon || undefined,
+      iconIndex: typeof parsed.iconIndex === 'number' ? parsed.iconIndex : undefined,
+      description: parsed.description || undefined,
+      cwd: '',
+      args: ''
+    }
+  } catch {
+    return null
+  }
 }
 
 /**

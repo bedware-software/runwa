@@ -228,6 +228,16 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
       pendingReadySignal = false
       window.electronAPI.paletteReady()
     }
+
+    // Modules can tag an item `autoExecute: true` to signal "just run
+    // this now" — used by app-search's launch-on-alias mode. Fire the
+    // normal execute IPC; main dismisses the palette on success. Only
+    // the first matching item is honoured to prevent surprise
+    // multi-launch if several carry the flag.
+    const auto = result.items.find((i) => i.autoExecute)
+    if (auto) {
+      void window.electronAPI.modulesExecute(auto)
+    }
   } catch (err) {
     console.warn('[palette] search failed', err)
     set((s) => {

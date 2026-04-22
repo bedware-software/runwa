@@ -48,6 +48,24 @@ const MANIFEST: ModuleManifest = {
       multiline: true,
       defaultValue: '',
       placeholder: 'D:\\Portable\\Apps'
+    },
+    {
+      key: 'aliasMode',
+      type: 'radio',
+      label: 'Alias match behavior',
+      description:
+        'Aliases are set per-app from the Ctrl+K context menu. When the typed query exactly matches one:',
+      defaultValue: 'prioritize',
+      options: [
+        {
+          value: 'prioritize',
+          label: 'Boost the matching app to the top of results'
+        },
+        {
+          value: 'launch',
+          label: 'Launch the app immediately without pressing Enter'
+        }
+      ]
     }
   ]
 }
@@ -73,6 +91,24 @@ function parseCustomPaths(raw: unknown): string[] {
     .filter((s) => s.length > 0)
 }
 
+/**
+ * First app whose stored alias exactly matches the (normalised) query.
+ * Aliases are stored lowercased by the main-process setter, so a simple
+ * equality check is enough here.
+ */
+function findExactAliasMatch(
+  apps: AppEntry[],
+  aliases: Record<string, string>,
+  normalisedQuery: string
+): AppEntry | undefined {
+  if (!normalisedQuery) return undefined
+  for (const a of apps) {
+    const alias = aliases[a.id]
+    if (alias && alias === normalisedQuery) return a
+  }
+  return undefined
+}
+
 export function createAppSearchModule(): PaletteModule {
   // Every enumeration call caches internally; this map is a process-wide
   // lookup so `execute()` can find the entry by id without re-enumerating.
@@ -80,7 +116,9 @@ export function createAppSearchModule(): PaletteModule {
 
   const toItem = (
     entry: AppEntry,
-    score: number
+    score: number,
+    alias?: string,
+    autoExecute = false
   ): Omit<PaletteItem, 'moduleId'> => ({
     id: entry.id,
     title: entry.name,
@@ -100,6 +138,8 @@ export function createAppSearchModule(): PaletteModule {
     // AUMID and have no stable folder to open, so we leave revealPath
     // undefined for them (the menu hotkey then becomes a no-op per row).
     revealPath: entry.filePath,
+    alias,
+    autoExecute: autoExecute || undefined,
     actionKind: 'launch-app',
     action: { entryId: entry.id } satisfies LaunchAction,
     score
@@ -115,6 +155,8 @@ export function createAppSearchModule(): PaletteModule {
       const includeUwp = context.config.includeUwp !== false
       const includeDesktop = context.config.includeDesktop === true
       const customPaths = parseCustomPaths(context.config.customPaths)
+      const aliasMode =
+        context.config.aliasMode === 'launch' ? 'launch' : 'prioritize'
 
       const apps = await enumerateApps({
         includeStartMenu,
@@ -128,35 +170,70 @@ export function createAppSearchModule(): PaletteModule {
       entriesById.clear()
       for (const a of apps) entriesById.set(a.id, a)
 
+      const aliases = context.aliases ?? {}
       const trimmed = query.trim()
+      const normalisedQuery = trimmed.toLowerCase()
 
-      // Empty query (always scoped — the home-screen picker never calls us
-      // unscoped): alphabetical full list. Warm every app's icon so rows
-      // below the fold don't show the Lucide fallback when the user
-      // scrolls. The warm set is deduped and cached for the life of the
-      // process, so the cost is paid only on first open — subsequent
-      // opens get instant data-URLs out of the map.
+      // Empty query: alphabetical full list, alias chip rendered where
+      // the user set one so they can double-check their mappings.
       if (trimmed === '') {
         await warmIconCache(apps.map((a) => a.iconPath ?? a.filePath))
         if (signal.aborted) return []
-        return apps.map((a, i) => toItem(a, i / 10000))
+        return apps.map((a, i) => toItem(a, i / 10000, aliases[a.id]))
       }
 
-      const fuse = new Fuse(apps, {
-        keys: [{ name: 'name', weight: 1 }],
+      // Exact alias match short-circuits when the user opted into
+      // `launch` mode — return a single autoExecute item and skip the
+      // fuzzy pass entirely. In `prioritize` mode we still run the
+      // fuzzy search but bump the matching entry to the top below.
+      const exactAliasEntry = findExactAliasMatch(apps, aliases, normalisedQuery)
+      if (exactAliasEntry && aliasMode === 'launch') {
+        await warmIconCache([exactAliasEntry.iconPath ?? exactAliasEntry.filePath])
+        if (signal.aborted) return []
+        return [toItem(exactAliasEntry, -1, aliases[exactAliasEntry.id], true)]
+      }
+
+      // Fuzzy pass — include aliases as a secondary search key so a
+      // partial alias hit ("ch" → "chrome") still surfaces the app.
+      const fuseSource = apps.map((a) => ({
+        entry: a,
+        name: a.name,
+        alias: aliases[a.id] ?? ''
+      }))
+      const fuse = new Fuse(fuseSource, {
+        keys: [
+          { name: 'name', weight: 0.7 },
+          { name: 'alias', weight: 0.3 }
+        ],
         includeScore: true,
         threshold: 0.4,
         ignoreLocation: true
       })
-      const matches = fuse.search(trimmed)
+      let matches = fuse.search(trimmed)
       if (signal.aborted) return []
 
-      // Warm icons only for the matched subset — enumerating all 100+ apps'
-      // icons every keystroke is wasteful when only ~10 will render.
-      await warmIconCache(matches.map((r) => r.item.iconPath ?? r.item.filePath))
+      // Prioritize mode: lift the exact-alias entry to score -1 (above
+      // any fuzzy hit). If Fuse's threshold dropped it, re-insert at
+      // the top so the alias always wins against similar-looking names.
+      if (exactAliasEntry && aliasMode === 'prioritize') {
+        const idx = matches.findIndex((m) => m.item.entry.id === exactAliasEntry.id)
+        const promoted = {
+          item: { entry: exactAliasEntry, name: exactAliasEntry.name, alias: normalisedQuery },
+          refIndex: 0,
+          score: -1
+        }
+        if (idx >= 0) matches.splice(idx, 1)
+        matches = [promoted, ...matches]
+      }
+
+      await warmIconCache(
+        matches.map((r) => r.item.entry.iconPath ?? r.item.entry.filePath)
+      )
       if (signal.aborted) return []
 
-      return matches.map((r) => toItem(r.item, r.score ?? 1))
+      return matches.map((r) =>
+        toItem(r.item.entry, r.score ?? 1, aliases[r.item.entry.id])
+      )
     },
 
     async execute(item) {

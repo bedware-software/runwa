@@ -8,9 +8,20 @@ interface Props {
   items: PaletteItem[]
   selectedIndex: number
   isLoading: boolean
+  /**
+   * Called when a row is right-clicked. Caller decides whether the click
+   * opens a context menu (rows without a `revealPath` — UWP entries,
+   * service-module items — typically make this a no-op).
+   */
+  onOpenContextMenu?: (index: number) => void
 }
 
-export function ResultsList({ items, selectedIndex, isLoading }: Props) {
+export function ResultsList({
+  items,
+  selectedIndex,
+  isLoading,
+  onOpenContextMenu
+}: Props) {
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
   const listRef = useRef<HTMLDivElement>(null)
@@ -52,6 +63,16 @@ export function ResultsList({ items, selectedIndex, isLoading }: Props) {
             setSelectedIndex(index)
             void executeSelected()
           }}
+          onContextMenu={
+            onOpenContextMenu
+              ? (e) => {
+                  // Suppress the default browser right-click menu — Electron
+                  // shows the Chromium one in dev which just confuses users.
+                  e.preventDefault()
+                  onOpenContextMenu(index)
+                }
+              : undefined
+          }
         />
       ))}
     </div>

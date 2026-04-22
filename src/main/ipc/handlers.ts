@@ -70,6 +70,12 @@ export function registerIpcHandlers(): void {
     ) => settingsStore.patchModuleConfig(moduleId, configPatch)
   )
 
+  ipcMain.handle(
+    'settings:setModuleAlias',
+    async (_e, moduleId: ModuleId, itemId: string, alias: string | null) =>
+      settingsStore.patchModuleAlias(moduleId, itemId, alias)
+  )
+
   // Palette / settings window control
   ipcMain.handle('palette:hide', async () => {
     paletteWindow.hide(true)

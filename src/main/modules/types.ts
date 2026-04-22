@@ -3,6 +3,13 @@ import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/typ
 export interface SearchContext {
   /** Current config values for this module, already merged with defaults. */
   config: Record<string, ModuleConfigValue>
+  /**
+   * User-assigned aliases for this module's items, keyed by the module's
+   * stable entry id. Empty object when no aliases are set. Modules decide
+   * how to interpret them (app-search boosts / auto-launches on exact
+   * match).
+   */
+  aliases: Record<string, string>
 }
 
 /**
