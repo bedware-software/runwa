@@ -1,7 +1,11 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateStatus } from '@shared/types'
-import { killSiblingRunwaProcesses } from './process-utils'
+import {
+  forceKillSelf,
+  killSiblingRunwaProcesses,
+  scheduleOrphanCleanup
+} from './process-utils'
 
 /**
  * GitHub Releases-backed auto-update.
@@ -156,4 +160,11 @@ export function installUpdateNow(): void {
   }
   killSiblingRunwaProcesses()
   autoUpdater.quitAndInstall(true, true)
+  // Belt-and-suspenders: the diag log showed `app.exit(0)` / the
+  // quit-via-quitAndInstall path occasionally leaves our main process
+  // alive in dev — stuck waiting on something Electron can't finish.
+  // Give quitAndInstall a short grace period to spawn the installer
+  // and exit cleanly; after that, force-kill ourselves via taskkill so
+  // NSIS finds no runwa processes left to block its uninstall step.
+  setTimeout(() => forceKillSelf(), 3000)
 }

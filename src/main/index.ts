@@ -12,6 +12,7 @@ import { indicatorWindow } from './modules/groq-stt/indicator-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { initAutoUpdater } from './auto-update'
+import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import {
   requestScreenRecordingPermission,
   isScreenRecordingGranted,
@@ -31,6 +32,11 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(async () => {
+  // Very first thing: what was already alive when we came up? If the
+  // previous session's orphan is still there, the startup snapshot
+  // catches it.
+  logProcessSnapshot('startup')
+
   // Hide the dock icon on macOS — runwa is a background launcher, not a regular app.
   if (process.platform === 'darwin') {
     app.dock?.hide()
@@ -140,10 +146,54 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
-  hotkeyManager.dispose()
-  recorderWindow.dispose()
-  indicatorWindow.dispose()
-  keyboardRemapService.stop()
+  // Trace each dispose step — if the process hangs during will-quit,
+  // the last line printed to the electron-vite terminal tells us
+  // which dispose is stuck. Without this, the hang is invisible.
+  console.log('[shutdown] will-quit: start')
+  try {
+    console.log('[shutdown] hotkeyManager.dispose…')
+    hotkeyManager.dispose()
+    console.log('[shutdown] hotkeyManager.dispose OK')
+  } catch (err) {
+    console.warn('[shutdown] hotkeyManager.dispose threw:', err)
+  }
+  try {
+    console.log('[shutdown] recorderWindow.dispose…')
+    recorderWindow.dispose()
+    console.log('[shutdown] recorderWindow.dispose OK')
+  } catch (err) {
+    console.warn('[shutdown] recorderWindow.dispose threw:', err)
+  }
+  try {
+    console.log('[shutdown] indicatorWindow.dispose…')
+    indicatorWindow.dispose()
+    console.log('[shutdown] indicatorWindow.dispose OK')
+  } catch (err) {
+    console.warn('[shutdown] indicatorWindow.dispose threw:', err)
+  }
+  try {
+    console.log('[shutdown] keyboardRemapService.stop…')
+    keyboardRemapService.stop()
+    console.log('[shutdown] keyboardRemapService.stop OK')
+  } catch (err) {
+    console.warn('[shutdown] keyboardRemapService.stop threw:', err)
+  }
+  // Exit via external `taskkill /F /PID self` rather than Node's
+  // `process.exit(0)`. Why: when Electron's stdio is piped to a Node
+  // parent (exactly what electron-vite does in dev, exactly what
+  // electron-updater's installer spawn does after quit), Electron
+  // 9+ hangs on shutdown for ~15 s while Chromium's DLL teardown
+  // runs — see electron/electron#27084. `process.exit` goes through
+  // `ExitProcess`, which runs `DLL_PROCESS_DETACH` and inherits the
+  // same hang. `taskkill /F` sends `TerminateProcess` from a separate
+  // process and the kernel kills us instantly, no DLL teardown.
+  //
+  // spawnSync never returns here — we're dead by the time taskkill
+  // has issued TerminateProcess. The unreachable process.exit below
+  // is a macOS / Linux fallback (forceKillSelf is a no-op there).
+  console.log('[shutdown] will-quit: handler returning — taskkill /F /PID self')
+  forceKillSelf()
+  process.exit(0)
 })
 
 function isKeyboardRemapEnabled(): boolean {

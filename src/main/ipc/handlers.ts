@@ -18,6 +18,7 @@ import { paletteWindow } from '../palette-window'
 import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
+import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
   isAccessibilityTrusted,
   isScreenRecordingGranted,
@@ -173,6 +174,7 @@ export function registerIpcHandlers(): void {
   // instance. Electron.exe is a GUI subsystem binary, so the helper runs
   // with no console window.
   ipcMain.handle('app:wipe-data', async () => {
+    logProcessSnapshot('wipe-data: start')
     const userDataDir = app.getPath('userData')
 
     // Best-effort: release Chromium's file locks on userData.
@@ -233,6 +235,15 @@ export function registerIpcHandlers(): void {
         if (key === 'ELECTRON_RUN_AS_NODE') continue
         if (typeof value === 'string') relaunchEnv[key] = value
       }
+      // In dev, skip the automatic respawn: electron-vite watches our
+      // main process and marks it "stopped" as soon as we die, so any
+      // process we spawn directly via `electron.exe .` comes up without
+      // electron-vite's HMR / renderer-server routing — result is a
+      // running main with permanently-empty windows. Instead, print a
+      // hint and leave the user to hit `r` in the vite terminal (or
+      // restart `npm run dev`). Packaged installs have no such server
+      // dependency, so the direct respawn works there.
+      const shouldRelaunch = app.isPackaged
 
       // Delete children one-by-one instead of rmSync on the whole tree.
       // If an external process (editor, File Explorer) holds a handle on
@@ -246,13 +257,31 @@ export function registerIpcHandlers(): void {
       const script = `
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const pid = ${pid};
 const target = ${JSON.stringify(userDataDir)};
 const lockPath = ${JSON.stringify(lockPath)};
+const diagPath = ${JSON.stringify(path.join(app.getPath('temp'), 'runwa-diag.log'))};
+const ownImage = ${JSON.stringify(path.basename(process.execPath))};
 const relaunchExec = ${JSON.stringify(relaunchExec)};
 const relaunchArgs = ${JSON.stringify(relaunchArgs)};
 const relaunchEnv = ${JSON.stringify(relaunchEnv)};
+const shouldRelaunch = ${JSON.stringify(shouldRelaunch)};
+
+function snapshotSiblings() {
+  if (process.platform !== 'win32') return '';
+  try {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq ' + ownImage, '/FO', 'CSV'], { windowsHide: true, timeout: 5000 });
+    return r.stdout ? r.stdout.toString() : '';
+  } catch (e) { return 'snapshotSiblings: ' + String(e) }
+}
+function logDiag(label, extra) {
+  try {
+    const ts = new Date().toISOString();
+    const header = '\\n==== ' + ts + ' · wipe-helper ' + label + ' · pid=' + process.pid + ' · image=' + ownImage + ' ====\\n';
+    fs.appendFileSync(diagPath, header + (extra || '') + '\\n', 'utf8');
+  } catch {}
+}
 
 try { fs.writeFileSync(lockPath, String(process.pid)) } catch {}
 function removeLock() { try { fs.unlinkSync(lockPath) } catch {} }
@@ -281,20 +310,29 @@ async function wipeContents(dir) {
 }
 
 (async () => {
+  logDiag('started (parent still alive)', snapshotSiblings());
   for (let i = 0; i < 150; i++) {
     if (!alive(pid)) break
     await sleep(100)
   }
   await sleep(500)
+  logDiag('parent confirmed dead — about to wipe', snapshotSiblings());
   if (fs.existsSync(target)) {
     await wipeContents(target)
     try { fs.rmdirSync(target) } catch {}
   }
-  try {
-    spawn(relaunchExec, relaunchArgs, { detached: true, stdio: 'ignore', env: relaunchEnv }).unref()
-  } catch {}
+  logDiag('wipe done — about to respawn', snapshotSiblings());
+  if (shouldRelaunch) {
+    try {
+      spawn(relaunchExec, relaunchArgs, { detached: true, stdio: 'ignore', env: relaunchEnv }).unref()
+    } catch {}
+  } else {
+    logDiag('skipping respawn (dev mode — electron-vite owns the spawn)');
+  }
   try { fs.unlinkSync(__filename) } catch {}
   removeLock();
+  logDiag('respawn issued — exiting helper');
+  process.exit(0);
 })()
 `
       writeFileSync(scriptPath, script, 'utf8')
@@ -318,6 +356,15 @@ async function wipeContents(dir) {
         /* ignore */
       }
     }
+    logProcessSnapshot('wipe-data: pre-exit')
+    // Use the nuclear option: `taskkill /F /PID self` goes straight to
+    // `TerminateProcess`, bypassing Electron's shutdown (which, per the
+    // diag log, gets stuck in dev mode and leaves this process alive
+    // while the helper's `process.kill(pid, 0)` liveness probe is
+    // fooled into thinking we died). `app.exit(0)` / `process.exit(0)`
+    // are kept as fallbacks in case the taskkill call doesn't return
+    // immediately or the platform branch of `forceKillSelf` no-ops.
+    forceKillSelf()
     app.exit(0)
   })
 
