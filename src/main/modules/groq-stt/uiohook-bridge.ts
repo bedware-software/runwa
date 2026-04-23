@@ -279,6 +279,7 @@ interface BindingEntry {
 
 class UiohookBridge {
   private bindings: BindingEntry[] = []
+  private rawKeydownSubscribers: Array<(e: UiohookKeyboardEvent) => void> = []
   private started = false
   private onKeyDown: ((e: UiohookKeyboardEvent) => void) | null = null
   private onKeyUp: ((e: UiohookKeyboardEvent) => void) | null = null
@@ -325,8 +326,47 @@ class UiohookBridge {
       }
       this.bindings.splice(idx, 1)
     }
-    if (this.bindings.length === 0) {
-      this.stop()
+    this.stopIfIdle()
+  }
+
+  /**
+   * Subscribe to every raw keydown event (no chord filtering). Used by the
+   * hotstrings module — it needs a running keystroke stream to match trigger
+   * prefixes as the user types. Returns an unsubscribe callback.
+   *
+   * Calls `ensureStarted` the first time a subscriber arrives and
+   * `stopIfIdle` on the last unsubscribe, so uIOhook only runs while at
+   * least one consumer (binding OR raw subscriber) needs it.
+   */
+  subscribeKeystrokes(cb: (e: UiohookKeyboardEvent) => void): () => void {
+    const mod = tryLoadUiohook()
+    if (!mod) return () => {}
+    this.rawKeydownSubscribers.push(cb)
+    this.ensureStarted(mod)
+    return () => {
+      const i = this.rawKeydownSubscribers.indexOf(cb)
+      if (i >= 0) this.rawKeydownSubscribers.splice(i, 1)
+      this.stopIfIdle()
+    }
+  }
+
+  /**
+   * Simulate a short sequence of Backspace presses at the OS level. Used by
+   * the hotstrings module to erase the trigger before pasting the
+   * replacement. No-op when uiohook-napi isn't loaded.
+   */
+  simulateBackspaces(count: number): boolean {
+    if (count <= 0) return true
+    const mod = tryLoadUiohook()
+    if (!mod) return false
+    try {
+      for (let i = 0; i < count; i++) {
+        mod.uIOhook.keyTap(mod.UiohookKey.Backspace)
+      }
+      return true
+    } catch (err) {
+      console.warn('[uiohook-bridge] simulateBackspaces failed:', err)
+      return false
     }
   }
 
@@ -336,6 +376,16 @@ class UiohookBridge {
       for (const entry of this.bindings) {
         this.updateMainKey(entry, e, true)
         this.recomputeChord(entry, e)
+      }
+      // Snapshot the raw subscriber list so an in-handler unsubscribe
+      // (e.g. hotstrings module ejecting itself on a disable) doesn't
+      // mutate the array mid-iteration.
+      for (const cb of this.rawKeydownSubscribers.slice()) {
+        try {
+          cb(e)
+        } catch (err) {
+          console.warn('[uiohook-bridge] raw keydown subscriber threw:', err)
+        }
       }
     }
     this.onKeyUp = (e: UiohookKeyboardEvent): void => {
@@ -429,8 +479,17 @@ class UiohookBridge {
     this.started = false
   }
 
+  /** Tear uIOhook down once nothing needs it anymore — no bindings AND no
+   *  raw keystroke subscribers. Called from every unregister path. */
+  private stopIfIdle(): void {
+    if (this.bindings.length === 0 && this.rawKeydownSubscribers.length === 0) {
+      this.stop()
+    }
+  }
+
   dispose(): void {
     this.bindings = []
+    this.rawKeydownSubscribers = []
     this.stop()
   }
 }

@@ -11,6 +11,8 @@ import { recorderWindow } from './modules/groq-stt/recorder-window'
 import { indicatorWindow } from './modules/groq-stt/indicator-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
+import { hotstringService } from './modules/hotstrings/service'
+import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import { syncStartupIntegrations } from './startup-integration'
@@ -124,6 +126,23 @@ app.whenReady().then(async () => {
     }
   })
 
+  // 9a. Hotstrings — global snippet expander. Reads its rules list from
+  //     the module config and refreshes it on every settings change, so
+  //     editing the textarea in the settings panel takes effect live.
+  const initialHot = readHotstringsConfig()
+  if (initialHot.enabled) {
+    hotstringService.start(initialHot.rules)
+  }
+  let lastHotEnabled = initialHot.enabled
+  let lastHotRules = initialHot.rules
+  settingsStore.on('change', () => {
+    const next = readHotstringsConfig()
+    if (next.enabled === lastHotEnabled && next.rules === lastHotRules) return
+    lastHotEnabled = next.enabled
+    lastHotRules = next.rules
+    hotstringService.reconfigure(next.rules, next.enabled)
+  })
+
   // 10. Auto-update. Kicks off a background check against the GitHub
   //     Releases publish target configured in electron-builder.yml and
   //     schedules periodic re-checks. No-op in unpackaged dev runs.
@@ -195,6 +214,13 @@ app.on('will-quit', () => {
   } catch (err) {
     console.warn('[shutdown] keyboardRemapService.stop threw:', err)
   }
+  try {
+    console.log('[shutdown] hotstringService.stop…')
+    hotstringService.stop()
+    console.log('[shutdown] hotstringService.stop OK')
+  } catch (err) {
+    console.warn('[shutdown] hotstringService.stop threw:', err)
+  }
   // Exit via external `taskkill /F /PID self` rather than Node's
   // `process.exit(0)`. Why: when Electron's stdio is piped to a Node
   // parent (exactly what electron-vite does in dev, exactly what
@@ -221,4 +247,19 @@ function isKeyboardRemapEnabled(): boolean {
   // registerModules() so the entry should always be there. The `?? true`
   // handles the degenerate case without blocking the feature.
   return mod?.enabled ?? true
+}
+
+/**
+ * Pull the hotstrings module's enabled flag + rules text out of settings.
+ * Defaults to `{ enabled: false, rules: '' }` on a fresh install — the
+ * module is opt-in to avoid a global keystroke hook running unannounced.
+ */
+function readHotstringsConfig(): { enabled: boolean; rules: string } {
+  const s = settingsStore.get()
+  const mod = s.modules['hotstrings']
+  const rawRules = mod?.config?.[HOTSTRINGS_RULES_KEY]
+  return {
+    enabled: mod?.enabled ?? false,
+    rules: typeof rawRules === 'string' ? rawRules : ''
+  }
 }
