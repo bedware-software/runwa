@@ -1,11 +1,11 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { Info, SlidersHorizontal } from 'lucide-react'
 import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
-import type { ModuleMeta } from '@shared/types'
+import type { ModuleMeta, SettingsTabId } from '@shared/types'
 
-export type SettingsTab = 'general' | `module:${string}`
+export type SettingsTab = SettingsTabId
 
 interface Props {
   current: SettingsTab
@@ -71,6 +71,22 @@ export function Sidebar({ current, onChange }: Props) {
           />
         </div>
       )}
+
+      <nav className="mt-auto pt-3 border-t border-border flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={() => onChange('about')}
+          className={cn(
+            'flex items-center gap-2 h-8 px-2 rounded-md text-sm text-left transition-colors',
+            current === 'about'
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+          )}
+        >
+          <Info size={16} />
+          About
+        </button>
+      </nav>
     </aside>
   )
 }

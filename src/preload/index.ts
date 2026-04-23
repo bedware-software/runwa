@@ -14,6 +14,7 @@ import type {
   SearchRequest,
   SearchResult,
   Settings,
+  SettingsTabId,
   ExecuteResult,
   UpdateStatus
 } from '@shared/types'
@@ -132,6 +133,16 @@ const api: ElectronAPI = {
     ipcRenderer.on('settings:changed', listener)
     return () => {
       ipcRenderer.removeListener('settings:changed', listener)
+    }
+  },
+
+  onOpenSettingsTab: (cb: (tab: SettingsTabId) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, tab: SettingsTabId): void => {
+      cb(tab)
+    }
+    ipcRenderer.on('settings:open-tab', listener)
+    return () => {
+      ipcRenderer.removeListener('settings:open-tab', listener)
     }
   }
 }

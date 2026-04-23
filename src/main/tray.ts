@@ -130,11 +130,18 @@ class TrayManager {
       { type: 'separator' },
       {
         label: 'Check for updates',
-        // `checkForUpdatesNow` is a no-op in unpackaged dev runs, so the
-        // menu entry is always present but only does real work in a
-        // packaged install. The update flow notifies silently via a
-        // system Notification when downloaded; nothing more to do here.
-        click: () => void checkForUpdatesNow()
+        // Route through the About tab so the user sees the live update
+        // status (checking → downloading → ready). The check itself is a
+        // no-op in unpackaged dev runs; the About panel still surfaces a
+        // "disabled for dev builds" state so the click isn't a dead end.
+        click: () => {
+          settingsWindow.open('about')
+          void checkForUpdatesNow()
+        }
+      },
+      {
+        label: `About runwa ${app.getVersion()}`,
+        click: () => settingsWindow.open('about')
       },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }

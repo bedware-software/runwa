@@ -295,7 +295,15 @@ export type PermissionStatus = PermissionFlags | null
 export interface AppInfo {
   isPackaged: boolean
   platform: NodeJS.Platform
+  version: string
 }
+
+/**
+ * Tabs the settings window can be deep-linked to. 'module:<id>' selects a
+ * specific module's panel. The tray menu uses this to jump straight to the
+ * About tab when the user clicks "About" or "Check for updates".
+ */
+export type SettingsTabId = 'general' | 'about' | `module:${string}`
 
 /**
  * GitHub Releases-backed auto-update state machine, as observed from
@@ -397,4 +405,10 @@ export interface ElectronAPI {
   // Events (main → renderer). Return an unsubscribe function.
   onPaletteShow: (cb: (payload: PaletteShowPayload) => void) => () => void
   onSettingsChanged: (cb: (settings: Settings) => void) => () => void
+  /**
+   * Main asks the settings renderer to switch to a specific tab. Fired when
+   * the tray opens settings with a target pane (e.g. "About", "Check for
+   * updates") so the user lands where they expect.
+   */
+  onOpenSettingsTab: (cb: (tab: SettingsTabId) => void) => () => void
 }
