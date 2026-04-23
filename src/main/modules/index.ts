@@ -1,6 +1,7 @@
 import { moduleRegistry } from './registry'
 import { createWindowSwitcherModule } from './window-switcher'
 import { createAppSearchModule } from './app-search'
+import { createCommandPaletteModule } from './command-palette'
 import { createKeyboardRemapModule } from './keyboard-remap'
 import { createGroqSttModule } from './groq-stt'
 import { createHotstringsModule } from './hotstrings'
@@ -12,12 +13,14 @@ import { createHotstringsModule } from './hotstrings'
  *
  * Registration order is what both the palette home-screen picker and the
  * settings sidebar show. User-facing launchers first (app-search,
- * window-switcher), then the background services (keyboard-remap,
- * hotstrings), then the hotkey-only utility (groq-stt) at the bottom.
+ * window-switcher, command-palette), then the background services
+ * (keyboard-remap, hotstrings), then the hotkey-only utility (groq-stt)
+ * at the bottom.
  */
 export async function registerModules(): Promise<void> {
   moduleRegistry.register(createAppSearchModule())
   moduleRegistry.register(createWindowSwitcherModule())
+  moduleRegistry.register(createCommandPaletteModule())
   moduleRegistry.register(createKeyboardRemapModule())
   moduleRegistry.register(createHotstringsModule())
   moduleRegistry.register(createGroqSttModule())
