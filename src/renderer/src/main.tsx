@@ -7,7 +7,10 @@ import { RecorderApp } from './components/recorder/RecorderApp'
 import { IndicatorApp } from './components/indicator/IndicatorApp'
 
 // Hash-based routing so one HTML file / one bundle serves every window.
-const view = (window.location.hash || '#palette').replace(/^#/, '')
+// Settings can carry a `?tab=<id>` suffix for deep-linking (e.g. tray →
+// About tab); strip it before matching against the known view ids.
+const rawHash = (window.location.hash || '#palette').replace(/^#/, '')
+const view = rawHash.split('?')[0]
 const Root =
   view === 'settings'
     ? SettingsApp

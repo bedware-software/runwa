@@ -1,7 +1,7 @@
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import path from 'path'
 import { settingsStore } from './settings-store'
-import type { Settings, Theme } from '@shared/types'
+import type { Settings, SettingsTabId, Theme } from '@shared/types'
 
 const iconPath = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.png')
@@ -30,10 +30,14 @@ class SettingsWindow {
   private window: BrowserWindow | null = null
   private offSettingsChange: (() => void) | null = null
 
-  open(): void {
+  open(tab?: SettingsTabId): void {
     if (this.window && !this.window.isDestroyed()) {
       this.window.show()
       this.window.focus()
+      // Existing window — push the tab over IPC. The renderer's
+      // `onOpenSettingsTab` subscription is live by the time we get here
+      // (set up on mount, long before any subsequent tray click).
+      if (tab) this.sendTab(tab)
       return
     }
 
@@ -101,15 +105,35 @@ class SettingsWindow {
       this.window = null
     })
 
+    // Initial tab is baked into the hash fragment so the renderer can read
+    // it synchronously during mount. Subsequent open-to-tab requests
+    // (while the window stays alive) go over the IPC event instead.
+    const hash = tab ? `settings?tab=${encodeURIComponent(tab)}` : 'settings'
     if (process.env.ELECTRON_RENDERER_URL) {
-      this.window.loadURL(process.env.ELECTRON_RENDERER_URL + '#settings')
+      this.window.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`)
     } else {
-      this.window.loadFile(path.join(__dirname, '../renderer/index.html'), { hash: 'settings' })
+      this.window.loadFile(path.join(__dirname, '../renderer/index.html'), { hash })
     }
   }
 
   getBrowserWindow(): BrowserWindow | null {
     return this.window && !this.window.isDestroyed() ? this.window : null
+  }
+
+  private sendTab(tab: SettingsTabId): void {
+    const win = this.getBrowserWindow()
+    if (!win) return
+    // On a fresh window the renderer's subscription isn't wired up by the
+    // time `ready-to-show` fires, so buffer the message until the web
+    // contents finish loading. On an already-open window this branch
+    // skips straight to send.
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', () => {
+        if (!win.isDestroyed()) win.webContents.send('settings:open-tab', tab)
+      })
+    } else {
+      win.webContents.send('settings:open-tab', tab)
+    }
   }
 }
 

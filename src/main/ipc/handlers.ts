@@ -27,10 +27,12 @@ import {
 } from '../modules/window-switcher/native'
 
 export function registerIpcHandlers(): void {
-  // Environment snapshot for renderer (gates packaged-only settings).
+  // Environment snapshot for renderer (gates packaged-only settings, drives
+  // the About tab version readout).
   ipcMain.handle('app:info', async () => ({
     isPackaged: app.isPackaged,
-    platform: process.platform
+    platform: process.platform,
+    version: app.getVersion()
   }))
 
   // Modules

@@ -1,11 +1,19 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { Info, SlidersHorizontal } from 'lucide-react'
 import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
-import type { ModuleMeta } from '@shared/types'
+import type { ModuleMeta, SettingsTabId } from '@shared/types'
 
-export type SettingsTab = 'general' | `module:${string}`
+export type SettingsTab = SettingsTabId
+
+/**
+ * Module ids that land under the "Keyboard" subheader. Kept as a
+ * Sidebar-local list so modules don't have to know about their own
+ * settings grouping — the sidebar is the only place that renders these
+ * sections today.
+ */
+const KEYBOARD_MODULE_IDS = new Set(['keyboard-remap', 'hotstrings'])
 
 interface Props {
   current: SettingsTab
@@ -47,13 +55,15 @@ export function Sidebar({ current, onChange }: Props) {
       {modules.length > 0 && (
         <div className="border-t border-border mt-3 pt-3 flex flex-col gap-3">
           {/*
-            Two-level grouping: "Searches" are modules that appear in the
-            home-screen picker (App Search, Window Switcher, future
-            Files/Calculator/…). "Other" is background services and
-            hotkey-only utilities that never show up in the palette list
-            (Keyboard Remap, Groq Transcription). Preserving registration
-            order within each group means adding a new module keeps its
-            position predictable.
+            Three-level grouping: "Searches" are modules that appear in
+            the home-screen picker (App Search, Window Switcher, future
+            Files/Calculator/…). "Keyboard" groups the low-level input
+            services (Keyboard Remap, Hotstrings) so users looking for
+            one always find the other. "Other" is the remainder — any
+            background service that doesn't belong to Keyboard (Groq
+            Transcription today). Preserving registration order within
+            each group means adding a new module keeps its position
+            predictable.
           */}
           <ModuleGroup
             label="Searches"
@@ -63,14 +73,41 @@ export function Sidebar({ current, onChange }: Props) {
             onToggle={(id, v) => void setEnabled(id, v)}
           />
           <ModuleGroup
+            label="Keyboard"
+            modules={modules.filter(
+              (m) => m.kind !== 'search' && KEYBOARD_MODULE_IDS.has(m.id)
+            )}
+            current={current}
+            onChange={onChange}
+            onToggle={(id, v) => void setEnabled(id, v)}
+          />
+          <ModuleGroup
             label="Other"
-            modules={modules.filter((m) => m.kind !== 'search')}
+            modules={modules.filter(
+              (m) => m.kind !== 'search' && !KEYBOARD_MODULE_IDS.has(m.id)
+            )}
             current={current}
             onChange={onChange}
             onToggle={(id, v) => void setEnabled(id, v)}
           />
         </div>
       )}
+
+      <nav className="mt-auto pt-3 border-t border-border flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={() => onChange('about')}
+          className={cn(
+            'flex items-center gap-2 h-8 px-2 rounded-md text-sm text-left transition-colors',
+            current === 'about'
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+          )}
+        >
+          <Info size={16} />
+          About
+        </button>
+      </nav>
     </aside>
   )
 }

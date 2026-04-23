@@ -78,6 +78,11 @@ export function createWindowSwitcherModule(): PaletteModule {
       getWindowIconDataUrl(w.id) ??
       getIconDataUrlSync(w.executablePath) ??
       'app-window',
+    // Drives the Ctrl+K context menu's "Show in file explorer" action.
+    // Windows exposed via the AX/CGWindow bridge without an exe path
+    // (e.g. some macOS UI-element windows) leave this undefined, so the
+    // menu hides the reveal row rather than pointing at nothing.
+    revealPath: w.executablePath,
     actionKind: 'focus-window',
     action: { nativeId: w.id } satisfies FocusAction,
     score
