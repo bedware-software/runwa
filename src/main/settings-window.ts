@@ -52,7 +52,7 @@ class SettingsWindow {
       minHeight: 480,
       show: false,
       icon: iconPath,
-      title: 'runwa — Settings',
+      title: `${app.getName()} — Settings`,
       backgroundColor: colors.bg,
       titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
       ...(isMac

@@ -26,6 +26,14 @@ export interface EnumerateOptions {
   includeStartMenu: boolean
   includeUwp: boolean
   includeDesktop: boolean
+  /**
+   * macOS-only: include `.app` bundles whose name starts with a dot
+   * (e.g. `.Karabiner-VirtualHIDDevice-Manager.app`). These are system
+   * helpers that Finder and Spotlight hide by default; the same toggle
+   * also applies to custom paths so the rule is consistent across
+   * sources.
+   */
+  includeHidden: boolean
   customPaths: string[]
 }
 
@@ -33,10 +41,11 @@ export interface EnumerateOptions {
 // Mirrors PowerToys' Apps extension (.appref-ms handled like .lnk: via shell.openPath).
 const WIN_EXTS = new Set(['.lnk', '.url', '.exe', '.appref-ms'])
 
-// macOS: .app bundles are directories; one level of nesting under /Applications
-// is idiomatic (e.g. /Applications/Utilities/Terminal.app). Walk two levels
-// deep — deeper than that is almost never used.
-const MAC_MAX_DEPTH = 2
+// macOS: .app bundles are directories; users nest them arbitrarily deep in
+// suite folders (Adobe CC, Microsoft Office, Setapp, /Applications/Utilities,
+// /System/Applications/Utilities, etc.). Walk deep — the short-circuit on
+// matched bundles below prevents us from descending into any .app's internals.
+const MAC_MAX_DEPTH = 8
 
 // Windows Start Menu / Desktop folders are typically shallow but can nest a
 // folder or two (e.g. .../Start Menu/Programs/Accessories/Paint.lnk). Three
@@ -61,8 +70,13 @@ async function walkForApps(
     for (const e of entries) {
       const full = path.join(dir, e.name)
       if (e.isDirectory()) {
-        if (depth + 1 < maxDepth) stack.push({ dir: full, depth: depth + 1 })
-        if (matches(e.name)) collect(full)
+        if (matches(e.name)) {
+          // Matched bundle (e.g. Foo.app) — collect but don't descend into
+          // its internals; Contents/Frameworks/*.app are helpers, not apps.
+          collect(full)
+        } else if (depth + 1 < maxDepth) {
+          stack.push({ dir: full, depth: depth + 1 })
+        }
       } else if (e.isFile() && matches(e.name)) {
         collect(full)
       }
@@ -280,13 +294,23 @@ function runPowerShell(command: string): Promise<string | null> {
 
 // ─── macOS ─────────────────────────────────────────────────────────────────
 
-async function enumerateMacApplications(): Promise<AppEntry[]> {
-  const roots = ['/Applications', path.join(os.homedir(), 'Applications')]
+async function enumerateMacApplications(includeHidden: boolean): Promise<AppEntry[]> {
+  // Finder's /Applications view is a synthetic union of /Applications and
+  // /System/Applications. The latter is where modern macOS keeps system apps
+  // — System Settings, Calculator, Music, TV — and /System/Applications/
+  // Utilities holds Terminal, Disk Utility, Activity Monitor, and friends.
+  // None of these live under the top-level /Applications anymore, so we have
+  // to scan both roots to match what the user sees in Finder.
+  const roots = [
+    '/Applications',
+    '/System/Applications',
+    path.join(os.homedir(), 'Applications')
+  ]
   const out: AppEntry[] = []
   for (const root of roots) {
     await walkForApps(
       root,
-      (name) => name.toLowerCase().endsWith('.app'),
+      (name) => isMacAppBundleName(name, includeHidden),
       MAC_MAX_DEPTH,
       (bundlePath) => {
         const name = displayNameFromFile(bundlePath, '.app')
@@ -303,9 +327,23 @@ async function enumerateMacApplications(): Promise<AppEntry[]> {
   return out
 }
 
+/**
+ * Match `.app` bundles, optionally excluding dot-prefixed ones (system
+ * helpers like `.Karabiner-VirtualHIDDevice-Manager.app`). Same predicate
+ * is used for custom paths on macOS so the toggle applies uniformly.
+ */
+function isMacAppBundleName(name: string, includeHidden: boolean): boolean {
+  if (!name.toLowerCase().endsWith('.app')) return false
+  if (!includeHidden && name.startsWith('.')) return false
+  return true
+}
+
 // ─── Custom paths (both platforms) ─────────────────────────────────────────
 
-async function enumerateCustomPaths(paths: string[]): Promise<AppEntry[]> {
+async function enumerateCustomPaths(
+  paths: string[],
+  includeHidden: boolean
+): Promise<AppEntry[]> {
   const out: AppEntry[] = []
   const isWin = process.platform === 'win32'
   const isMac = process.platform === 'darwin'
@@ -314,7 +352,7 @@ async function enumerateCustomPaths(paths: string[]): Promise<AppEntry[]> {
       root,
       (name) => {
         if (isWin) return WIN_EXTS.has(path.extname(name).toLowerCase())
-        if (isMac) return name.toLowerCase().endsWith('.app')
+        if (isMac) return isMacAppBundleName(name, includeHidden)
         return false
       },
       WIN_MAX_DEPTH,
@@ -360,6 +398,7 @@ function cacheKey(opts: EnumerateOptions): string {
     opts.includeStartMenu ? '1' : '0',
     opts.includeUwp ? '1' : '0',
     opts.includeDesktop ? '1' : '0',
+    opts.includeHidden ? '1' : '0',
     opts.customPaths.join('|')
   ].join('\x00')
 }
@@ -387,12 +426,12 @@ export async function enumerateApps(opts: EnumerateOptions): Promise<AppEntry[]>
     // "include system apps" so users can disable it via the same switch;
     // includeUwp / includeDesktop are no-ops on this platform.
     if (opts.includeStartMenu) {
-      collected.push(...(await enumerateMacApplications()))
+      collected.push(...(await enumerateMacApplications(opts.includeHidden)))
     }
   }
 
   if (opts.customPaths.length > 0) {
-    collected.push(...(await enumerateCustomPaths(opts.customPaths)))
+    collected.push(...(await enumerateCustomPaths(opts.customPaths, opts.includeHidden)))
   }
 
   const deduped = dedupeByName(collected)

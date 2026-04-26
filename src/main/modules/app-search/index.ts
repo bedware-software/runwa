@@ -20,23 +20,34 @@ const MANIFEST: ModuleManifest = {
       type: 'checkbox',
       label: 'Start Menu apps',
       description:
-        'Windows: User and system Start Menu shortcuts. macOS: `/Applications` and `~/Applications` bundles.',
+        'Windows: User and system Start Menu shortcuts. macOS: `.app` bundles under `/Applications`, `/System/Applications` (including Utilities and System Settings), and `~/Applications`.',
       defaultValue: true
+    },
+    {
+      key: 'includeHidden',
+      type: 'checkbox',
+      os: 'macos',
+      label: 'Hidden apps',
+      description:
+        'Show `.app` bundles whose name starts with a dot (e.g. `.Karabiner-VirtualHIDDevice-Manager`). These are system helpers macOS hides from Finder and Spotlight by default — usually not what you want to launch.',
+      defaultValue: false
     },
     {
       key: 'includeUwp',
       type: 'checkbox',
+      os: 'windows',
       label: 'Store / UWP apps',
       description:
-        'Windows-only. Apps registered with Windows AppX / Microsoft Store (Calculator, Settings, PWAs, etc.) that aren\'t plain shortcuts.',
+        'Apps registered with Windows AppX / Microsoft Store (Calculator, Settings, PWAs, etc.) that aren\'t plain shortcuts.',
       defaultValue: true
     },
     {
       key: 'includeDesktop',
       type: 'checkbox',
+      os: 'windows',
       label: 'Desktop shortcuts',
       description:
-        'Windows-only. User and Public Desktop shortcuts. Often duplicates Start Menu entries — on by the user\'s request only.',
+        'User and Public Desktop shortcuts. Often duplicates Start Menu entries — on by the user\'s request only.',
       defaultValue: false
     },
     {
@@ -154,6 +165,7 @@ export function createAppSearchModule(): PaletteModule {
       const includeStartMenu = context.config.includeStartMenu !== false
       const includeUwp = context.config.includeUwp !== false
       const includeDesktop = context.config.includeDesktop === true
+      const includeHidden = context.config.includeHidden === true
       const customPaths = parseCustomPaths(context.config.customPaths)
       const aliasMode =
         context.config.aliasMode === 'launch' ? 'launch' : 'prioritize'
@@ -162,6 +174,7 @@ export function createAppSearchModule(): PaletteModule {
         includeStartMenu,
         includeUwp,
         includeDesktop,
+        includeHidden,
         customPaths
       })
       if (signal.aborted) return []

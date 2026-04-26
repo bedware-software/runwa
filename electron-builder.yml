@@ -1,5 +1,5 @@
 appId: dev.dmitr.runwa
-productName: runwa
+productName: Runwa
 icon: resources/icon.png
 directories:
   output: release

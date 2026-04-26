@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
+import type { AppInfo } from '@shared/types'
 
 /**
  * Prefer navigator.userAgentData (Chromium 90+), fall back to the deprecated
@@ -30,8 +31,10 @@ function detectMac(): boolean {
  */
 export function SettingsTitleBar() {
   const [isMac, setIsMac] = useState(false)
+  const [appName, setAppName] = useState('')
   useEffect(() => {
     setIsMac(detectMac())
+    void window.electronAPI.getAppInfo().then((info: AppInfo) => setAppName(info.name))
   }, [])
 
   const style: CSSProperties = {
@@ -45,7 +48,7 @@ export function SettingsTitleBar() {
       className="h-12 bg-card border-b border-border flex items-center gap-2 shrink-0 select-none"
       style={style}
     >
-      <span className="text-sm font-semibold text-foreground">runwa</span>
+      <span className="text-sm font-semibold text-foreground">{appName}</span>
     </div>
   )
 }

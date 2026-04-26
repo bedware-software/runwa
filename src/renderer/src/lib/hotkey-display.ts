@@ -14,7 +14,7 @@
  * `Win` (matches what the physical key is labelled).
  */
 
-const IS_MAC = navigator.platform.toLowerCase().includes('mac')
+import { IS_MAC } from './platform'
 
 const MAC_GLYPH: Record<string, string> = {
   // Modifiers

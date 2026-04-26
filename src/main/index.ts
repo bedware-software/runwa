@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import path from 'path'
 import { settingsStore } from './settings-store'
 import { moduleRegistry } from './modules/registry'
 import { registerModules } from './modules'
@@ -22,6 +23,17 @@ import {
   requestAccessibilityPermission,
   isAccessibilityTrusted
 } from './modules/window-switcher/native'
+
+// Sandbox the dev build's settings, caches, hotkey state, etc. into a
+// separate `runwa_dev` userData folder so it never overwrites the stable
+// installation's data on the same machine. Has to run BEFORE anything
+// reads `app.getPath('userData')` or `requestSingleInstanceLock` — both
+// derive their key from the app name. Also gives dev and stable
+// distinct single-instance keys so the two can run side by side.
+if (!app.isPackaged) {
+  app.setName('Runwa Dev')
+  app.setPath('userData', path.join(app.getPath('appData'), 'Runwa Dev'))
+}
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()

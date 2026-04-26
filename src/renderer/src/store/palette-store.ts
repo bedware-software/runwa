@@ -37,9 +37,15 @@ interface PaletteState {
   /**
    * Re-run the current search immediately (no debounce) — used by Ctrl+R
    * in the app-search scope after the rescan IPC has invalidated the main
-   * process's enumeration cache.
+   * process's enumeration cache, and after editing per-item state (e.g.
+   * setting an alias) where we want the row chip to update without
+   * losing the user's place in the list.
+   *
+   * `preserveSelection: true` keeps the cursor on the same item id once
+   * the new results land. If the id is gone (filtered out, renamed),
+   * we fall back to index 0 like a normal refresh.
    */
-  refresh: () => void
+  refresh: (opts?: { preserveSelection?: boolean }) => void
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -120,11 +126,21 @@ export const usePaletteStore = create<PaletteState>()(
       }
     },
 
-    refresh: () => {
+    refresh: (opts) => {
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer)
         debounceTimer = null
       }
+      // Capture the currently-selected id BEFORE clearing items so we
+      // can re-select it once the refreshed results arrive. Item ids
+      // are stable across re-enumerations (app:/path on Mac, source:
+      // path on Win), so this works even when the new search reorders
+      // results — e.g. an alias change in `prioritize` mode bubbles
+      // the row up but the cursor follows.
+      const preserveId =
+        opts?.preserveSelection
+          ? get().items[get().selectedIndex]?.id
+          : undefined
       // Clear items so ResultsList flips to its loading state — without
       // this the stale results stay on screen until the refreshed search
       // lands, which hides the rescan's progress from the user. Mirrors
@@ -134,7 +150,7 @@ export const usePaletteStore = create<PaletteState>()(
         s.selectedIndex = 0
         s.isLoading = true
       })
-      void runSearch(get().query, get, set)
+      void runSearch(get().query, get, set, preserveId)
     },
 
     unscope: () => {
@@ -191,7 +207,12 @@ export const usePaletteStore = create<PaletteState>()(
 type Setter = (fn: (state: PaletteState) => void) => void
 type Getter = () => PaletteState
 
-async function runSearch(query: string, get: Getter, set: Setter): Promise<void> {
+async function runSearch(
+  query: string,
+  get: Getter,
+  set: Setter,
+  preserveSelectionId?: string
+): Promise<void> {
   const prev = get()
   const newId = prev.requestId + 1
 
@@ -217,10 +238,21 @@ async function runSearch(query: string, get: Getter, set: Setter): Promise<void>
     // Drop stale results.
     if (get().requestId !== newId) return
 
+    // If the caller asked to keep the cursor on a specific item (e.g. a
+    // refresh after editing an alias), find its new index in the fresh
+    // result list. findIndex returns -1 when the item is gone, which
+    // Math.max collapses back to 0 — a normal "fresh result" landing.
+    const nextIndex = preserveSelectionId
+      ? Math.max(
+          0,
+          result.items.findIndex((it) => it.id === preserveSelectionId)
+        )
+      : 0
+
     set((s) => {
       s.items = result.items
       s.resolvedModuleId = result.resolvedModuleId
-      s.selectedIndex = 0
+      s.selectedIndex = nextIndex
       s.isLoading = false
     })
 

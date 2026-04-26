@@ -74,7 +74,10 @@ export function ResultRow({ item, isSelected, onMouseEnter, onClick, onContextMe
           {item.alias && (
             <kbd
               className={cn(
-                'shrink-0 px-1.5 py-0.5 rounded font-mono text-[11px] font-medium border',
+                // `leading-none` + inline-flex keeps the chip's box
+                // height ≤ the title row's `text-sm` line-height (20px),
+                // so adding/removing an alias never changes row height.
+                'shrink-0 inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[11px] leading-none font-medium border',
                 isSelected
                   ? 'border-accent-foreground/30 text-accent-foreground bg-accent-foreground/10'
                   : 'border-border text-muted-foreground bg-secondary'

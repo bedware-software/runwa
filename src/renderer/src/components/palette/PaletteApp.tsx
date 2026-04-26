@@ -85,6 +85,20 @@ export function PaletteApp() {
     if (!canOpenMenu) setMenuOpen(false)
   }, [canOpenMenu])
 
+  // Restore focus to the search input when the alias modal closes. The
+  // modal's own <input> steals DOM focus while it's open, and once it
+  // unmounts focus would otherwise land on <body> — which has no
+  // keydown handler, so arrow keys / Enter / Esc silently stop working
+  // until the user clicks back into the search box. The cleanup
+  // pattern fires exactly on the close transition (true → false),
+  // including the unmount-during-hide case.
+  useEffect(() => {
+    if (!aliasModalOpen) return
+    return () => {
+      inputRef.current?.focus()
+    }
+  }, [aliasModalOpen])
+
   // Initial hydration
   useEffect(() => {
     void hydrate()
@@ -267,9 +281,11 @@ export function PaletteApp() {
           onSave={(alias) => {
             // Main's `patchModuleAlias` handles empty-string = clear, so
             // we can hand the raw input straight through. refresh() so
-            // the alias chip renders (or disappears) immediately.
+            // the alias chip renders (or disappears) immediately;
+            // preserveSelection keeps the cursor on the just-edited
+            // row instead of snapping back to the top of the list.
             void setModuleAlias('app-search', selectedItem.id, alias || null).then(
-              () => refresh()
+              () => refresh({ preserveSelection: true })
             )
             setAliasModalOpen(false)
           }}

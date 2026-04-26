@@ -32,7 +32,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('app:info', async () => ({
     isPackaged: app.isPackaged,
     platform: process.platform,
-    version: app.getVersion()
+    version: app.getVersion(),
+    name: app.getName(),
+    userDataPath: app.getPath('userData')
   }))
 
   // Modules

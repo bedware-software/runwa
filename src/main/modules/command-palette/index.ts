@@ -50,7 +50,7 @@ const COMMANDS: CommandDef[] = [
     defaultEnabled: true,
     command: 'maximize',
     configDescription:
-      'Shows "Maximize window" as a command. Expands the previously-focused window to fill the screen via the OS shortcut (Win+Up on Windows / Linux, Ctrl+Cmd+F on macOS).'
+      'Expands the previously-focused window to fill the visible screen area (excluding menu bar and dock). Windows / Linux: Win+Up. macOS: directly sets the window position and size — no menu navigation, no green-button click, no fullscreen.'
   },
   {
     id: 'minimize-window',
@@ -61,18 +61,18 @@ const COMMANDS: CommandDef[] = [
     defaultEnabled: true,
     command: 'minimize',
     configDescription:
-      'Shows "Minimize window" as a command. Hides the previously-focused window via the OS shortcut (Win+Down on Windows / Linux, Cmd+M on macOS).'
+      'Hides the previously-focused window. Windows / Linux: Win+Down. macOS: sets the window\'s AXMinimized accessibility attribute.'
   },
   {
     id: 'restore-window',
     title: 'Restore window',
     icon: 'square',
-    subtitle: 'Undo a maximize / bring the window back to normal size.',
+    subtitle: 'Undo a maximize / fullscreen / minimize.',
     configKey: 'enableRestore',
     defaultEnabled: true,
     command: 'restore',
     configDescription:
-      'Shows "Restore window" as a command. Drives the system menu (Alt+Space, R) to return the previously-focused window to its normal size.'
+      'Returns the previously-focused window to a normal size. Windows / Linux: drives Alt+Space → R. macOS: un-fullscreens or un-minimizes if applicable, otherwise resizes to 70% of the screen, centred.'
   }
 ]
 
@@ -86,12 +86,16 @@ const MANIFEST: ModuleManifest = {
   defaultEnabled: true,
   supportsDirectLaunch: true,
   defaultDirectLaunchHotkey: 'Ctrl+Alt+P',
+  // All current commands manipulate the focused window — group them under
+  // a single header so users can show/hide the whole batch with one click
+  // rather than ticking three checkboxes individually.
   configFields: COMMANDS.map((c) => ({
     key: c.configKey,
     type: 'checkbox' as const,
     label: c.title,
     description: c.configDescription,
-    defaultValue: c.defaultEnabled
+    defaultValue: c.defaultEnabled,
+    group: 'Windows Control'
   }))
 }
 
@@ -142,24 +146,30 @@ export function createCommandPaletteModule(): PaletteModule {
       }
 
       // Hide with restoreFocus=true so the OS foreground window is the
-      // one the user was on before the palette opened. The keystroke we
-      // fire below is a global input event — it targets whichever
-      // window the OS currently considers foreground.
+      // one the user was on before the palette opened. Both the macOS
+      // System Events query ("first process whose frontmost is true")
+      // and the Win/Linux keystroke synthesis target whichever window
+      // the OS currently considers foreground, so the handoff has to
+      // settle before we run.
       paletteWindow.hide(true)
 
-      // A short delay covers the focus handoff. Empirically ~120 ms is
-      // long enough on Windows for SetForegroundWindow to settle and
-      // the target window to become ready to receive a Win+Up / Win+Down
-      // chord. Too short and the keystroke gets eaten by our own
-      // now-hiding window; too long and the user notices the lag.
+      // A short delay covers the focus handoff. ~120 ms is long enough
+      // on Windows for SetForegroundWindow to settle and the target
+      // window to become ready to receive a Win+Up / Win+Down chord;
+      // macOS needs a touch more headroom because Electron's hide() is
+      // async to the OS and `osascript` queries the frontmost process
+      // at execution time — too short and we tell System Events to
+      // act on our own (still-hiding) window. Too long and the user
+      // notices the lag.
+      const delay = process.platform === 'darwin' ? 200 : 120
       setTimeout(() => {
         const ok = simulateWindowCommand(item.action.command)
         if (!ok) {
           console.warn(
-            `[command-palette] ${item.action.command} failed — uiohook unavailable?`
+            `[command-palette] ${item.action.command} failed — driver unavailable?`
           )
         }
-      }, 120)
+      }, delay)
 
       // We've handled the hide ourselves. Returning false short-circuits
       // the IPC handler's redundant `paletteWindow.hide()` call, which

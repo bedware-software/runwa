@@ -24,14 +24,35 @@ export function AboutPanel() {
   return (
     <div className="flex flex-col gap-8 max-w-xl">
       <section>
-        <h2 className="text-sm font-semibold text-foreground mb-1">runwa</h2>
+        <h2 className="text-sm font-semibold text-foreground mb-1">{info?.name ?? '…'}</h2>
         <p className="text-xs text-muted-foreground mb-3">
           A cross-platform command palette launcher.
         </p>
-        <div className="flex items-center justify-between gap-4 px-4 py-3 border border-input rounded-md bg-card">
-          <div className="text-sm font-medium text-foreground">Version</div>
-          <div className="text-sm text-muted-foreground tabular-nums">
-            {info ? `v${info.version}` : '…'}
+        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="text-sm font-medium text-foreground">Version</div>
+            <div className="text-sm text-muted-foreground tabular-nums">
+              {info ? `v${info.version}` : '…'}
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="text-sm font-medium text-foreground shrink-0">
+              Settings folder
+            </div>
+            {info?.userDataPath ? (
+              <button
+                type="button"
+                onClick={() =>
+                  void window.electronAPI.revealInFolder(info.userDataPath)
+                }
+                title="Reveal in file manager"
+                className="text-xs text-muted-foreground font-mono truncate hover:text-foreground transition-colors text-right"
+              >
+                {info.userDataPath}
+              </button>
+            ) : (
+              <div className="text-xs text-muted-foreground">…</div>
+            )}
           </div>
         </div>
       </section>

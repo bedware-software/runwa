@@ -21,6 +21,23 @@ export interface ModuleConfigFieldBase {
   key: string
   label: string
   description?: string
+  /**
+   * OS filter — when set, the settings UI only renders the field on the
+   * matching platform. Mirrors the `os:` predicate used in keyboard-remap
+   * rules so module authors have one mental model for both schemas.
+   * Storage is unaffected — a value persisted on Windows stays in the
+   * config when the user opens settings on macOS, it just isn't shown.
+   */
+  os?: 'windows' | 'macos' | 'linux'
+  /**
+   * Settings-UI grouping label. Adjacent fields that share the same
+   * `group` string render together under a header bearing that label,
+   * with a master "toggle all" control that flips every checkbox in the
+   * group in one click. Fields with no `group` render as standalone
+   * rows. The string is the user-facing label — keep it short
+   * (e.g. "Windows Control"). Storage is per-field as usual.
+   */
+  group?: string
 }
 
 export interface ModuleConfigFieldCheckbox extends ModuleConfigFieldBase {
@@ -296,6 +313,24 @@ export interface AppInfo {
   isPackaged: boolean
   platform: NodeJS.Platform
   version: string
+  /**
+   * Canonical user-facing app name. Source of truth = `app.getName()`,
+   * which returns `productName` from electron-builder.yml in packaged
+   * builds and the package.json `name` in dev. The dev build calls
+   * `app.setName('Runwa Dev')` early in main, so the same accessor
+   * returns the right label across both. Renderer uses it in the
+   * settings header and About panel — keeps every label in sync from
+   * one place.
+   */
+  name: string
+  /**
+   * Absolute path to the userData directory — where settings, caches,
+   * and per-module state live (`electron-store` and ad-hoc writes both
+   * land under here). Surfaced on the About panel so users can
+   * pinpoint the active install's data folder, especially relevant for
+   * dev vs stable side-by-side runs.
+   */
+  userDataPath: string
 }
 
 /**

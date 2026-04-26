@@ -1,19 +1,28 @@
 import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
 
 /**
- * Window-command keystroke simulator.
+ * Window-command driver. Three commands — maximize / minimize /
+ * restore — implemented per-OS using the most stable path available
+ * on each platform.
  *
- * The Command Palette module hides itself and hands focus back to the
- * previously-foreground window; after a short delay we fire a platform-
- * native keystroke that the OS interprets as "maximize", "minimize", or
- * "restore" the foreground window. Keystrokes instead of native API
- * calls because extending the Rust addon with per-OS window-state
- * manipulation would be significantly more work; keystrokes cover the
- * MVP and can be swapped out later without changing the module surface.
+ * macOS: direct Accessibility attribute set on the frontmost window
+ *   - maximize: read NSScreen.mainScreen.visibleFrame (excludes menu
+ *     bar + dock, accounts for notch height), set the window's
+ *     `AXPosition` + `AXSize` to fill it. Works on every standard
+ *     NSWindow regardless of app cooperation — no menu navigation,
+ *     no green-button-click synthesis, no lazy-validation pitfalls.
+ *   - minimize: `set value of attribute "AXMinimized" to true`.
+ *     Read/write everywhere, no animation gap to fight.
+ *   - restore: un-fullscreen or un-minimize if applicable, otherwise
+ *     resize to 70% of the visible frame centred. We don't track
+ *     pre-maximize frames per-window — restoring a maximized window
+ *     to a sensible default is more predictable than relying on
+ *     state we'd have to store across invocations.
  *
- * Loaded via the same `createRequire` trick the hold-to-talk bridge
- * uses — the native addon is optional, and a missing binary degrades to
- * a logged no-op rather than crashing the module.
+ * Windows / Linux: synthesize the OS-native window-management chords
+ * via `uiohook-napi` (Win+Up / Win+Down / Alt+Space → R). The native
+ * addon is optional — a missing binary degrades to a logged no-op.
  */
 
 export type WindowCommand = 'maximize' | 'minimize' | 'restore'
@@ -41,13 +50,133 @@ function loadUiohook(): UiohookModule | null {
   return cached
 }
 
-/**
- * Convert a command into a sequence of `keyTap` calls. A "sequence" is
- * used instead of a single tap so "Restore" on Windows can drive the
- * system menu (Alt+Space, R) as two sequential events — the menu
- * popping up eats a bit of time between the two taps, so a small gap
- * between them is mandatory.
- */
+// ─── macOS ────────────────────────────────────────────────────────────────
+//
+// Each script returns silently on success and logs to stderr on failure.
+// Wrapping the AX work in `try` keeps borderless / chromeless windows
+// (dialogs, popovers) from surfacing as osascript errors that the caller
+// would mistake for a driver fault.
+
+interface ScriptPayload {
+  lang: 'AppleScript' | 'JavaScript'
+  body: string
+}
+
+const MAC_SCRIPTS: Record<WindowCommand, ScriptPayload> = {
+  maximize: {
+    lang: 'JavaScript',
+    body: `
+ObjC.import("AppKit");
+const SE = Application("System Events");
+const proc = SE.processes.whose({frontmost: true})[0];
+if (proc) {
+  const wnds = proc.windows();
+  if (wnds.length > 0) {
+    const wnd = wnds[0];
+    const scr = $.NSScreen.mainScreen;
+    const fullH = scr.frame.size.height;
+    const vf = scr.visibleFrame;
+    // NSScreen uses bottom-left origin; AX uses top-left. Convert.
+    const x = vf.origin.x;
+    const y = fullH - (vf.origin.y + vf.size.height);
+    const w = vf.size.width;
+    const h = vf.size.height;
+    try { wnd.position = [x, y]; } catch (e) {}
+    try { wnd.size = [w, h]; } catch (e) {}
+  }
+}
+`.trim()
+  },
+  minimize: {
+    lang: 'AppleScript',
+    body: `
+tell application "System Events"
+  set frontProc to first process whose frontmost is true
+  if (count of windows of frontProc) > 0 then
+    try
+      set value of attribute "AXMinimized" of front window of frontProc to true
+    end try
+  end if
+end tell`.trim()
+  },
+  restore: {
+    lang: 'JavaScript',
+    body: `
+ObjC.import("AppKit");
+const SE = Application("System Events");
+const proc = SE.processes.whose({frontmost: true})[0];
+if (proc) {
+  const wnds = proc.windows();
+  if (wnds.length > 0) {
+    const wnd = wnds[0];
+    let handled = false;
+    // 1. Un-fullscreen if currently fullscreen.
+    try {
+      if (wnd.attributes.byName("AXFullScreen").value() === true) {
+        wnd.attributes.byName("AXFullScreen").value = false;
+        handled = true;
+      }
+    } catch (e) {}
+    // 2. Un-minimize if currently minimized.
+    if (!handled) {
+      try {
+        if (wnd.attributes.byName("AXMinimized").value() === true) {
+          wnd.attributes.byName("AXMinimized").value = false;
+          handled = true;
+        }
+      } catch (e) {}
+    }
+    // 3. Otherwise resize to a "reasonable normal" — 70% of the visible
+    //    frame, centred. Predictable across apps; we don't track the
+    //    pre-maximize frame per-window so this is the next-best thing.
+    if (!handled) {
+      const scr = $.NSScreen.mainScreen;
+      const fullH = scr.frame.size.height;
+      const vf = scr.visibleFrame;
+      const w = Math.round(vf.size.width * 0.7);
+      const h = Math.round(vf.size.height * 0.7);
+      const x = Math.round(vf.origin.x + (vf.size.width - w) / 2);
+      const y = Math.round(fullH - (vf.origin.y + vf.size.height) + (vf.size.height - h) / 2);
+      try { wnd.position = [x, y]; } catch (e) {}
+      try { wnd.size = [w, h]; } catch (e) {}
+    }
+  }
+}
+`.trim()
+  }
+}
+
+function runMacWindowCommand(command: WindowCommand): boolean {
+  try {
+    const { lang, body } = MAC_SCRIPTS[command]
+    const args = lang === 'JavaScript' ? ['-l', 'JavaScript', '-e', body] : ['-e', body]
+    const proc = spawn('osascript', args, {
+      stdio: ['ignore', 'ignore', 'pipe']
+    })
+    let stderr = ''
+    proc.stderr?.on('data', (c) => (stderr += c.toString()))
+    proc.on('close', (code) => {
+      const trimmed = stderr.trim()
+      if (code !== 0) {
+        console.warn(
+          `[command-palette] osascript ${command} exited ${code}: ${trimmed}`
+        )
+      } else if (trimmed) {
+        console.log(`[command-palette] ${command}: ${trimmed}`)
+      }
+    })
+    proc.on('error', (err) => {
+      console.warn(`[command-palette] osascript ${command} spawn failed:`, err)
+    })
+    return true
+  } catch (err) {
+    console.warn('[command-palette] runMacWindowCommand failed:', err)
+    return false
+  }
+}
+
+// ─── Windows / Linux ─────────────────────────────────────────────────────
+
 interface Step {
   key: number
   modifiers?: number[]
@@ -57,35 +186,14 @@ function stepsFor(
   command: WindowCommand,
   K: UiohookModule['UiohookKey']
 ): Step[] | null {
-  if (process.platform === 'darwin') {
-    switch (command) {
-      case 'maximize':
-        // Ctrl+Cmd+F toggles the native "enter full screen" on most
-        // standard macOS apps. Not a pixel-perfect match for Windows
-        // maximize, but the closest thing the platform ships with.
-        return [{ key: K.F, modifiers: [K.Ctrl, K.Meta] }]
-      case 'minimize':
-        return [{ key: K.M, modifiers: [K.Meta] }]
-      case 'restore':
-        // Same keystroke as maximize — Ctrl+Cmd+F is a toggle on macOS,
-        // so firing it again from a fullscreen state returns to the
-        // windowed size.
-        return [{ key: K.F, modifiers: [K.Ctrl, K.Meta] }]
-    }
-  }
-
-  // Windows / Linux — both honour the Super / Windows key combos below
-  // on the major window managers (WinAPI directly, Mutter/KWin/Xfwm by
-  // default). Restore goes through the Alt+Space system menu on
-  // Windows; on Linux the same sequence is mostly a no-op, so the
-  // user-facing effect matches "not much happens" rather than a wrong
-  // action. Documented limitation.
   switch (command) {
     case 'maximize':
       return [{ key: K.ArrowUp, modifiers: [K.Meta] }]
     case 'minimize':
       return [{ key: K.ArrowDown, modifiers: [K.Meta] }]
     case 'restore':
+      // Alt+Space opens the system menu, R picks "Restore". A small
+      // gap between the two so the menu has time to render.
       return [
         { key: K.Space, modifiers: [K.Alt] },
         { key: K.R }
@@ -95,16 +203,19 @@ function stepsFor(
 
 const INTER_STEP_DELAY_MS = 60
 
+// ─── Public entry point ──────────────────────────────────────────────────
+
 /**
- * Fire the keystroke sequence for `command`. Returns false when the
- * native hook isn't available or the sequence can't be mapped on this
- * platform; the caller surfaces a warning.
- *
- * Sequences of length > 1 are sent with a small delay between taps so
- * the OS has time to honour the first keystroke (e.g. open the system
- * menu) before receiving the next character.
+ * Run the OS action for `command`. Returns false when the platform
+ * driver isn't available (uiohook missing on Windows / Linux); the
+ * caller surfaces a warning. macOS always returns true synchronously
+ * — `osascript` errors are async, so they're logged as they happen
+ * rather than reported back here.
  */
 export function simulateWindowCommand(command: WindowCommand): boolean {
+  if (process.platform === 'darwin') {
+    return runMacWindowCommand(command)
+  }
   const mod = loadUiohook()
   if (!mod) return false
   const steps = stepsFor(command, mod.UiohookKey)

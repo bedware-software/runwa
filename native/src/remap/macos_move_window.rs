@@ -107,19 +107,28 @@ fn run_move_sequence(n: u32) {
         return;
     }
 
-    // Click just past the right edge of the green (zoom) traffic-light
-    // button. Querying AXZoomButton's actual frame makes this layout-
-    // independent — handles wider button spacing on newer macOS, apps
-    // that shift traffic lights down, and custom chrome. Fall back to a
-    // conservative fixed offset if the AX query fails (borderless /
+    // Click in the gap between the close (red) and minimize (orange)
+    // traffic-light buttons. The AX query gives us each button's actual
+    // frame, so the midpoint is layout-independent — handles wider
+    // spacing on newer macOS and apps that shift the chrome. Fall back
+    // chain: close+minimize midpoint → just past close's right edge →
+    // a fixed offset if neither AX button is exposed (borderless /
     // chromeless windows, dialogs).
-    let target = match active_zoom_button_frame() {
-        Some(zoom) => CGPoint {
-            x: zoom.origin.x + zoom.size.width + 4.0,
-            y: zoom.origin.y + zoom.size.height / 2.0,
+    let close = active_window_button_frame("AXCloseButton");
+    let minimize = active_window_button_frame("AXMinimizeButton");
+    let target = match (close, minimize) {
+        (Some(c), Some(m)) => CGPoint {
+            x: (c.origin.x + c.size.width + m.origin.x) / 2.0,
+            y: c.origin.y + c.size.height / 2.0,
         },
-        None => CGPoint {
-            x: frame.origin.x + 75.0,
+        (Some(c), None) => CGPoint {
+            x: c.origin.x + c.size.width + 5.0,
+            y: c.origin.y + c.size.height / 2.0,
+        },
+        _ => CGPoint {
+            // ~24pt past the window's left edge — between close (~x=14) and
+            // minimize (~x=34) on the standard macOS traffic-light layout.
+            x: frame.origin.x + 24.0,
             y: frame.origin.y + 13.0,
         },
     };
@@ -156,22 +165,14 @@ fn run_move_sequence(n: u32) {
     //    may be treated as a "click on an inactive region" rather than a
     //    drag start.
     post_mouse(&source, CGEventType::MouseMoved, target);
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(100));
 
     // 3. Mouse down with full pressure. On Force Touch trackpads the
     //    pressure field governs the drag-engage threshold; 1.0 = fully
     //    pressed. Also sets clickState=1 inside `post_mouse_pressed`.
-    //
-    //    Unlike generic button drags, title-bar drag is a dedicated
-    //    WindowServer path: MouseDown on the title bar immediately
-    //    enters drag-follow-cursor mode without needing a motion
-    //    threshold. So we DON'T post a MouseDragged to "engage" the
-    //    drag — doing so moves the window a few pixels, and macOS eases
-    //    that motion into a visible ~10-20px wobble before snap-back.
-    //    The window's drag state is established purely by holding the
-    //    button down on the title bar for the 75ms below.
     post_mouse_pressed(&source, CGEventType::LeftMouseDown, target);
-    thread::sleep(Duration::from_millis(75));
+    thread::sleep(Duration::from_millis(50));
+    post_mouse_pressed(&source, CGEventType::LeftMouseDragged, target);
 
     // 6. Switch Space via the system shortcut. The window follows because
     //    it's our active drag target.
@@ -299,13 +300,12 @@ fn active_window_frame() -> Option<CGRect> {
     }
 }
 
-/// Frame of the green (zoom) traffic-light button on the frontmost window,
-/// or None if unavailable. Used to compute a layout-independent click
-/// target for the title-bar drag trick — every macOS window that supports
-/// zoom/maximize exposes this button via AX, and clicking just right of
-/// it reliably lands in empty drag-chrome (apps leave a gap between the
-/// zoom button and their toolbar's first item).
-fn active_zoom_button_frame() -> Option<CGRect> {
+/// Frame of one of the frontmost window's standard title-bar buttons, or
+/// `None` if unavailable. Pass `"AXCloseButton"`, `"AXMinimizeButton"`,
+/// or `"AXZoomButton"` — every macOS window with the standard chrome
+/// exposes these via AX, and the returned CGRect is in screen coordinates
+/// suitable for `CGEventPost` directly.
+fn active_window_button_frame(button_attr: &str) -> Option<CGRect> {
     unsafe {
         let system = AXUIElementCreateSystemWide();
         if system.is_null() {
@@ -321,12 +321,12 @@ fn active_zoom_button_frame() -> Option<CGRect> {
         let focused_window = ax_copy(focused_app, "AXFocusedWindow")?;
         let _window_guard = AXGuard(focused_window);
 
-        let zoom = ax_copy(focused_window, "AXZoomButton")?;
-        let _zoom_guard = AXGuard(zoom);
+        let button = ax_copy(focused_window, button_attr)?;
+        let _button_guard = AXGuard(button);
 
-        let position = ax_copy(zoom, "AXPosition")?;
+        let position = ax_copy(button, "AXPosition")?;
         let _pos_guard = AXGuard(position);
-        let size = ax_copy(zoom, "AXSize")?;
+        let size = ax_copy(button, "AXSize")?;
         let _size_guard = AXGuard(size);
 
         let mut origin = CGPoint { x: 0.0, y: 0.0 };
