@@ -1,6 +1,6 @@
 {
   "name": "Runwa",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "description": "A cross-platform command palette launcher",
   "main": "./out/main/index.js",
   "author": "dmitr",
@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "dist": "electron-vite build && electron-builder",
     "dist:win": "electron-vite build && electron-builder --win --x64",
-    "dist:mac": "electron-vite build && electron-builder --mac --publish=never",
+    "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:linux": "electron-vite build && electron-builder --linux",
     "prepare": "husky"
   },
