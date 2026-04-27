@@ -304,6 +304,10 @@ async function enumerateMacApplications(includeHidden: boolean): Promise<AppEntr
   const roots = [
     '/Applications',
     '/System/Applications',
+    // CoreServices/Applications holds bundled utilities that aren't
+    // surfaced in /System/Applications: Screen Sharing, Wireless
+    // Diagnostics, Directory Utility, Storage Management, etc.
+    '/System/Library/CoreServices/Applications',
     path.join(os.homedir(), 'Applications')
   ]
   const out: AppEntry[] = []
@@ -323,6 +327,22 @@ async function enumerateMacApplications(includeHidden: boolean): Promise<AppEntr
         })
       }
     )
+  }
+  // Finder is the obvious omission from the three roots above — it lives in
+  // /System/Library/CoreServices alongside dozens of background helpers we
+  // don't want surfaced (Dock, SystemUIServer, loginwindow, …), so we
+  // whitelist it explicitly rather than walking that directory.
+  const finder = '/System/Library/CoreServices/Finder.app'
+  try {
+    await fs.access(finder)
+    out.push({
+      id: `app:${finder}`,
+      name: 'Finder',
+      filePath: finder,
+      source: 'applications'
+    })
+  } catch {
+    // Finder.app not found — shouldn't happen on a real macOS install.
   }
   return out
 }

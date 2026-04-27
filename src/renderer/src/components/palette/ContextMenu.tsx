@@ -41,8 +41,9 @@ export function ContextMenu({ open, onClose, actions }: Props) {
   const [selected, setSelected] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // Reset the highlighted option whenever the menu re-opens so a stale
-  // pointer hover doesn't leak state between sessions.
+  // Reset the highlighted option whenever the menu re-opens so the user
+  // always lands on the first action regardless of where the previous
+  // session left off.
   useEffect(() => {
     if (open) setSelected(0)
   }, [open])
@@ -116,7 +117,6 @@ export function ContextMenu({ open, onClose, actions }: Props) {
             type="button"
             role="menuitem"
             disabled={action.disabled}
-            onMouseEnter={() => setSelected(idx)}
             onClick={() => {
               if (action.disabled) return
               action.onActivate()
@@ -126,9 +126,7 @@ export function ContextMenu({ open, onClose, actions }: Props) {
               'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
               action.disabled
                 ? 'opacity-50 cursor-not-allowed'
-                : idx === selected
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent/50'
+                : idx === selected && 'bg-accent text-accent-foreground'
             )}
           >
             <action.Icon size={14} className="shrink-0" />

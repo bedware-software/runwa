@@ -52,7 +52,6 @@ export function PaletteApp() {
   const canSetAlias = selectedItem?.moduleId === 'app-search'
   const contextActions = useMemo(() => {
     const actions = []
-    if (selectedItem?.revealPath) actions.push(revealAction(selectedItem.revealPath))
     if (canSetAlias) {
       actions.push(
         setAliasAction(Boolean(selectedItem?.alias), () => {
@@ -61,6 +60,7 @@ export function PaletteApp() {
         })
       )
     }
+    if (selectedItem?.revealPath) actions.push(revealAction(selectedItem.revealPath))
     return actions
   }, [selectedItem?.revealPath, selectedItem?.alias, canSetAlias])
   const canOpenMenu = contextActions.length > 0

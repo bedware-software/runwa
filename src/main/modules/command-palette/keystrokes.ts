@@ -83,6 +83,11 @@ if (proc) {
     const h = vf.size.height;
     try { wnd.position = [x, y]; } catch (e) {}
     try { wnd.size = [w, h]; } catch (e) {}
+    // Setting AXPosition/AXSize via System Events sometimes promotes
+    // osascript/System Events to the foreground for a beat; without
+    // this re-activate the target window keeps its new bounds but
+    // loses keyboard focus, so the user can't keep typing into it.
+    try { proc.frontmost = true; } catch (e) {}
   }
 }
 `.trim()
@@ -140,6 +145,9 @@ if (proc) {
       try { wnd.position = [x, y]; } catch (e) {}
       try { wnd.size = [w, h]; } catch (e) {}
     }
+    // Same focus-restoration rationale as maximize — un-fullscreen and
+    // resize-to-70% paths both set AX attributes via System Events.
+    try { proc.frontmost = true; } catch (e) {}
   }
 }
 `.trim()

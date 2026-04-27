@@ -58,7 +58,6 @@ export function ResultsList({
           key={item.id}
           item={item}
           isSelected={index === selectedIndex}
-          onMouseEnter={() => setSelectedIndex(index)}
           onClick={() => {
             setSelectedIndex(index)
             void executeSelected()

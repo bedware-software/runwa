@@ -66,15 +66,15 @@ const MANIFEST: ModuleManifest = {
       label: 'Alias match behavior',
       description:
         'Aliases are set per-app from the Ctrl+K context menu. When the typed query exactly matches one:',
-      defaultValue: 'prioritize',
+      defaultValue: 'launch',
       options: [
-        {
-          value: 'prioritize',
-          label: 'Boost the matching app to the top of results'
-        },
         {
           value: 'launch',
           label: 'Launch the app immediately without pressing Enter'
+        },
+        {
+          value: 'prioritize',
+          label: 'Boost the matching app to the top of results'
         }
       ]
     }
@@ -168,7 +168,7 @@ export function createAppSearchModule(): PaletteModule {
       const includeHidden = context.config.includeHidden === true
       const customPaths = parseCustomPaths(context.config.customPaths)
       const aliasMode =
-        context.config.aliasMode === 'launch' ? 'launch' : 'prioritize'
+        context.config.aliasMode === 'prioritize' ? 'prioritize' : 'launch'
 
       const apps = await enumerateApps({
         includeStartMenu,

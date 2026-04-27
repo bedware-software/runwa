@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils'
 interface Props {
   item: PaletteItem
   isSelected: boolean
-  onMouseEnter?: () => void
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
 }
@@ -29,18 +28,17 @@ function isImageUrl(hint: string | undefined): hint is string {
   return !!hint && hint.startsWith('data:')
 }
 
-export function ResultRow({ item, isSelected, onMouseEnter, onClick, onContextMenu }: Props) {
+export function ResultRow({ item, isSelected, onClick, onContextMenu }: Props) {
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
   return (
     <div
-      onMouseEnter={onMouseEnter}
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
         'flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
-        isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+        isSelected && 'bg-accent text-accent-foreground'
       )}
     >
       <div
