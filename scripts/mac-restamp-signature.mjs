@@ -1,24 +1,27 @@
 #!/usr/bin/env node
 
-// macOS post-build re-sign step. electron-builder ad-hoc signs the output
-// with codesigning identifier "Electron" — literally the string "Electron",
-// not our bundle ID — because that's Electron's default linker-embedded
-// identifier and electron-builder doesn't override it in unsigned/ad-hoc
-// mode. TCC keys permission grants (Screen Recording, Accessibility, etc.)
-// by that identifier, so:
+// macOS post-build re-sign step. Two reasons we re-sign every build:
 //
-//   1. Grants we ask the user to apply to "runwa" silently collide with
-//      every other ad-hoc Electron app on the same machine, which is why
-//      Screen Recording never seems to actually apply (titles stay blank
-//      in CGWindowList output).
-//   2. Each rebuild produces a subtly-different signature, invalidating
-//      any grant the user already made.
+// 1) electron-builder ad-hoc signs the output with codesigning identifier
+//    "Electron" — literally the string "Electron", not our bundle ID —
+//    because that's Electron's default linker-embedded identifier and
+//    electron-builder doesn't override it in unsigned/ad-hoc mode. TCC
+//    keys permission grants (Screen Recording, Accessibility, etc.) by
+//    that identifier, so without re-stamping, grants we ask the user to
+//    apply to "runwa" silently collide with every other ad-hoc Electron
+//    app on the same machine, AND each rebuild produces a subtly-
+//    different signature, invalidating prior grants.
 //
-// Re-signing with `--identifier <bundle-id>` stamps a stable identifier on
-// the binary. TCC now keys grants to `dev.dmitr.runwa`, and as long as
-// that identifier doesn't change, prior grants survive subsequent rebuilds.
-// Signature is still ad-hoc (no Developer ID), but the identifier is the
-// part TCC cares about.
+// 2) Without a Developer ID, codesign's default "designated requirement"
+//    is `cdhash H"<sha256-of-the-binary>"`. The CDHash changes on every
+//    rebuild. Squirrel.Mac (Electron's auto-update framework) rejects
+//    updates whose code signature doesn't satisfy the running app's DR —
+//    so every fresh release fails to install over the previous one with
+//    "code failed to satisfy specified code requirement(s)". Embedding
+//    a permissive identifier-based DR (`identifier "dev.dmitr.runwa"`)
+//    makes any Runwa build satisfy any other Runwa build's DR, which is
+//    fine for an ad-hoc-signed app where the developer's the trust
+//    anchor anyway. Future builds → auto-update works.
 //
 // Runs against every `.app` bundle under `release/`, because
 // electron-builder outputs separate per-arch bundles (`mac/`, `mac-arm64/`)
@@ -66,14 +69,28 @@ if (bundles.length === 0) {
   process.exit(0)
 }
 
+// Designated requirement: any binary that signs as `dev.dmitr.runwa`
+// satisfies it. Anchors trust to the bundle identifier rather than the
+// per-build CDHash so cross-version updates pass Squirrel.Mac's
+// signature check. The leading `=` tells codesign this is an inline
+// requirement string, not a file path.
+const DESIGNATED_REQUIREMENT = `=designated => identifier "${BUNDLE_ID}"`
+
 for (const app of bundles) {
   try {
     execFileSync(
       'codesign',
-      ['--deep', '--force', '--sign', '-', '--identifier', BUNDLE_ID, app],
+      [
+        '--deep',
+        '--force',
+        '--sign', '-',
+        '--identifier', BUNDLE_ID,
+        '--requirements', DESIGNATED_REQUIREMENT,
+        app
+      ],
       { stdio: ['ignore', 'inherit', 'inherit'] }
     )
-    console.log(`[mac-restamp-signature] re-signed ${app} with identifier=${BUNDLE_ID}`)
+    console.log(`[mac-restamp-signature] re-signed ${app} with identifier=${BUNDLE_ID}, DR=identifier-based`)
   } catch (err) {
     console.error(`[mac-restamp-signature] failed to re-sign ${app}:`, err.message)
     process.exitCode = 1

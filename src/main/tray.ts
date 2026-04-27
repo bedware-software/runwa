@@ -140,7 +140,7 @@ class TrayManager {
         }
       },
       {
-        label: `About runwa ${app.getVersion()}`,
+        label: `About ${app.getName()} ${app.getVersion()}`,
         click: () => settingsWindow.open('about')
       },
       { type: 'separator' },
@@ -191,13 +191,14 @@ class TrayManager {
   /**
    * Tooltip text. On Windows we include the current desktop ordinal when
    * the numbered icon is active — on other platforms or when the user
-   * disabled the number, we just say "runwa".
+   * disabled the number, we just show the app name.
    */
   private tooltipFor(zeroBasedDesktop: number, showNumber: boolean): string {
+    const name = app.getName()
     if (showNumber && process.platform === 'win32') {
-      return `runwa — desktop ${zeroBasedDesktop + 1}`
+      return `${name} — desktop ${zeroBasedDesktop + 1}`
     }
-    return 'runwa'
+    return name
   }
 
   /**

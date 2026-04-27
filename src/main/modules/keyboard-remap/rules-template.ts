@@ -55,12 +55,18 @@ capslock:
 shift:
   on_tap: [cmd, space]
 
+tab
+  on_tap: [ctrl, alt, a]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+    - { keys: [k], to_hotkey: [ctrl, shift, tab] }
+
 space:
   on_tap: [space]
   on_hold:
     - { keys: [w], to_hotkey: [ctrl, alt, w] }
     - { keys: [a], to_hotkey: [ctrl, alt, a] }
-    - { keys: [s], to_hotkey: [ctrl, alt, s] }
+    - { keys: [p], to_hotkey: [ctrl, alt, p] }
 
     - { keys: [h], to_hotkey: [left] }
     - { keys: [j], to_hotkey: [down] }
