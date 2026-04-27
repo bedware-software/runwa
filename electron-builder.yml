@@ -4,6 +4,12 @@ icon: resources/icon.png
 directories:
   output: release
   buildResources: build
+# Re-sign the .app bundle right after electron-builder's default ad-hoc
+# sign and BEFORE the .dmg / .zip are packaged. Without this hook the
+# artifacts uploaded to GitHub freeze the pre-restamp signature
+# (cdhash-bound DR, identifier="Electron"), and Squirrel.Mac auto-update
+# fails on every cross-version install. See scripts/mac-after-sign.mjs.
+afterSign: scripts/mac-after-sign.mjs
 # electron-updater reads release metadata from the GitHub repo's public
 # releases API. `publish: never` in CI keeps us out of electron-builder's
 # own upload path — the workflow uploads artifacts (including the .yml
