@@ -12,6 +12,12 @@
  *   on_tap:   [key]                press-and-release with no interruption
  *   on_tap:   [mod, ..., key]      combo on tap
  *
+ *   on_tap fires only when the trigger is pressed without any external
+ *   modifier already held. So `tab: on_tap: [tab]` doesn't break
+ *   Cmd+Tab, Shift+Tab, Cmd+Shift+Tab, etc. — those chords pass
+ *   through to the OS / app untouched. Same for `space: on_tap: [space]`
+ *   and Cmd+Space (Spotlight).
+ *
  *   on_hold:  [<modifier>]         while held, act as that modifier
  *                                  (transparent layer)
  *   on_hold:                       explicit per-combo rule list
@@ -53,10 +59,10 @@ capslock:
   on_hold: [ctrl]
 
 shift:
-  on_tap: [cmd, space]
-
-tab
   on_tap: [ctrl, alt, a]
+
+tab:
+  on_tap: [tab]
   on_hold:
     - { keys: [j], to_hotkey: [ctrl, tab] }
     - { keys: [k], to_hotkey: [ctrl, shift, tab] }

@@ -171,10 +171,27 @@ impl StateMachine {
             // Trigger key events (any bound top-level key).
             // -----------------------------------------------------------
 
-            // Idle + trigger-down: enter Pending.
+            // Idle + trigger-down: enter Pending — UNLESS an external
+            // (non-self) modifier is already held, in which case the user
+            // is reaching for an OS-level chord (Cmd+Space → Spotlight,
+            // Cmd+Tab → app switcher, Shift+Tab → reverse focus, Win+L,
+            // Alt+Space, …). Forward the keydown so the chord reaches
+            // the OS / app instead of being swallowed into our trigger
+            // layer. Pre-emption of an already-Pending modifier trigger
+            // (Shift-then-Space-then-N) is handled by the dedicated arm
+            // below; that path runs from Pending, not Idle, so this
+            // guard doesn't interfere with it.
             (State::Idle, EventKind::KeyDown, Some(t), Some(_)) => {
-                self.state = State::Pending { trigger: t };
-                Action::Suppress
+                let mut external = ev.modifiers;
+                if let Some(self_mod) = key_self_modifier(t) {
+                    external.remove(self_mod);
+                }
+                if !external.is_empty() {
+                    Action::Forward
+                } else {
+                    self.state = State::Pending { trigger: t };
+                    Action::Suppress
+                }
             }
 
             // Autorepeat trigger-down on the CURRENT trigger: suppress.
@@ -352,6 +369,21 @@ impl StateMachine {
                 }
             }
         }
+    }
+}
+
+/// Map a logical-key trigger to the modifier bit it sets in its OWN keydown
+/// event. Used to distinguish "self-modifier flag set because the trigger is
+/// what just went down" from "external modifier held" when deciding whether
+/// a trigger-down from Idle should start a layer or pass through as part of
+/// an OS chord.
+fn key_self_modifier(k: LogicalKey) -> Option<Modifier> {
+    match k {
+        LogicalKey::Shift => Some(Modifier::Shift),
+        LogicalKey::Ctrl => Some(Modifier::Ctrl),
+        LogicalKey::Alt => Some(Modifier::Alt),
+        LogicalKey::Cmd => Some(Modifier::Cmd),
+        _ => None,
     }
 }
 
@@ -881,6 +913,124 @@ space:
         // 1 with Shift held — Space's qualified rule fires.
         let mut shift = ModifierMask::EMPTY;
         shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('1'), shift)),
+            emit(vec![SyntheticEvent::MoveToWorkspace(1)])
+        );
+    }
+
+    // External modifier held when trigger-down arrives → forward, so OS
+    // chords like Cmd+Space (Spotlight), Cmd+Tab (app switcher) and
+    // Shift+Tab (reverse focus traversal) keep working even when the
+    // user has bound the trigger key.
+    #[test]
+    fn cmd_held_then_space_forwards_for_os_chord() {
+        let mut m = sm(SPACE_MAC);
+        let mut cmd = ModifierMask::EMPTY;
+        cmd.insert(Modifier::Cmd);
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Space, cmd)),
+            Action::Forward
+        );
+        // Trigger-up from Idle (we never entered Pending) is also forwarded.
+        let space_up_with_cmd = RawEvent {
+            kind: EventKind::KeyUp,
+            key: LogicalKey::Space,
+            modifiers: cmd,
+        };
+        assert_eq!(m.on_event(space_up_with_cmd), Action::Forward);
+    }
+
+    #[test]
+    fn shift_held_then_tab_forwards_for_reverse_focus() {
+        let yaml = r#"
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+"#;
+        let mut m = sm(yaml);
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
+            Action::Forward
+        );
+    }
+
+    #[test]
+    fn cmd_held_then_modifier_trigger_forwards() {
+        // shift is configured as a tap-trigger. Pressing Cmd+Shift should
+        // forward Shift-down (the keydown carries both Cmd and Shift bits)
+        // — without the self-vs-external distinction we'd subtract nothing,
+        // see the Cmd flag, and forward; but if we naively subtracted ALL
+        // mods we'd see empty and enter Pending(Shift), then on Shift-up
+        // emit the on_tap and lose the Cmd+Shift chord entirely.
+        let yaml = r#"
+shift:
+  on_tap: [escape]
+"#;
+        let mut m = sm(yaml);
+        let mut both = ModifierMask::EMPTY;
+        both.insert(Modifier::Cmd);
+        both.insert(Modifier::Shift); // self-flag is set on Shift's own keydown
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Shift, both)),
+            Action::Forward
+        );
+    }
+
+    #[test]
+    fn modifier_trigger_alone_with_self_flag_still_pendings() {
+        // Real platform delivers Shift's own keydown with the Shift flag
+        // already set. The self-flag must not look like an external
+        // modifier — Shift-tap-for-Esc has to keep working.
+        let yaml = r#"
+shift:
+  on_tap: [escape]
+"#;
+        let mut m = sm(yaml);
+        let mut shift_self = ModifierMask::EMPTY;
+        shift_self.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Shift, shift_self)),
+            Action::Suppress
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::Shift)),
+            emit_tap(vec![
+                SyntheticEvent::KeyDown(NamedKey::Escape),
+                SyntheticEvent::KeyUp(NamedKey::Escape),
+            ])
+        );
+    }
+
+    #[test]
+    fn shift_pending_then_space_with_shift_flag_still_preempts() {
+        // Real-platform variant of `modifier_trigger_preempted_by_nonmodifier_trigger`:
+        // when Space arrives during Pending(Shift), the Space-down carries
+        // Shift's flag. The new "external mod → forward" guard runs only
+        // from Idle, so the preempt arm (which fires from Pending) still
+        // wins and the user gets Space's [shift,1] override.
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [shift, 1]
+      move_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Shift));
+
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        // Space-down with Shift flag set — preempt arm fires from Pending(Shift).
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Space, shift)),
+            Action::Suppress
+        );
         assert_eq!(
             m.on_event(down_with_mods(alpha('1'), shift)),
             emit(vec![SyntheticEvent::MoveToWorkspace(1)])

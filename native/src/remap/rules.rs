@@ -74,6 +74,10 @@ impl ModifierMask {
         self.0 |= Self::bit(m);
     }
 
+    pub fn remove(&mut self, m: Modifier) {
+        self.0 &= !Self::bit(m);
+    }
+
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
