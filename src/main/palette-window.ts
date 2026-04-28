@@ -47,6 +47,8 @@ const DEFAULT_WIDTH = 720
 const DEFAULT_HEIGHT = 520
 const MIN_WIDTH = 480
 const MIN_HEIGHT = 320
+const MIN_VISIBLE_INTERSECTION_WIDTH = 80
+const MIN_VISIBLE_INTERSECTION_HEIGHT = 60
 
 /**
  * Window of time after `show()` during which a blur event is treated as
@@ -67,6 +69,58 @@ const MIN_HEIGHT = 320
  *    can't meaningfully click outside the palette in under ~300 ms.
  */
 const BLUR_GRACE_MS = 250
+
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function hasEnoughVisibleArea(rect: Rect): boolean {
+  for (const display of screen.getAllDisplays()) {
+    const area = display.workArea
+    const left = Math.max(rect.x, area.x)
+    const top = Math.max(rect.y, area.y)
+    const right = Math.min(rect.x + rect.width, area.x + area.width)
+    const bottom = Math.min(rect.y + rect.height, area.y + area.height)
+    const intersectionWidth = right - left
+    const intersectionHeight = bottom - top
+    if (
+      intersectionWidth >= MIN_VISIBLE_INTERSECTION_WIDTH &&
+      intersectionHeight >= MIN_VISIBLE_INTERSECTION_HEIGHT
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function centeredPosition(width: number, height: number): { x: number; y: number } {
+  const cursor = screen.getCursorScreenPoint()
+  const display = screen.getDisplayNearestPoint(cursor)
+  const { x: dx, y: dy, width: dw, height: dh } = display.workArea
+  return {
+    x: Math.round(dx + (dw - width) / 2),
+    y: Math.round(dy + dh * 0.28) // upper third, feels natural for launchers
+  }
+}
+
+function resolvePalettePosition(width: number, height: number): { x: number; y: number } {
+  const saved = settingsStore.get().palettePosition
+  if (
+    saved &&
+    hasEnoughVisibleArea({
+      x: saved.x,
+      y: saved.y,
+      width,
+      height
+    })
+  ) {
+    return { x: saved.x, y: saved.y }
+  }
+  return centeredPosition(width, height)
+}
 
 class PaletteWindow {
   private window: BrowserWindow | null = null
@@ -265,12 +319,7 @@ class PaletteWindow {
     const width = Math.max(saved?.width ?? DEFAULT_WIDTH, MIN_WIDTH)
     const height = Math.max(saved?.height ?? DEFAULT_HEIGHT, MIN_HEIGHT)
 
-    // Center on the display containing the cursor.
-    const cursor = screen.getCursorScreenPoint()
-    const display = screen.getDisplayNearestPoint(cursor)
-    const { x: dx, y: dy, width: dw, height: dh } = display.workArea
-    const x = Math.round(dx + (dw - width) / 2)
-    const y = Math.round(dy + dh * 0.28) // upper third, feels natural for launchers
+    const { x, y } = resolvePalettePosition(width, height)
     win.setBounds({ x, y, width, height })
 
     // Show the window fully transparent so the compositor starts producing
@@ -417,6 +466,11 @@ class PaletteWindow {
 
   endMove(): void {
     this.moveStart = null
+    if (!this.window || this.window.isDestroyed()) return
+    const [x, y] = this.window.getPosition()
+    const stored = settingsStore.get().palettePosition
+    if (stored?.x === x && stored.y === y) return
+    settingsStore.patch({ palettePosition: { x, y } })
   }
 }
 

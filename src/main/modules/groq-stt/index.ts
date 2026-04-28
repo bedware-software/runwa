@@ -209,6 +209,12 @@ export function createGroqSttModule(): PaletteModule {
     const prompt = configString(cfg, 'prompt')
 
     try {
+      console.info('[groq-stt] transcribe start', {
+        bytes: audio.data.byteLength,
+        mimeType: audio.mimeType,
+        model,
+        language: language || 'auto'
+      })
       const { text } = await transcribe({
         apiKey,
         audio: audio.data,
@@ -236,8 +242,10 @@ export function createGroqSttModule(): PaletteModule {
       // nothing getting pasted is enough of a signal. No notification.
     } catch (err) {
       if (err instanceof GroqError) {
+        console.warn('[groq-stt] transcribe failed', { status: err.status, message: err.message })
         notify('Groq Transcription', `API error (${err.status}): ${err.message}`, 'critical')
       } else {
+        console.error('[groq-stt] transcribe failed (unexpected)', err)
         notify('Groq Transcription', `Transcription failed: ${(err as Error).message}`, 'critical')
       }
     } finally {
@@ -319,4 +327,3 @@ function pickFilename(mimeType: string): string {
   if (mimeType.includes('wav')) return 'audio.wav'
   return 'audio.webm'
 }
-

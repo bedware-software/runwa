@@ -205,6 +205,11 @@ export interface PaletteSize {
   height: number
 }
 
+export interface PalettePosition {
+  x: number
+  y: number
+}
+
 export interface Settings {
   /** Global activation hotkey as an Electron Accelerator string. */
   activationHotkey: string
@@ -232,6 +237,8 @@ export interface Settings {
   runAsAdmin: boolean
   /** User-resized dimensions of the palette window. Absent = use hard-coded default. */
   paletteSize?: PaletteSize
+  /** Last user-dragged top-left position of the palette window. */
+  palettePosition?: PalettePosition
   modules: Record<ModuleId, ModuleSettings>
 }
 
