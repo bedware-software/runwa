@@ -226,17 +226,37 @@ impl StateMachine {
                 }
             }
 
-            // Non-modifier trigger preempts a modifier trigger in Pending.
-            // Example: user holds Shift (a configured trigger) and then
-            // presses Space (also a trigger). Intent is to use Space's
-            // layer with Shift as a physical modifier, NOT Shift's tap or
-            // transparent-modifier-layer. Switch the primary trigger to
-            // Space and let its rules fire on subsequent keys — the
-            // ModifierMask snapshot carries Shift on those events via
-            // GetAsyncKeyState (Windows) / CGEventFlags (macOS), so
-            // `keys: [shift, n]` matches regardless of press order.
-            (State::Pending { trigger: ts }, EventKind::KeyDown, Some(te), Some(_))
-                if ts != te && ts.is_modifier() && !te.is_modifier() =>
+            // Non-modifier trigger preempts a modifier trigger in Pending —
+            // but only when the new trigger's on_hold has rules that use
+            // the held modifier.
+            //
+            // Example (preempt fires): user holds Shift (a configured
+            // trigger) and then presses Space (also a trigger) whose
+            // on_hold has a `keys: [shift, 1]` rule. Intent is to use
+            // Space's layer with Shift as a physical modifier, NOT
+            // Shift's tap or transparent-modifier-layer. Switch the
+            // primary trigger to Space and let its rules fire on
+            // subsequent keys — the ModifierMask snapshot carries Shift
+            // on those events via GetAsyncKeyState (Windows) /
+            // CGEventFlags (macOS), so `keys: [shift, n]` matches
+            // regardless of press order.
+            //
+            // Counter-example (preempt does NOT fire, falls through to
+            // the interruption arm below): user holds Shift and presses
+            // Tab. Tab is a trigger with `on_tap: [tab]` and an on_hold
+            // whose rules don't use Shift as a modifier. The user's
+            // intent is the OS Shift+Tab chord, not Tab's tap. Without
+            // the `uses_modifier` guard, the preempt arm switches state
+            // to Pending(Tab) and Tab-up emits Tab's on_tap — the user
+            // gets plain Tab on the first press (the "first time"
+            // weirdness reported users see, after which Shift is still
+            // held and a second press lands at Idle and forwards
+            // correctly).
+            (State::Pending { trigger: ts }, EventKind::KeyDown, Some(te), Some(b))
+                if ts != te
+                    && ts.is_modifier()
+                    && !te.is_modifier()
+                    && key_self_modifier(ts).is_some_and(|m| b.uses_modifier(m)) =>
             {
                 self.state = State::Pending { trigger: te };
                 Action::Suppress
@@ -955,6 +975,82 @@ tab:
         assert_eq!(
             m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
             Action::Forward
+        );
+    }
+
+    // Real-config variant: Shift is also a configured trigger, so the
+    // user's first Shift+Tab arrives in Pending(Shift) rather than Idle.
+    // The preempt-from-Pending arm used to unconditionally switch into
+    // Pending(Tab), and Tab-up then emitted Tab's `on_tap` — the user
+    // got plain Tab on the first press while Shift was held, then
+    // correct Shift+Tab on subsequent presses (because the second press
+    // arrives at Idle, where the external-modifier guard forwards).
+    //
+    // Tab's on_hold here doesn't use Shift in any rule, so the new
+    // `uses_modifier` guard rejects the preempt and the interruption
+    // arm runs Shift's TransparentModifier(Shift) layer instead — which
+    // forwards the chord by emitting ModifierDown(Shift) + KeyDown(Tab).
+    #[test]
+    fn shift_pending_then_tab_emits_shift_tab_via_transparent_layer() {
+        let yaml = r#"
+shift:
+  on_tap: [escape]
+
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+    - { keys: [k], to_hotkey: [ctrl, shift, tab] }
+"#;
+        let mut m = sm(yaml);
+
+        // Shift first — own keydown has Shift's self-flag set on real
+        // platforms, but state machine doesn't care; enter Pending(Shift).
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+
+        // Tab arrives with Shift held in the modifier mask. Tab's
+        // on_hold rules use only `j` and `k` (no shift-qualified rules),
+        // so the preempt guard rejects switching into Pending(Tab).
+        // Falls through to the interruption arm: Shift's transparent
+        // layer fires, emitting ModifierDown(Shift) + KeyDown(Tab).
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
+            emit(vec![
+                SyntheticEvent::ModifierDown(Modifier::Shift),
+                SyntheticEvent::KeyDown(NamedKey::Tab),
+            ])
+        );
+    }
+
+    // Counter-case: when the new trigger's on_hold DOES use the held
+    // modifier, the preempt arm still fires. Same setup as
+    // `modifier_trigger_preempted_by_nonmodifier_trigger` plus the
+    // realistic Shift-self flag on the Space-down — guards against
+    // accidentally regressing the [shift, 1] preempt path while
+    // tightening the guard for the Tab path above.
+    #[test]
+    fn shift_pending_then_space_with_shift_rule_still_preempts() {
+        let yaml = r#"
+shift:
+  on_tap: [escape]
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [shift, 1]
+      move_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        // Space has a `keys: [shift, 1]` override — preempt arm fires,
+        // state becomes Pending(Space).
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Space, shift)),
+            Action::Suppress
         );
     }
 

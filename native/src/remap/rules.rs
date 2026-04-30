@@ -82,6 +82,10 @@ impl ModifierMask {
         self.0 == 0
     }
 
+    pub fn contains(self, m: Modifier) -> bool {
+        self.0 & Self::bit(m) != 0
+    }
+
     fn bit(m: Modifier) -> u8 {
         match m {
             Modifier::Ctrl => Self::CTRL_BIT,
@@ -173,6 +177,23 @@ pub struct ResolvedBinding {
     /// other key in between. `None` = no-op.
     pub on_tap: Option<Vec<SyntheticEvent>>,
     pub on_hold: ResolvedHold,
+}
+
+impl ResolvedBinding {
+    /// True when this trigger's `on_hold` has at least one explicit
+    /// override keyed by a modifier mask that includes `m`. Used by the
+    /// preempt-from-Pending path to decide whether holding e.g. Shift and
+    /// then pressing this trigger should switch into its layer (because
+    /// the layer has `keys: [shift, …]` rules) or pass through as an OS
+    /// chord like Shift+Tab.
+    pub fn uses_modifier(&self, m: Modifier) -> bool {
+        match &self.on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                overrides.keys().any(|(mask, _)| mask.contains(m))
+            }
+            ResolvedHold::TransparentModifier(_) | ResolvedHold::Passthrough => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
