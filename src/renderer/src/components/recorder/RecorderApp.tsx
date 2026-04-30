@@ -20,18 +20,20 @@ export function RecorderApp() {
       return
     }
 
-    // Reuse a single MediaStream across recordings — getUserMedia's first
-    // call on macOS/Linux can take hundreds of ms while the OS opens the
-    // input device; keeping the stream warm means second+ hotkey presses
-    // start capturing instantly. The stream is torn down on unload.
+    // Open the mic only while a recording is in flight. Keeping a warm
+    // MediaStream between hotkey presses would mean macOS' orange
+    // "microphone in use" indicator stays on permanently, which the user
+    // (rightly) reads as the app eavesdropping. Trade-off: each new
+    // recording pays the getUserMedia cost again — a couple of hundred
+    // ms on macOS/Linux while the OS opens the input device. The
+    // user-facing fix is worth that latency.
     let stream: MediaStream | null = null
     let recorder: MediaRecorder | null = null
     let activeRequestId: number | null = null
     let chunks: Blob[] = []
     let mimeType = ''
 
-    const ensureStream = async (): Promise<MediaStream> => {
-      if (stream && stream.active) return stream
+    const openStream = async (): Promise<MediaStream> => {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -40,6 +42,12 @@ export function RecorderApp() {
         }
       })
       return stream
+    }
+
+    const releaseStream = (): void => {
+      if (!stream) return
+      for (const track of stream.getTracks()) track.stop()
+      stream = null
     }
 
     const pickMimeType = (): string => {
@@ -59,7 +67,7 @@ export function RecorderApp() {
 
     const onStart = async (payload: { requestId: number }): Promise<void> => {
       try {
-        const s = await ensureStream()
+        const s = await openStream()
         mimeType = pickMimeType()
         const options: MediaRecorderOptions = mimeType ? { mimeType } : {}
         recorder = new MediaRecorder(s, options)
@@ -72,6 +80,11 @@ export function RecorderApp() {
         recorder.onstop = async () => {
           const reqId = activeRequestId
           activeRequestId = null
+          // Release the mic as soon as the recorder finishes finalizing —
+          // anything past this point is just packaging the blob for IPC,
+          // and macOS keeps showing the orange indicator until every track
+          // is explicitly stopped.
+          releaseStream()
           if (reqId == null) return
           const blob = new Blob(chunks, {
             type: mimeType || 'application/octet-stream'
@@ -91,6 +104,7 @@ export function RecorderApp() {
         recorder.onerror = (ev) => {
           const reqId = activeRequestId
           activeRequestId = null
+          releaseStream()
           if (reqId != null) {
             const anyEv = ev as unknown as { error?: Error }
             api.sendError(reqId, anyEv.error?.message ?? 'MediaRecorder error')
@@ -99,6 +113,7 @@ export function RecorderApp() {
         recorder.start()
       } catch (err) {
         activeRequestId = null
+        releaseStream()
         api.sendError(payload.requestId, (err as Error).message)
       }
     }
@@ -110,6 +125,7 @@ export function RecorderApp() {
         } catch (err) {
           const reqId = activeRequestId
           activeRequestId = null
+          releaseStream()
           if (reqId != null) api.sendError(reqId, (err as Error).message)
         }
       }

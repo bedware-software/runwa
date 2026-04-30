@@ -196,6 +196,28 @@ export function PaletteApp() {
       return
     }
 
+    // Quick-launch digits: when the result list is narrow enough that
+    // ResultsList renders 1..N badges (≤4 items), pressing the matching
+    // digit selects + runs that row. Mirrors the badge cap so the chord
+    // and the visual hint stay in lock-step. We bail on modifiers so
+    // future Ctrl/Alt/Cmd+digit chords stay free for other features.
+    if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      items.length > 0 &&
+      items.length <= 4 &&
+      /^[1-4]$/.test(e.key)
+    ) {
+      const idx = Number(e.key) - 1
+      if (idx < items.length) {
+        e.preventDefault()
+        setSelectedIndex(idx)
+        void executeSelected()
+        return
+      }
+    }
+
     // Window-local shortcut: Open Settings (default Ctrl+,). Only fires while
     // the palette has focus — intentionally not a globalShortcut so the chord
     // stays available to IDEs when runwa isn't active.

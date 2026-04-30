@@ -51,6 +51,12 @@ export function ResultsList({
     )
   }
 
+  // Show 1..N digit hints only when the list is short enough that the
+  // user can plausibly hit the right number — the palette intercepts
+  // the matching keypress and runs the row. Above that we'd just be
+  // adding visual noise nobody can use anyway.
+  const showNumbers = items.length > 0 && items.length <= 4
+
   return (
     <div ref={listRef} className="flex-1 overflow-y-auto">
       {items.map((item, index) => (
@@ -58,6 +64,7 @@ export function ResultsList({
           key={item.id}
           item={item}
           isSelected={index === selectedIndex}
+          numberHint={showNumbers ? index + 1 : undefined}
           onClick={() => {
             setSelectedIndex(index)
             void executeSelected()

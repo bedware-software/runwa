@@ -24,13 +24,13 @@ const MANIFEST: ModuleManifest = {
       defaultValue: true
     },
     {
-      key: 'includeHidden',
+      key: 'hideHelperApps',
       type: 'checkbox',
       os: 'macos',
-      label: 'Hidden apps',
+      label: 'Hide helper apps',
       description:
-        'Show `.app` bundles whose name starts with a dot (e.g. `.Karabiner-VirtualHIDDevice-Manager`). These are system helpers macOS hides from Finder and Spotlight by default — usually not what you want to launch.',
-      defaultValue: false
+        'Hide `.app` bundles whose name starts with a dot (e.g. `.Karabiner-VirtualHIDDevice-Manager`). These are system helpers macOS hides from Finder and Spotlight by default — usually not what you want to launch.',
+      defaultValue: true
     },
     {
       key: 'includeUwp',
@@ -70,11 +70,11 @@ const MANIFEST: ModuleManifest = {
       options: [
         {
           value: 'launch',
-          label: 'Launch the app immediately without pressing Enter'
+          label: 'Run on match'
         },
         {
           value: 'prioritize',
-          label: 'Boost the matching app to the top of results'
+          label: 'Prioritize in results'
         }
       ]
     }
@@ -165,7 +165,7 @@ export function createAppSearchModule(): PaletteModule {
       const includeStartMenu = context.config.includeStartMenu !== false
       const includeUwp = context.config.includeUwp !== false
       const includeDesktop = context.config.includeDesktop === true
-      const includeHidden = context.config.includeHidden === true
+      const includeHidden = context.config.hideHelperApps === false
       const customPaths = parseCustomPaths(context.config.customPaths)
       const aliasMode =
         context.config.aliasMode === 'prioritize' ? 'prioritize' : 'launch'

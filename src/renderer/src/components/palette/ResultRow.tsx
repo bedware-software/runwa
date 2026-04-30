@@ -6,6 +6,11 @@ import { cn } from '@/lib/utils'
 interface Props {
   item: PaletteItem
   isSelected: boolean
+  /** When set, render a small `1`–`9` glyph stuck to the left window edge —
+   * the number the user can press to launch this row directly. ResultsList
+   * only sets it when the result count is small enough that the digit
+   * shortcut is wired up at the palette level. */
+  numberHint?: number
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
 }
@@ -28,7 +33,7 @@ function isImageUrl(hint: string | undefined): hint is string {
   return !!hint && hint.startsWith('data:')
 }
 
-export function ResultRow({ item, isSelected, onClick, onContextMenu }: Props) {
+export function ResultRow({ item, isSelected, numberHint, onClick, onContextMenu }: Props) {
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
@@ -37,10 +42,21 @@ export function ResultRow({ item, isSelected, onClick, onContextMenu }: Props) {
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
-        'flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
+        'relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
         isSelected && 'bg-accent text-accent-foreground'
       )}
     >
+      {numberHint !== undefined && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'absolute left-0 top-1/2 -translate-y-1/2 text-[10px] font-mono leading-none select-none pointer-events-none',
+            isSelected ? 'text-accent-foreground/60' : 'text-muted-foreground/60'
+          )}
+        >
+          {numberHint}
+        </span>
+      )}
       <div
         className={cn(
           'h-8 w-8 rounded-md flex items-center justify-center shrink-0',
