@@ -37,6 +37,11 @@ export function PaletteApp() {
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const modules = useSettingsStore((s) => s.modules)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
+  // The keycaps + matching digit chord live or die together — drive both
+  // off the same setting so an unchecked toggle silently disables both.
+  const quickLaunchDigits = useSettingsStore(
+    (s) => s.settings?.quickLaunchDigits ?? true
+  )
   const isHydrated = useSettingsStore((s) => s.isHydrated)
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -190,7 +195,10 @@ export function PaletteApp() {
     // digit selects + runs that row. Mirrors the badge cap so the chord
     // and the visual hint stay in lock-step. We bail on modifiers so
     // future Ctrl/Alt/Cmd+digit chords stay free for other features.
+    // The whole feature is gated by the General-panel toggle so users
+    // who'd rather just type "12" / "34" into the search box can opt out.
     if (
+      quickLaunchDigits &&
       !e.ctrlKey &&
       !e.metaKey &&
       !e.altKey &&
@@ -235,6 +243,7 @@ export function PaletteApp() {
         selectedIndex={selectedIndex}
         isLoading={isLoading}
         onOpenContextMenu={openContextMenuForRow}
+        showQuickLaunchDigits={quickLaunchDigits}
       />
 
       <div className="h-10 px-2 flex items-center justify-between border-t border-border bg-toolbar text-[12px] font-medium text-muted-foreground shrink-0">

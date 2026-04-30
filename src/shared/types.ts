@@ -231,6 +231,13 @@ export interface PalettePosition {
 export interface Settings {
   theme: Theme
   /**
+   * Render `1`–`4` keycap chips on the left edge of the palette result
+   * list when ≤ 4 rows match, and intercept the matching digit key to
+   * launch that row directly. Off = no chips, no chord — type / arrow
+   * / Enter only.
+   */
+  quickLaunchDigits: boolean
+  /**
    * Launch runwa automatically when the user logs into their OS session.
    * Cross-platform (Electron's `app.setLoginItemSettings` handles both
    * Windows HKCU\...\Run and macOS LoginItems). Only meaningful in
@@ -254,6 +261,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
+  quickLaunchDigits: true,
   startAtLogin: false,
   runAsAdmin: false,
   modules: {}

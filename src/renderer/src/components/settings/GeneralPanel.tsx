@@ -14,6 +14,10 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 export function GeneralPanel() {
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const setTheme = useSettingsStore((s) => s.setTheme)
+  const quickLaunchDigits = useSettingsStore(
+    (s) => s.settings?.quickLaunchDigits ?? DEFAULT_SETTINGS.quickLaunchDigits
+  )
+  const setQuickLaunchDigits = useSettingsStore((s) => s.setQuickLaunchDigits)
 
   const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false)
 
@@ -46,6 +50,21 @@ export function GeneralPanel() {
               {t.label}
             </button>
           ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-foreground mb-1">Palette</h2>
+        <p className="text-xs text-muted-foreground mb-3">
+          Tweaks for the palette window's behaviour and shortcuts.
+        </p>
+        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+          <ToggleRow
+            title="Quick-launch digits"
+            description="When the result list narrows to 4 or fewer rows, render 1–4 keycaps along the left edge and let the matching digit run that row directly."
+            checked={quickLaunchDigits}
+            onChange={(v) => void setQuickLaunchDigits(v)}
+          />
         </div>
       </section>
 
