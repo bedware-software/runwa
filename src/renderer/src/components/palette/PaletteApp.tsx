@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowUpDown, CornerDownLeft, Settings as SettingsIcon } from 'lucide-react'
+import { ArrowUpDown, CornerDownLeft } from 'lucide-react'
 import { usePaletteStore } from '@/store/palette-store'
 import { useSettingsStore } from '@/store/settings-store'
-import { keyEventToAccelerator } from '@/lib/hotkey'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
@@ -10,6 +9,14 @@ import { ContextMenu, revealAction, setAliasAction } from './ContextMenu'
 import { AliasInputModal } from './AliasInputModal'
 import { FooterHint } from './FooterHint'
 import { Kbd, Hotkey } from '../ui/Kbd'
+
+/**
+ * Module ids whose entries the user can attach a Ctrl+K alias to. Both
+ * modules expose stable per-item ids (app paths, command ids) so an alias
+ * stored in settings still matches the same row across restarts. Adding a
+ * module here is the only step needed to surface the alias menu for it.
+ */
+const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette'])
 
 export function PaletteApp() {
   const query = usePaletteStore((s) => s.query)
@@ -23,7 +30,6 @@ export function PaletteApp() {
   const selectPrev = usePaletteStore((s) => s.selectPrev)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
-  const unscope = usePaletteStore((s) => s.unscope)
   const refresh = usePaletteStore((s) => s.refresh)
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
 
@@ -31,9 +37,6 @@ export function PaletteApp() {
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const modules = useSettingsStore((s) => s.modules)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
-  const openSettingsHotkey = useSettingsStore(
-    (s) => s.settings?.openSettingsHotkey ?? ''
-  )
   const isHydrated = useSettingsStore((s) => s.isHydrated)
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -46,10 +49,8 @@ export function PaletteApp() {
   const setModuleAlias = useSettingsStore((s) => s.setModuleAlias)
 
   const selectedItem = items[selectedIndex]
-  // Alias actions are app-search-specific today — the module owns the
-  // stable entry id schema. Other modules can join the party by surfacing
-  // their own module id + alias-capable rows.
-  const canSetAlias = selectedItem?.moduleId === 'app-search'
+  const canSetAlias =
+    !!selectedItem && ALIAS_CAPABLE_MODULES.has(selectedItem.moduleId)
   const contextActions = useMemo(() => {
     const actions = []
     if (canSetAlias) {
@@ -69,11 +70,12 @@ export function PaletteApp() {
     // Right-click should both "select" the row and open the menu; callers
     // that click on a row without any applicable action get nothing
     // (avoids an instant open-close flicker from the canOpenMenu effect
-    // below). app-search rows always have at least the "Set alias…"
-    // action, so the menu opens even for UWP entries without revealPath.
+    // below). Alias-capable rows always have at least the "Set alias…"
+    // action, so the menu opens even when no revealPath is set.
     const target = items[index]
     const hasAction =
-      target && (target.revealPath || target.moduleId === 'app-search')
+      !!target &&
+      (target.revealPath !== undefined || ALIAS_CAPABLE_MODULES.has(target.moduleId))
     if (!hasAction) return
     setSelectedIndex(index)
     setMenuOpen(true)
@@ -164,20 +166,7 @@ export function PaletteApp() {
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      // Escape inside a scoped module returns to the home-screen picker
-      // instead of dismissing — matches Alfred / Raycast convention. A
-      // second Escape (now unscoped) dismisses the palette.
-      if (activeModuleId) {
-        unscope()
-      } else {
-        void window.electronAPI.paletteHide()
-      }
-      return
-    }
-    if (e.key === 'Backspace' && query === '' && activeModuleId) {
-      // Backspace on an empty query while scoped also returns to the picker.
-      e.preventDefault()
-      unscope()
+      void window.electronAPI.paletteHide()
       return
     }
     if (e.key === 'ArrowDown') {
@@ -215,17 +204,6 @@ export function PaletteApp() {
         setSelectedIndex(idx)
         void executeSelected()
         return
-      }
-    }
-
-    // Window-local shortcut: Open Settings (default Ctrl+,). Only fires while
-    // the palette has focus — intentionally not a globalShortcut so the chord
-    // stays available to IDEs when runwa isn't active.
-    if (openSettingsHotkey) {
-      const accel = keyEventToAccelerator(e)
-      if (accel && accel === openSettingsHotkey) {
-        e.preventDefault()
-        void window.electronAPI.openSettings()
       }
     }
   }
@@ -275,17 +253,8 @@ export function PaletteApp() {
           {activeModuleId === 'app-search' && (
             <FooterHint label="Rescan" keys={<Hotkey value="Ctrl+R" />} />
           )}
-          <FooterHint
-            label={activeModuleId ? 'Back' : 'Dismiss'}
-            keys={<Hotkey value="Esc" />}
-          />
+          <FooterHint label="Dismiss" keys={<Hotkey value="Esc" />} />
         </div>
-        <FooterHint
-          leading={<SettingsIcon size={12} strokeWidth={1.5} />}
-          label="Settings"
-          keys={<Hotkey value={openSettingsHotkey} />}
-          onClick={() => void window.electronAPI.openSettings()}
-        />
       </div>
 
       <ContextMenu
@@ -294,7 +263,7 @@ export function PaletteApp() {
         actions={contextActions}
       />
 
-      {selectedItem && selectedItem.moduleId === 'app-search' && (
+      {selectedItem && canSetAlias && (
         <AliasInputModal
           open={aliasModalOpen}
           itemTitle={selectedItem.title}
@@ -306,7 +275,7 @@ export function PaletteApp() {
             // the alias chip renders (or disappears) immediately;
             // preserveSelection keeps the cursor on the just-edited
             // row instead of snapping back to the top of the list.
-            void setModuleAlias('app-search', selectedItem.id, alias || null).then(
+            void setModuleAlias(selectedItem.moduleId, selectedItem.id, alias || null).then(
               () => refresh({ preserveSelection: true })
             )
             setAliasModalOpen(false)

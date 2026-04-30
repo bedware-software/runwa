@@ -15,8 +15,6 @@ interface SettingsState {
 
   hydrate: () => Promise<void>
   setTheme: (theme: Theme) => Promise<void>
-  setActivationHotkey: (hotkey: string) => Promise<void>
-  setOpenSettingsHotkey: (hotkey: string) => Promise<void>
   setStartAtLogin: (enabled: boolean) => Promise<void>
   setRunAsAdmin: (enabled: boolean) => Promise<void>
   setModuleEnabled: (moduleId: ModuleId, enabled: boolean) => Promise<void>
@@ -56,24 +54,6 @@ export const useSettingsStore = create<SettingsState>()(
 
     setTheme: async (theme: Theme) => {
       const updated = await window.electronAPI.settingsSet({ theme })
-      set((s) => {
-        s.settings = updated
-      })
-    },
-
-    setActivationHotkey: async (hotkey: string) => {
-      const updated = await window.electronAPI.settingsSet({
-        activationHotkey: hotkey
-      })
-      set((s) => {
-        s.settings = updated
-      })
-    },
-
-    setOpenSettingsHotkey: async (hotkey: string) => {
-      const updated = await window.electronAPI.settingsSet({
-        openSettingsHotkey: hotkey
-      })
       set((s) => {
         s.settings = updated
       })

@@ -278,7 +278,7 @@ class PaletteWindow {
     }
   }
 
-  show(moduleId?: ModuleId): void {
+  show(moduleId: ModuleId): void {
     // Windows virtual-desktop affinity: a BrowserWindow's HWND sticks to the
     // virtual desktop where it was last shown. Hide → switch desktop → show
     // re-reveals the HWND on the *original* desktop, invisibly to the user
@@ -422,14 +422,6 @@ class PaletteWindow {
       }
     }
     this.previousWindowId = null
-  }
-
-  toggle(moduleId?: ModuleId): void {
-    if (this.window?.isVisible()) {
-      this.hide()
-    } else {
-      this.show(moduleId)
-    }
   }
 
   getBrowserWindow(): BrowserWindow | null {

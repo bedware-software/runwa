@@ -2,19 +2,16 @@ import { HotkeyRecorder } from './HotkeyRecorder'
 import { cn } from '@/lib/utils'
 
 /**
- * Reusable row for a single hotkey binding. Used by both GeneralPanel
- * (activation + open-settings) and ModulePanel (per-module direct-launch
- * hotkeys) so every binding in Settings shares the same visuals:
+ * Reusable row for a single hotkey binding. Drives the per-module
+ * direct-launch hotkeys in ModulePanel — every module that opts into
+ * `supportsDirectLaunch` renders one row of this shape.
  *
- *   - Title + scope badge (Global / Window-local)
+ *   - Title + scope badge
  *   - Short description
  *   - HotkeyRecorder with a reset-to-default affordance whenever the
  *     current value diverges from the recommended one
- *
- * Callers wrap N of these in the same outlined card to get the stacked
- * "Hotkeys" section look — see GeneralPanel for the canonical pattern.
  */
-export type HotkeyScope = 'Global' | 'Window-local'
+export type HotkeyScope = 'Global'
 
 interface Props {
   title: string

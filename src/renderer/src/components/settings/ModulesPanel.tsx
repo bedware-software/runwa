@@ -151,35 +151,51 @@ function ConfigGroup({ label, fields, values, onPatch, onAction }: ConfigGroupPr
       f.type === 'checkbox'
   )
   const checkedFlags = checkboxFields.map((f) => {
+    if (f.readOnly === true) return Boolean(f.defaultValue)
     const v = values[f.key]
     return typeof v === 'boolean' ? v : f.defaultValue
   })
   const allOn = checkedFlags.length > 0 && checkedFlags.every(Boolean)
   const noneOn = checkedFlags.every((v) => !v)
   const mixed = !allOn && !noneOn
+  // The master only governs editable checkboxes. When every checkbox in
+  // the group is read-only (e.g. command-palette's Settings group),
+  // the master is locked too — there's nothing for it to flip.
+  const editableFields = checkboxFields.filter((f) => f.readOnly !== true)
+  const masterReadOnly = editableFields.length === 0
   // Mixed and all-off both flip to all-on; only all-on flips to all-off.
   // Matches the "click to fully enable, click again to fully disable"
   // intuition users have from system Settings panes.
   const toggleAll = (): void => {
+    if (masterReadOnly) return
     const next = !allOn
     const patch: Record<string, ModuleConfigValue> = {}
-    for (const f of checkboxFields) patch[f.key] = next
+    for (const f of editableFields) patch[f.key] = next
     onPatch(patch)
   }
 
   return (
     <div className="flex flex-col gap-3 border border-border rounded-md p-3 bg-card/40">
-      <label className="flex items-center gap-3 cursor-pointer select-none">
+      <label
+        className={cn(
+          'flex items-center gap-3 select-none',
+          masterReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'
+        )}
+        title={masterReadOnly ? 'Built-in — always on.' : undefined}
+      >
         <button
           type="button"
           role="checkbox"
           aria-checked={mixed ? 'mixed' : allOn}
+          aria-disabled={masterReadOnly || undefined}
+          disabled={masterReadOnly}
           onClick={toggleAll}
           className={cn(
             'h-4 w-4 rounded-[3px] border flex items-center justify-center shrink-0 transition-colors',
             allOn || mixed
               ? 'bg-primary border-primary'
-              : 'bg-secondary border-input hover:border-muted-foreground'
+              : 'bg-secondary border-input hover:border-muted-foreground',
+            masterReadOnly && 'opacity-60 cursor-not-allowed'
           )}
         >
           {allOn && (

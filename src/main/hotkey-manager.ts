@@ -29,13 +29,6 @@ class HotkeyManager {
     onPress: () => void
     onRelease: () => void
   }> = []
-  private activationRegistered = false
-
-  /** True if the current activation hotkey is live. False means another
-   * app is holding the chord and the user needs to pick a different one. */
-  isActivationRegistered(): boolean {
-    return this.activationRegistered
-  }
 
   init(): void {
     this.refresh(settingsStore.get())
@@ -44,74 +37,15 @@ class HotkeyManager {
 
   private refresh(settings: Settings): void {
     this.unregisterAll()
-    this.activationRegistered = false
 
-    // 1. Activation hotkey → toggle palette
-    //    (openSettingsHotkey is intentionally NOT registered globally — it's
-    //    a window-local shortcut handled in the renderer, so chords like
-    //    Ctrl+, don't hijack the same binding in IDEs.)
-    //
-    // If the user cleared the activation binding (Backspace in the
-    // HotkeyRecorder persists an empty string), skip the registration
-    // entirely — passing "" to Electron's globalShortcut throws a noisy
-    // "conversion failure" TypeError. The downstream fallback in
-    // src/main/index.ts still catches this and opens the settings window
-    // so the user can rebind.
-    if (settings.activationHotkey && settings.activationHotkey.trim() !== '') {
-      const activationToggle = (): void => {
-        paletteWindow.toggle()
-      }
-      if (isModifierOnlyAccelerator(settings.activationHotkey)) {
-        // Modifier-only chord — Electron globalShortcut can't take it.
-        // Fall through to uiohook, which also gives us a free keyup we
-        // don't currently use (toggle semantics only need press).
-        if (!isUiohookAvailable()) {
-          console.warn(
-            `[hotkey] activation: modifier-only chord "${settings.activationHotkey}" requires uiohook-napi (${
-              getLoadErrorMessage() || 'not loaded'
-            }). Rebind to a chord with a main key.`
-          )
-        } else {
-          const binding = acceleratorToKeyBinding(settings.activationHotkey)
-          if (binding) {
-            const noop = (): void => undefined
-            const ok = uiohookBridge.registerHoldToTalk(
-              binding,
-              activationToggle,
-              noop
-            )
-            if (ok) {
-              this.uiohookBindings.push({
-                binding,
-                onPress: activationToggle,
-                onRelease: noop
-              })
-              this.activationRegistered = true
-            }
-          }
-        }
-      } else {
-        this.activationRegistered = this.tryRegister(
-          settings.activationHotkey,
-          'activation',
-          activationToggle
-        )
-      }
-    } else {
-      console.warn(
-        '[hotkey] activation hotkey is empty; skipping registration. Rebind it in Settings.'
-      )
-    }
-
-    // 2. Per-module direct-launch hotkeys
+    // Per-module direct-launch hotkeys. There is no aggregate "open palette"
+    // chord any more — every entry into the palette names its own module.
     for (const [moduleId, mod] of Object.entries(settings.modules)) {
       if (!mod.enabled) continue
       const key = mod.directLaunchHotkey
-      // Skip if empty (user cleared it) or whitespace-only — same reason
-      // as the activation guard above.
+      // Skip if empty (user cleared it) or whitespace-only — passing "" to
+      // Electron's globalShortcut throws a noisy "conversion failure" error.
       if (!key || key.trim() === '') continue
-      // Avoid double-registering the same accelerator
-      if (key === settings.activationHotkey) continue
 
       const module = moduleRegistry.getModule(moduleId as ModuleId)
       const hasCustomHandler = typeof module?.handleDirectLaunch === 'function'

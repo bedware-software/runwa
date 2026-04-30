@@ -1,3 +1,4 @@
+import type { Ref } from 'react'
 import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
@@ -13,6 +14,10 @@ interface Props {
   numberHint?: number
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
+  /** Set by ResultsList so it can scroll the selected row into view —
+   * positional indexing on listRef.children breaks once we interleave
+   * group headers between rows. */
+  ref?: Ref<HTMLDivElement>
 }
 
 /**
@@ -33,12 +38,20 @@ function isImageUrl(hint: string | undefined): hint is string {
   return !!hint && hint.startsWith('data:')
 }
 
-export function ResultRow({ item, isSelected, numberHint, onClick, onContextMenu }: Props) {
+export function ResultRow({
+  item,
+  isSelected,
+  numberHint,
+  onClick,
+  onContextMenu,
+  ref
+}: Props) {
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
   return (
     <div
+      ref={ref}
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(

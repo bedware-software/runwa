@@ -1,7 +1,6 @@
 import { app, Menu, MenuItemConstructorOptions, nativeImage, nativeTheme, Tray } from 'electron'
 import { readFileSync } from 'fs'
 import path from 'path'
-import { paletteWindow } from './palette-window'
 import { settingsWindow } from './settings-window'
 import { resetCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { checkForUpdatesNow } from './auto-update'
@@ -53,9 +52,6 @@ class TrayManager {
     this.tray.setToolTip(this.tooltipFor(initialDesktop, initialShowNumber))
     this.refreshMenu()
 
-    // Left-click on tray icon toggles the palette (Windows/Linux convention).
-    this.tray.on('click', () => paletteWindow.toggle())
-
     // Prime state so the first poll tick recognises changes correctly.
     this.lastDesktop = initialDesktop
     this.lastDark = initialDark
@@ -106,7 +102,6 @@ class TrayManager {
   private refreshMenu(): void {
     if (!this.tray) return
     const items: MenuItemConstructorOptions[] = [
-      { label: 'Show Palette', click: () => paletteWindow.show() },
       { label: 'Settings', click: () => settingsWindow.open() }
     ]
 

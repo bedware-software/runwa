@@ -19,7 +19,7 @@ A cross-platform (Win & Mac) command palette launcher inspired by [PowerToys Com
 - **Groq Transcription** — push-to-talk or toggle voice-to-text via Groq Whisper. Direct-launch hotkey captures mic audio, transcribes, and drops the result on the clipboard (optional auto-paste).
 - **Keyboard Remap** — low-level, system-wide remap layer. CapsLock → Ctrl (tap = Escape), Space → modifier layer (tap = space). YAML rules file, cross-platform (Windows hook, macOS CGEventTap, Linux uinput). Covers the AutoHotkey / Karabiner-Elements basics.
 - **Settings UI** — per-module toggles, config fields, hotkey rebinding.
-- **Hotkey system** — global activation chord (default `Super+Alt+Space`) plus per-module direct-launch hotkeys.
+- **Hotkey system** — per-module direct-launch hotkeys; each module's palette is reachable via its own configurable chord.
 - **Module registry** — prefix routing, request cancellation, firewalled providers.
 
 ## Tech stack
