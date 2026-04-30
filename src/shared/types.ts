@@ -43,6 +43,15 @@ export interface ModuleConfigFieldBase {
 export interface ModuleConfigFieldCheckbox extends ModuleConfigFieldBase {
   type: 'checkbox'
   defaultValue: boolean
+  /**
+   * Render the checkbox as locked: the toggle is disabled and the row
+   * shows a "locked" affordance. Used by modules that ship a built-in
+   * command the user shouldn't be able to remove (e.g. command-palette's
+   * "Open Settings"). The stored value is still respected at runtime —
+   * the lock is purely a UI-level guarantee that the field stays on the
+   * default, no backend enforcement.
+   */
+  readOnly?: boolean
 }
 
 export interface ModuleConfigFieldRadio extends ModuleConfigFieldBase {
@@ -82,11 +91,11 @@ export type ModuleConfigField =
 /**
  * What the module *is*, from the palette's point of view.
  *  - 'search': the module produces a searchable list (Window Switcher, App
- *    Search, future Files/Calculator/Clipboard…). Appears in the home-screen
- *    picker and can be scoped into.
+ *    Search, Command Palette, future Files/Calculator/Clipboard…). Bound to
+ *    a direct-launch hotkey that opens the palette into this module's view.
  *  - 'service': background utility with no palette surface (Keyboard Remap)
  *    or a hotkey-only trigger (Groq Transcription). Settings-sidebar-only —
- *    never shown in the home picker.
+ *    never opens a palette window.
  */
 export type ModuleKind = 'search' | 'service'
 
@@ -108,6 +117,14 @@ export interface ModuleManifest {
   defaultDirectLaunchHotkey?: string
   /** Declarative config schema — the settings UI renders fields from this. */
   configFields?: ModuleConfigField[]
+  /**
+   * Per-item aliases the module ships with. Seeded into the user's
+   * settings on first registration so a freshly-installed runwa already
+   * has the bindings live (no setup step). Existing users keep whatever
+   * alias they've set — the seeder only writes when the entry is missing.
+   * Keys are the module's stable item ids; values are the alias strings.
+   */
+  defaultAliases?: Record<string, string>
 }
 
 export interface ModuleMeta extends ModuleManifest {
@@ -150,6 +167,15 @@ export interface PaletteItem {
    * when matching the typed query — see app-search's `aliasMode` config.
    */
   alias?: string
+  /**
+   * Optional grouping label rendered as a sticky-style header before the
+   * first item with this group value, and again whenever the group
+   * changes between adjacent items in the result list. Items without a
+   * group render flush like before. Modules use it to give visual
+   * structure to a long command list (Command Palette's "Settings" /
+   * "Windows Control" sections, etc.).
+   */
+  group?: string
   /** Per-module action discriminator. Re-validated by the owning module on execute. */
   actionKind: string
   /** Opaque payload, owned by the module. Renderer never interprets this. */
@@ -175,14 +201,6 @@ export interface SearchResult {
 export interface ExecuteResult {
   dismissPalette: boolean
   error?: string
-  /**
-   * If set, the renderer should NOT dismiss the palette and instead enter
-   * scoped mode for this module (clear query, re-run search). Used by the
-   * synthetic module-picker entries the registry returns on the home screen
-   * — selecting "App Search" sets scopeToModuleId='app-search', dropping
-   * the user into app-search's own view.
-   */
-  scopeToModuleId?: ModuleId
 }
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -211,15 +229,14 @@ export interface PalettePosition {
 }
 
 export interface Settings {
-  /** Global activation hotkey as an Electron Accelerator string. */
-  activationHotkey: string
-  /**
-   * Hotkey that opens the settings window. Window-local — only fires while a
-   * runwa window has focus, so it's safe to use chords like Ctrl+, that IDEs
-   * already own.
-   */
-  openSettingsHotkey: string
   theme: Theme
+  /**
+   * Render `1`–`4` keycap chips on the left edge of the palette result
+   * list when ≤ 4 rows match, and intercept the matching digit key to
+   * launch that row directly. Off = no chips, no chord — type / arrow
+   * / Enter only.
+   */
+  quickLaunchDigits: boolean
   /**
    * Launch runwa automatically when the user logs into their OS session.
    * Cross-platform (Electron's `app.setLoginItemSettings` handles both
@@ -243,9 +260,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  activationHotkey: 'Ctrl+Alt+S',
-  openSettingsHotkey: 'Ctrl+,',
   theme: 'system',
+  quickLaunchDigits: true,
   startAtLogin: false,
   runAsAdmin: false,
   modules: {}

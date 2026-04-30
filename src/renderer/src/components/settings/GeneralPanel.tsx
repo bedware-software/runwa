@@ -3,7 +3,6 @@ import { AlertTriangle, Trash2 } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { HotkeyRow } from './HotkeyRow'
 import { ConfirmDialog } from '../ConfirmDialog'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
@@ -15,16 +14,10 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 export function GeneralPanel() {
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const setTheme = useSettingsStore((s) => s.setTheme)
-  const activationHotkey = useSettingsStore(
-    (s) => s.settings?.activationHotkey ?? ''
+  const quickLaunchDigits = useSettingsStore(
+    (s) => s.settings?.quickLaunchDigits ?? DEFAULT_SETTINGS.quickLaunchDigits
   )
-  const setActivationHotkey = useSettingsStore((s) => s.setActivationHotkey)
-  const openSettingsHotkey = useSettingsStore(
-    (s) => s.settings?.openSettingsHotkey ?? ''
-  )
-  const setOpenSettingsHotkey = useSettingsStore(
-    (s) => s.setOpenSettingsHotkey
-  )
+  const setQuickLaunchDigits = useSettingsStore((s) => s.setQuickLaunchDigits)
 
   const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false)
 
@@ -61,26 +54,16 @@ export function GeneralPanel() {
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-foreground mb-1">Hotkeys</h2>
+        <h2 className="text-sm font-semibold text-foreground mb-1">Palette</h2>
         <p className="text-xs text-muted-foreground mb-3">
-          Keyboard shortcuts for opening runwa and its settings.
+          Tweaks for the palette window's behaviour and shortcuts.
         </p>
         <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
-          <HotkeyRow
-            title="Open runwa"
-            scope="Global"
-            description="Toggles the command palette from anywhere."
-            value={activationHotkey}
-            defaultValue={DEFAULT_SETTINGS.activationHotkey}
-            onChange={(v) => void setActivationHotkey(v)}
-          />
-          <HotkeyRow
-            title="Open Settings"
-            scope="Window-local"
-            description="Only works when a runwa window is focused."
-            value={openSettingsHotkey}
-            defaultValue={DEFAULT_SETTINGS.openSettingsHotkey}
-            onChange={(v) => void setOpenSettingsHotkey(v)}
+          <ToggleRow
+            title="Quick-launch digits"
+            description="When the result list narrows to 4 or fewer rows, render 1–4 keycaps along the left edge and let the matching digit run that row directly."
+            checked={quickLaunchDigits}
+            onChange={(v) => void setQuickLaunchDigits(v)}
           />
         </div>
       </section>

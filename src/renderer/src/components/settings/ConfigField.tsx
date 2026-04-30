@@ -43,19 +43,36 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
   const effective = value ?? field.defaultValue
 
   if (field.type === 'checkbox') {
-    const checked = Boolean(effective)
+    // Read-only checkboxes are pinned on the default value (true for the
+    // built-ins that ship locked) and render with a disabled cursor +
+    // dimmed control. Clicks are no-ops; the row otherwise looks the
+    // same so the user can still see the field exists in settings.
+    const isReadOnly = field.readOnly === true
+    const checked = isReadOnly ? Boolean(field.defaultValue) : Boolean(effective)
     return (
-      <label className="flex items-start gap-3 cursor-pointer select-none">
+      <label
+        className={cn(
+          'flex items-start gap-3 select-none',
+          isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'
+        )}
+        title={isReadOnly ? 'Built-in — always on.' : undefined}
+      >
         <button
           type="button"
           role="checkbox"
           aria-checked={checked}
-          onClick={() => onChange(!checked)}
+          aria-disabled={isReadOnly || undefined}
+          disabled={isReadOnly}
+          onClick={() => {
+            if (isReadOnly) return
+            onChange(!checked)
+          }}
           className={cn(
             'mt-0.5 h-4 w-4 rounded-[3px] border flex items-center justify-center shrink-0 transition-colors',
             checked
               ? 'bg-primary border-primary'
-              : 'bg-secondary border-input hover:border-muted-foreground'
+              : 'bg-secondary border-input hover:border-muted-foreground',
+            isReadOnly && 'opacity-60 cursor-not-allowed'
           )}
         >
           {checked && (
@@ -72,7 +89,7 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
             </svg>
           )}
         </button>
-        <div className="flex-1 min-w-0">
+        <div className={cn('flex-1 min-w-0', isReadOnly && 'opacity-80')}>
           <div className="text-xs font-medium text-foreground">{field.label}</div>
           {field.description && (
             <div className="text-xs text-muted-foreground mt-0.5">

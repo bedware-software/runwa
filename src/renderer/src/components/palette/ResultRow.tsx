@@ -1,3 +1,4 @@
+import type { Ref } from 'react'
 import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
@@ -6,8 +7,17 @@ import { cn } from '@/lib/utils'
 interface Props {
   item: PaletteItem
   isSelected: boolean
+  /** When set, render a small `1`–`9` glyph stuck to the left window edge —
+   * the number the user can press to launch this row directly. ResultsList
+   * only sets it when the result count is small enough that the digit
+   * shortcut is wired up at the palette level. */
+  numberHint?: number
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
+  /** Set by ResultsList so it can scroll the selected row into view —
+   * positional indexing on listRef.children breaks once we interleave
+   * group headers between rows. */
+  ref?: Ref<HTMLDivElement>
 }
 
 /**
@@ -28,19 +38,55 @@ function isImageUrl(hint: string | undefined): hint is string {
   return !!hint && hint.startsWith('data:')
 }
 
-export function ResultRow({ item, isSelected, onClick, onContextMenu }: Props) {
+export function ResultRow({
+  item,
+  isSelected,
+  numberHint,
+  onClick,
+  onContextMenu,
+  ref
+}: Props) {
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
   return (
     <div
+      ref={ref}
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
-        'flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
+        // `relative` anchors the absolutely-positioned keycap below.
+        // Padding stays at px-4 so the row's content baseline matches
+        // the search input and footer hints (16 px). Selected rows tint
+        // the row bg only — internal chips don't restyle on selection.
+        'relative flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors',
         isSelected && 'bg-accent text-accent-foreground'
       )}
     >
+      {numberHint !== undefined && (
+        // Full keycap, absolutely positioned so it never affects the
+        // row's flex flow — the application icon stays at its fixed
+        // 16 px-from-left spot regardless of whether the keycaps are
+        // active. The chip occupies exactly the row's left padding
+        // gutter: left edge flush against the window border, right
+        // edge flush against the icon. Static styling — no isSelected
+        // variant, no hover — so the eye reads selection from the row
+        // bg only.
+        <kbd
+          aria-hidden="true"
+          className={cn(
+            'absolute left-0 top-1/2 -translate-y-1/2',
+            'inline-flex items-center justify-center',
+            'h-[18px] w-4',
+            'rounded-md border border-border bg-popover text-foreground',
+            'font-mono font-medium text-[10px] leading-none',
+            'shadow-[0_0_2px_rgb(0_0_0/0.1)]',
+            'select-none pointer-events-none'
+          )}
+        >
+          {numberHint}
+        </kbd>
+      )}
       <div
         className={cn(
           'h-8 w-8 rounded-md flex items-center justify-center shrink-0',

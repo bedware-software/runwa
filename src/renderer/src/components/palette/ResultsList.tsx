@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
 import { usePaletteStore } from '@/store/palette-store'
@@ -14,22 +14,29 @@ interface Props {
    * service-module items — typically make this a no-op).
    */
   onOpenContextMenu?: (index: number) => void
+  /** When true, render 1..N keycap chips alongside the first 4 rows
+   * (palette intercepts the matching digit). Off = no chips, no chord.
+   * Wired to the `quickLaunchDigits` general setting. */
+  showQuickLaunchDigits?: boolean
 }
 
 export function ResultsList({
   items,
   selectedIndex,
   isLoading,
-  onOpenContextMenu
+  onOpenContextMenu,
+  showQuickLaunchDigits = true
 }: Props) {
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
-  const listRef = useRef<HTMLDivElement>(null)
+  // Per-row refs so we can scroll the selected row into view without
+  // depending on direct-child positional indexing — adding optional
+  // group headers between rows breaks `listRef.children[selectedIndex]`.
+  const rowRefs = useRef<Array<HTMLDivElement | null>>([])
 
   // Keep the selected row visible when navigating with the keyboard
   useEffect(() => {
-    const el = listRef.current?.children[selectedIndex] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
+    rowRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
 
   if (items.length === 0) {
@@ -51,29 +58,61 @@ export function ResultsList({
     )
   }
 
+  // Show 1..N digit hints only when the list is short enough that the
+  // user can plausibly hit the right number — the palette intercepts
+  // the matching keypress and runs the row. Above that we'd just be
+  // adding visual noise nobody can use anyway. The general toggle
+  // collapses both sides at once so an unchecked setting hides chips
+  // and frees the digit keys for typing into the search input.
+  const showNumbers =
+    showQuickLaunchDigits && items.length > 0 && items.length <= 4
+
+  // Trim the refs array to the current item count so stale refs from a
+  // longer previous result set don't survive a re-render.
+  rowRefs.current.length = items.length
+
   return (
-    <div ref={listRef} className="flex-1 overflow-y-auto">
-      {items.map((item, index) => (
-        <ResultRow
-          key={item.id}
-          item={item}
-          isSelected={index === selectedIndex}
-          onClick={() => {
-            setSelectedIndex(index)
-            void executeSelected()
-          }}
-          onContextMenu={
-            onOpenContextMenu
-              ? (e) => {
-                  // Suppress the default browser right-click menu — Electron
-                  // shows the Chromium one in dev which just confuses users.
-                  e.preventDefault()
-                  onOpenContextMenu(index)
-                }
-              : undefined
-          }
-        />
-      ))}
+    <div className="flex-1 overflow-y-auto">
+      {items.map((item, index) => {
+        // Insert a group header before the first item with this group
+        // value, and again whenever the group string changes between
+        // adjacent items. Items with no group never trigger a header.
+        const prev = items[index - 1]
+        const showHeader =
+          item.group !== undefined && item.group !== prev?.group
+        return (
+          <Fragment key={item.id}>
+            {showHeader && (
+              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
+                {item.group}
+              </div>
+            )}
+            <ResultRow
+              ref={(el) => {
+                rowRefs.current[index] = el
+              }}
+              item={item}
+              isSelected={index === selectedIndex}
+              numberHint={showNumbers ? index + 1 : undefined}
+              onClick={() => {
+                setSelectedIndex(index)
+                void executeSelected()
+              }}
+              onContextMenu={
+                onOpenContextMenu
+                  ? (e) => {
+                      // Suppress the default browser right-click menu —
+                      // Electron shows the Chromium one in dev which
+                      // just confuses users.
+                      e.preventDefault()
+                      onOpenContextMenu(index)
+                    }
+                  : undefined
+              }
+            />
+          </Fragment>
+        )
+      })}
     </div>
   )
 }

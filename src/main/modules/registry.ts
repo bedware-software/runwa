@@ -14,13 +14,6 @@ import { settingsStore } from '../settings-store'
 
 const MAX_RESULTS = 100
 
-/**
- * Synthetic actionKind used by the module-picker items the registry injects
- * on the home screen. The registry owns execute for these — no module sees
- * them. Kept here (not in shared/) because it's a registry-internal protocol.
- */
-const SCOPE_ACTION_KIND = 'registry:scope-to-module'
-
 /** Build a fresh config object from a module's declared default values. */
 function defaultConfigFromManifest(
   m: PaletteModule
@@ -37,7 +30,8 @@ function defaultConfigFromManifest(
  *  - module registry (hard-coded at startup)
  *  - enabled/hotkey cache (store = truth, registry caches for the session)
  *  - in-flight search controllers (for cancellation)
- *  - home-screen module picker + scoped search routing
+ *  - scoped search routing — every palette session names its module via the
+ *    direct-launch hotkey or programmatic show(moduleId).
  */
 class ModuleRegistry {
   private modules = new Map<ModuleId, PaletteModule>()
@@ -63,8 +57,8 @@ class ModuleRegistry {
       return
     }
     this.modules.set(id, module)
-    // Seed the direct-launch hotkey from the manifest default on fresh
-    // installs. `ensureModuleDefaults` only writes when the entry is
+    // Seed the direct-launch hotkey + default aliases from the manifest on
+    // fresh installs. `ensureModuleDefaults` only writes when the entry is
     // missing (first registration of this module id), so existing users
     // keep their bindings — in particular, anyone who deliberately cleared
     // a hotkey stays cleared instead of having it resurrected on restart.
@@ -73,10 +67,14 @@ class ModuleRegistry {
       module.manifest.defaultDirectLaunchHotkey
         ? { directLaunchHotkey: module.manifest.defaultDirectLaunchHotkey }
         : {}
+    const aliasesSeed = module.manifest.defaultAliases
+      ? { aliases: { ...module.manifest.defaultAliases } }
+      : {}
     settingsStore.ensureModuleDefaults(id, {
       enabled: module.manifest.defaultEnabled,
       config: defaultConfigFromManifest(module),
-      ...directLaunchSeed
+      ...directLaunchSeed,
+      ...aliasesSeed
     })
   }
 
@@ -114,41 +112,6 @@ class ModuleRegistry {
     return { ...(this.moduleSettingsCache.get(m.manifest.id)?.aliases ?? {}) }
   }
 
-  /**
-   * Build the module-picker items shown on the unscoped home screen. One
-   * entry per enabled search-kind module; executing an entry scopes the
-   * palette into that module (handled in `execute()`). If a query is
-   * present, filter by substring on the module's display name.
-   */
-  private buildPickerItems(query: string): PaletteItem[] {
-    const trimmed = query.trim().toLowerCase()
-    const items: PaletteItem[] = []
-    let i = 0
-    for (const m of this.modules.values()) {
-      // Only search-kind modules are user-facing launchers — services stay
-      // settings-only.
-      if (m.manifest.kind !== 'search') continue
-      const enabled =
-        this.moduleSettingsCache.get(m.manifest.id)?.enabled ??
-        m.manifest.defaultEnabled
-      if (!enabled) continue
-      if (trimmed && !m.manifest.name.toLowerCase().includes(trimmed)) continue
-      items.push({
-        id: `picker:${m.manifest.id}`,
-        moduleId: m.manifest.id,
-        title: m.manifest.name,
-        subtitle: m.manifest.description,
-        iconHint: m.manifest.icon,
-        actionKind: SCOPE_ACTION_KIND,
-        action: { moduleId: m.manifest.id },
-        // Small monotonic scores preserve registration order so the picker
-        // renders in the same sequence the user sees in the settings sidebar.
-        score: i++ / 10000
-      })
-    }
-    return items
-  }
-
   async search(req: SearchRequest): Promise<SearchResult> {
     const { requestId, query, scopeModuleId } = req
 
@@ -160,14 +123,11 @@ class ModuleRegistry {
       }
     }
 
-    // Unscoped path: return the module picker. No per-module searches run
-    // on the home screen. Scoping is explicit: either a direct-launch
-    // hotkey or clicking a picker entry.
+    // Every palette session is scoped — there is no aggregate home screen.
+    // A search arriving without a target module (shouldn't happen via the
+    // hotkey path) returns empty rather than synthesising a picker.
     if (!scopeModuleId) {
-      return {
-        requestId,
-        items: this.buildPickerItems(query)
-      }
+      return { requestId, items: [] }
     }
 
     const scopedModule = this.modules.get(scopeModuleId)
@@ -220,19 +180,6 @@ class ModuleRegistry {
   }
 
   async execute(item: PaletteItem): Promise<ExecuteResult> {
-    // Registry-synthesized picker entry — scope into the module instead of
-    // running a module execute. Keep the palette open so the user sees the
-    // module's own results immediately.
-    if (item.actionKind === SCOPE_ACTION_KIND) {
-      const action = item.action as { moduleId?: unknown }
-      const targetId =
-        typeof action?.moduleId === 'string' ? action.moduleId : undefined
-      if (!targetId || !this.modules.has(targetId)) {
-        return { dismissPalette: false, error: `unknown picker target: ${String(targetId)}` }
-      }
-      return { dismissPalette: false, scopeToModuleId: targetId }
-    }
-
     const m = this.modules.get(item.moduleId)
     if (!m) {
       return { dismissPalette: false, error: `unknown module: ${item.moduleId}` }

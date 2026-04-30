@@ -43,7 +43,12 @@ if (!gotLock) {
 }
 
 app.on('second-instance', () => {
-  paletteWindow.show()
+  // The user re-launched runwa while another instance was already running.
+  // Without an aggregate "open palette" chord any more there's no obvious
+  // window to bring forward, so route them to Settings — the most useful
+  // recovery destination if they couldn't find runwa via its tray icon or
+  // a module hotkey.
+  settingsWindow.open()
 })
 
 app.whenReady().then(async () => {
@@ -176,16 +181,6 @@ app.whenReady().then(async () => {
     })
   )
 
-  // 11. Fallback: if the activation hotkey couldn't be registered (another
-  //    app owns it — PowerToys, AutoHotkey, Windows itself, etc.), open the
-  //    settings window so the user can pick a working chord. Without this
-  //    it's impossible to reach settings on first launch.
-  if (!hotkeyManager.isActivationRegistered()) {
-    console.warn(
-      '[main] activation hotkey not registered - opening settings so you can rebind it'
-    )
-    settingsWindow.open()
-  }
 })
 
 // Background launcher: never quit when all windows close.

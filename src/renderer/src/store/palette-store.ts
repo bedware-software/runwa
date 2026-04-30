@@ -32,8 +32,6 @@ interface PaletteState {
   executeSelected: () => Promise<void>
   reset: () => void
   onPaletteShow: (initialModuleId?: ModuleId) => void
-  /** Clear the scoped-module state and return to the home-screen picker. */
-  unscope: () => void
   /**
    * Re-run the current search immediately (no debounce) — used by Ctrl+R
    * in the app-search scope after the rescan IPC has invalidated the main
@@ -101,26 +99,7 @@ export const usePaletteStore = create<PaletteState>()(
       const item = items[selectedIndex]
       if (!item) return
       try {
-        const result = await window.electronAPI.modulesExecute(item)
-        // Scope-into-module: the registry handed back a target module id.
-        // Reset state as if the palette had just opened with that module
-        // pre-selected — existing direct-launch code path, minus the
-        // window-show side effects.
-        if (result?.scopeToModuleId) {
-          if (debounceTimer !== null) {
-            clearTimeout(debounceTimer)
-            debounceTimer = null
-          }
-          set((s) => {
-            s.activeModuleId = result.scopeToModuleId
-            s.query = ''
-            s.items = []
-            s.selectedIndex = 0
-            s.resolvedModuleId = undefined
-            s.isLoading = true
-          })
-          void runSearch('', get, set)
-        }
+        await window.electronAPI.modulesExecute(item)
       } catch (err) {
         console.warn('[palette] execute failed', err)
       }
@@ -144,29 +123,13 @@ export const usePaletteStore = create<PaletteState>()(
       // Clear items so ResultsList flips to its loading state — without
       // this the stale results stay on screen until the refreshed search
       // lands, which hides the rescan's progress from the user. Mirrors
-      // the onPaletteShow / unscope reset pattern.
+      // the onPaletteShow reset pattern.
       set((s) => {
         s.items = []
         s.selectedIndex = 0
         s.isLoading = true
       })
       void runSearch(get().query, get, set, preserveId)
-    },
-
-    unscope: () => {
-      if (debounceTimer !== null) {
-        clearTimeout(debounceTimer)
-        debounceTimer = null
-      }
-      set((s) => {
-        s.activeModuleId = undefined
-        s.resolvedModuleId = undefined
-        s.query = ''
-        s.items = []
-        s.selectedIndex = 0
-        s.isLoading = true
-      })
-      void runSearch('', get, set)
     },
 
     reset: () => {

@@ -687,6 +687,65 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
   Ok(activated)
 }
 
+/// Return the id of the window the user currently has focused, in the same
+/// `{pid}:{cg_window_id}` format `focus_window` accepts. Used by the palette
+/// window to remember "what was foreground when I opened" so Esc can return
+/// focus there on dismiss.
+///
+/// CGWindowList returns windows in front-to-back z-order; the first
+/// `kCGWindowLayer == 0` (normal app) entry that isn't owned by our own
+/// process is the user's foreground window. The palette's BrowserWindow is
+/// either not yet shown (first invocation) or hidden (subsequent ones), so
+/// `kCGWindowListOptionOnScreenOnly` filters it out — no need for an
+/// explicit hwnd-vs-self check beyond the PID guard. Falls back to an
+/// empty string when the list comes back empty (no app windows on the
+/// current Space, transient state during space-switch animations, etc.) —
+/// callers treat that as "no previous focus to restore".
+pub fn get_foreground_window() -> napi::Result<String> {
+  unsafe {
+    let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+    let array_ref = CGWindowListCopyWindowInfo(options, kCGNullWindowID);
+    if array_ref.is_null() {
+      return Ok(String::new());
+    }
+
+    let count = CFArrayGetCount(array_ref);
+    let key_layer = CFString::from_static_string("kCGWindowLayer");
+    let key_number = CFString::from_static_string("kCGWindowNumber");
+    let key_owner_pid = CFString::from_static_string("kCGWindowOwnerPID");
+    let own_pid = std::process::id();
+
+    let mut result = String::new();
+    for i in 0..count {
+      let dict_ptr = CFArrayGetValueAtIndex(array_ref, i) as CFDictionaryRef;
+      if dict_ptr.is_null() {
+        continue;
+      }
+      // Layer 0 = normal app window. Higher layers are menu bar, dock,
+      // notification center, status items — none of which the user thinks
+      // of as "the focused app".
+      if cf_dict_get_i64(dict_ptr, key_layer.as_concrete_TypeRef()) != Some(0) {
+        continue;
+      }
+      let pid = match cf_dict_get_i64(dict_ptr, key_owner_pid.as_concrete_TypeRef()) {
+        Some(p) if p > 0 => p as u32,
+        _ => continue,
+      };
+      // Don't pick our own (palette) window. Belt-and-suspenders since the
+      // OnScreenOnly option already filters hidden windows.
+      if pid == own_pid {
+        continue;
+      }
+      let win_id = cf_dict_get_i64(dict_ptr, key_number.as_concrete_TypeRef()).unwrap_or(0);
+      result = format!("{pid}:{win_id}");
+      break;
+    }
+
+    CFRelease(array_ref as CFTypeRef);
+    Ok(result)
+  }
+}
+
 /// Locate the AX window whose CGWindowID matches `target_wid` in `pid`'s
 /// AXWindows list, and raise it. Assumes the app is already foregrounded
 /// (see `osascript_activate_pid`) so AX queries don't return
