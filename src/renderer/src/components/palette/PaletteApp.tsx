@@ -224,7 +224,7 @@ export function PaletteApp() {
       className="relative h-full bg-popover text-popover-foreground flex flex-col rounded-md border border-border overflow-hidden"
       onKeyDown={onKeyDown}
     >
-      <div className="px-3 py-2 border-b border-border flex items-center gap-2 [-webkit-app-region:drag]">
+      <div className="px-4 py-2 border-b border-border flex items-center gap-2 [-webkit-app-region:drag]">
         <SearchInput
           ref={inputRef}
           value={query}

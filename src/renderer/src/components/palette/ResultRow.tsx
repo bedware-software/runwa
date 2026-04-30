@@ -3,6 +3,7 @@ import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { Kbd } from '../ui/Kbd'
 
 interface Props {
   item: PaletteItem
@@ -55,38 +56,22 @@ export function ResultRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
-        'relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
+        // px-4 keeps every leading element of the palette (search input
+        // text, result row leading element, footer hint content) on the
+        // same 16 px vertical baseline. Selected rows tint the whole row
+        // bg only — internal chips intentionally don't recolor on
+        // selection so the eye sees one accent surface, not three.
+        'flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors',
         isSelected && 'bg-accent text-accent-foreground'
       )}
     >
       {numberHint !== undefined && (
-        // Half-keycap: borders + rounded corners on top/right/bottom only.
-        // The left edge sits flush against the palette window border so it
-        // reads as the right half of a Kbd chip — enough visual weight to
-        // catch the eye without spending the horizontal real estate of a
-        // full-width chip. The row's `px-3` padding stays put, so the
-        // icon and title don't shift to make room (the keycap nudges into
-        // the otherwise-empty 12 px gutter).
-        <kbd
-          aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 -translate-y-1/2',
-            'inline-flex items-center justify-center',
-            'h-[16px] min-w-[14px] pl-[3px] pr-[4px]',
-            'rounded-l-none rounded-r-md border border-l-0',
-            'font-mono font-medium text-[10px] leading-none',
-            'select-none pointer-events-none',
-            // Drop a soft right-leaning shadow so the half-cap reads as a
-            // 3D edge rather than a flat coloured rectangle. Symmetric
-            // shadow would muddy the "chopped in half" effect.
-            'shadow-[1px_0_2px_rgb(0_0_0/0.08)]',
-            isSelected
-              ? 'border-accent-foreground/30 text-accent-foreground bg-accent-foreground/10'
-              : 'border-border text-foreground bg-popover'
-          )}
-        >
-          {numberHint}
-        </kbd>
+        // Full Kbd, in-flow as the first flex child so the keycap sits
+        // inside the row instead of bleeding past its left edge. Fixed
+        // styling — no isSelected variant, no hover — keeps the chip
+        // visually anchored regardless of which row is currently
+        // highlighted.
+        <Kbd>{numberHint}</Kbd>
       )}
       <div
         className={cn(
