@@ -91,7 +91,11 @@ pub fn get_foreground_window() -> napi::Result<String> {
   {
     return windows_impl::get_foreground_window();
   }
-  #[cfg(not(target_os = "windows"))]
+  #[cfg(target_os = "macos")]
+  {
+    return macos::get_foreground_window();
+  }
+  #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
     Ok(String::new())
   }
