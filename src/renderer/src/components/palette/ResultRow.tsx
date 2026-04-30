@@ -3,7 +3,6 @@ import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { Kbd } from '../ui/Kbd'
 
 interface Props {
   item: PaletteItem
@@ -56,22 +55,37 @@ export function ResultRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
-        // px-4 keeps every leading element of the palette (search input
-        // text, result row leading element, footer hint content) on the
-        // same 16 px vertical baseline. Selected rows tint the whole row
-        // bg only — internal chips intentionally don't recolor on
-        // selection so the eye sees one accent surface, not three.
-        'flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors',
+        // `relative` anchors the absolutely-positioned keycap below.
+        // Padding stays at px-4 so the row's content baseline matches
+        // the search input and footer hints (16 px). Selected rows tint
+        // the row bg only — internal chips don't restyle on selection.
+        'relative flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors',
         isSelected && 'bg-accent text-accent-foreground'
       )}
     >
       {numberHint !== undefined && (
-        // Full Kbd, in-flow as the first flex child so the keycap sits
-        // inside the row instead of bleeding past its left edge. Fixed
-        // styling — no isSelected variant, no hover — keeps the chip
-        // visually anchored regardless of which row is currently
-        // highlighted.
-        <Kbd>{numberHint}</Kbd>
+        // Full keycap, absolutely positioned so it never affects the
+        // row's flex flow — the application icon stays at its fixed
+        // 16 px-from-left spot regardless of whether the keycaps are
+        // active. The chip occupies exactly the row's left padding
+        // gutter: left edge flush against the window border, right
+        // edge flush against the icon. Static styling — no isSelected
+        // variant, no hover — so the eye reads selection from the row
+        // bg only.
+        <kbd
+          aria-hidden="true"
+          className={cn(
+            'absolute left-0 top-1/2 -translate-y-1/2',
+            'inline-flex items-center justify-center',
+            'h-[18px] w-4',
+            'rounded-md border border-border bg-popover text-foreground',
+            'font-mono font-medium text-[10px] leading-none',
+            'shadow-[0_0_2px_rgb(0_0_0/0.1)]',
+            'select-none pointer-events-none'
+          )}
+        >
+          {numberHint}
+        </kbd>
       )}
       <div
         className={cn(
