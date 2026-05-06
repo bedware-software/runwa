@@ -137,6 +137,10 @@ class PaletteWindow {
   /** Timestamp (ms) of the most recent `show()`. Drives the blur-grace
    * window — see BLUR_GRACE_MS above. */
   private lastShownAt = 0
+  /** Module id last passed to `show()`. Lets the hotkey toggle close the
+   * palette when the *same* module's hotkey fires twice in a row, while a
+   * different module's hotkey still switches into it. Cleared on hide(). */
+  private currentModuleId: ModuleId | null = null
   private moveStart: {
     x: number
     y: number
@@ -333,6 +337,7 @@ class PaletteWindow {
     // triggered a blur on ourselves, or an injected-hotkey remapper racing
     // our foreground change).
     this.lastShownAt = Date.now()
+    this.currentModuleId = moduleId
     win.setOpacity(0)
     win.show()
     win.focus()
@@ -422,6 +427,26 @@ class PaletteWindow {
       }
     }
     this.previousWindowId = null
+    this.currentModuleId = null
+  }
+
+  /**
+   * Hotkey-driven entry point: open the palette for `moduleId`, OR close it
+   * if it's already open showing that same module. Pressing a *different*
+   * module's hotkey while the palette is up still switches into that module
+   * rather than closing — only the same-hotkey-twice case is a dismissal.
+   */
+  toggle(moduleId: ModuleId): void {
+    if (
+      this.window &&
+      !this.window.isDestroyed() &&
+      this.window.isVisible() &&
+      this.currentModuleId === moduleId
+    ) {
+      this.hide(true)
+      return
+    }
+    this.show(moduleId)
   }
 
   getBrowserWindow(): BrowserWindow | null {

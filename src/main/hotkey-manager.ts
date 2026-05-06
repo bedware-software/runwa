@@ -54,7 +54,7 @@ class HotkeyManager {
 
       const onPress = hasCustomHandler
         ? () => module!.handleDirectLaunch!('press')
-        : () => paletteWindow.show(moduleId as ModuleId)
+        : () => paletteWindow.toggle(moduleId as ModuleId)
 
       // Modifier-only chord (Ctrl+Super, Alt+Shift, …): Electron's
       // globalShortcut rejects these with a "conversion failure"
