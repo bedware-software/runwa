@@ -235,6 +235,14 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
             inject(events.as_slice());
             CallNextHookEx(None, code, wparam, lparam)
         }
+        // SendInput already updates the global key state for any modifier
+        // we injected, so subsequent real events (including the original
+        // we're about to forward) naturally carry the flag — there's no
+        // per-event override to apply on Windows.
+        Action::EmitThenForwardWithModifier(events, _) => {
+            inject(events.as_slice());
+            CallNextHookEx(None, code, wparam, lparam)
+        }
     }
 }
 

@@ -314,6 +314,19 @@ fn tap_callback(
             inject(events.as_slice(), event_flags);
             CallbackResult::Keep
         }
+        Action::EmitThenForwardWithModifier(events, m) => {
+            // Inject the synth events (typically ModifierDown), then stamp
+            // the modifier flag onto the user's real event before letting
+            // it through. The forwarded event is a real keystroke (no
+            // INJECT_TAG, real source PID), so the macOS app switcher and
+            // similar system services that filter synthetic events still
+            // see it. The stamped flag tells the receiving process the
+            // modifier is held without us needing the OS to track it
+            // physically (which CGEventPost can't do reliably).
+            inject(events.as_slice(), event_flags);
+            event.set_flags(event_flags | modifier_to_flag(m));
+            CallbackResult::Keep
+        }
     }
 }
 
