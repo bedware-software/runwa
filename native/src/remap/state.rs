@@ -92,6 +92,19 @@ pub enum Action {
     /// for — we need to press the modifier but can't synthesize the key,
     /// so we pre-inject the modifier and forward the user's keystroke.
     EmitThenForward(SmallVec<[SyntheticEvent; 8]>),
+    /// Inject synthetic events, then forward the original with the given
+    /// modifier flag stamped on top of the original's existing flag state.
+    /// Used by the transparent-modifier and fallback-modifier interruption
+    /// paths when the layered key IS one we could synthesize — but doing so
+    /// makes the macOS app-switcher (and similar system services that
+    /// filter `EVENT_SOURCE_USER_DATA`-tagged events) see no real
+    /// keystroke. Forwarding the user's actual `Tab` event makes Space+Tab
+    /// behave like Cmd+Tab: a tap moves the switcher one slot, holding
+    /// Tab autorepeats it via the keyboard hardware (still flowing through
+    /// `ForwardWithModifier` for repeat events). Windows treats this as
+    /// `EmitThenForward` — `SendInput` already propagates the modifier
+    /// flag globally so per-event stamping is a no-op there.
+    EmitThenForwardWithModifier(SmallVec<[SyntheticEvent; 8]>, Modifier),
     /// Forward the event but assert the given modifier on it. Used when a
     /// transparent modifier is logically held (state is `Modifying{held:
     /// Some(m)}`) and a subsequent real key event arrives. Platform layers
@@ -114,6 +127,13 @@ impl Action {
 
     pub fn emit_then_forward(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
         Action::EmitThenForward(events.into_iter().collect())
+    }
+
+    pub fn emit_then_forward_with_modifier(
+        events: impl IntoIterator<Item = SyntheticEvent>,
+        modifier: Modifier,
+    ) -> Self {
+        Action::EmitThenForwardWithModifier(events.into_iter().collect(), modifier)
     }
 }
 
@@ -337,31 +357,21 @@ impl StateMachine {
             ResolvedHold::TransparentModifier(m) => {
                 let m = *m;
                 self.state = State::Modifying { trigger, held: Some(m) };
-                match other {
-                    // Synthesize a full press-release pair for the
-                    // interrupting key. Posting only KeyDown leaves the OS
-                    // believing the key is physically held — and macOS
-                    // happily fires its own autorepeat on that "held" state,
-                    // which catastrophically misbehaves under the app
-                    // switcher: holding Space (Cmd-fallback) and tapping
-                    // Tab once spins through every running app instead of
-                    // moving one slot. The user's real KeyUp arrives later
-                    // and is forwarded with the modifier stamped — the OS
-                    // already saw our synth KeyUp, so the duplicate is a
-                    // no-op. Real autorepeat from the keyboard hardware
-                    // still goes through `arm 8` (ForwardWithModifier) and
-                    // re-fires the chord, matching native modifier+key
-                    // hold-to-repeat behaviour.
-                    LogicalKey::Named(nk) => Action::emit([
-                        SyntheticEvent::ModifierDown(m),
-                        SyntheticEvent::KeyDown(nk),
-                        SyntheticEvent::KeyUp(nk),
-                    ]),
-                    // Key we don't recognize — inject modifier-down, then
-                    // let the original event through so the OS sees e.g.
-                    // Ctrl+F13 naturally.
-                    _ => Action::emit_then_forward([SyntheticEvent::ModifierDown(m)]),
-                }
+                // Inject the modifier-down only and forward the user's
+                // real KeyDown with the modifier flag stamped. Synthesizing
+                // a paired Key↓/Key↑ via `Action::Emit` works for ordinary
+                // apps but breaks under the macOS app switcher: switcher
+                // input handling filters our `EVENT_SOURCE_USER_DATA`-
+                // tagged events, so it sees Tab↓ but never Tab↑, then
+                // autoradoresses through every app. Forwarding the user's
+                // real Tab leaves the keystroke source untouched and the
+                // switcher behaves correctly. Same path covers unrecognized
+                // keys (LogicalKey::Other / non-Named) — there's no
+                // physical keycode we'd synthesize in that case anyway.
+                Action::emit_then_forward_with_modifier(
+                    [SyntheticEvent::ModifierDown(m)],
+                    m,
+                )
             }
 
             ResolvedHold::Explicit { overrides, fallback } => {
@@ -384,36 +394,26 @@ impl StateMachine {
                     }
                 }
 
-                // No override → fallback modifier, if configured. Same
-                // press-release pairing as TransparentModifier above —
-                // synthesizing a bare KeyDown leaves the OS believing the
-                // key is held, which the macOS app switcher interprets as
-                // "user is holding Tab" and autorepeats one app per tick.
-                // Pairing fixes Space+Tab (and analogous Cmd-fallback
-                // chords) so a single tap moves one selection.
+                // No override → fallback modifier, if configured.
+                // Inject the modifier-down only and forward the user's
+                // real keystroke with the flag stamped — see the
+                // TransparentModifier comment above for the macOS-app-
+                // -switcher rationale (synth events get filtered by the
+                // switcher's input handling, so Space+Tab needs a real
+                // Tab to flow through, not a synthesized one).
                 if let Some(m) = *fallback {
                     self.state = State::Modifying { trigger, held: Some(m) };
-                    return match other {
-                        LogicalKey::Named(nk) => Action::emit([
-                            SyntheticEvent::ModifierDown(m),
-                            SyntheticEvent::KeyDown(nk),
-                            SyntheticEvent::KeyUp(nk),
-                        ]),
-                        _ => Action::emit_then_forward([SyntheticEvent::ModifierDown(m)]),
-                    };
+                    return Action::emit_then_forward_with_modifier(
+                        [SyntheticEvent::ModifierDown(m)],
+                        m,
+                    );
                 }
 
-                // No override, no fallback → forward the naked key. Same
-                // pairing rationale: don't strand the OS thinking the key
-                // is held.
+                // No override, no fallback → forward the naked key
+                // unchanged. State stays in `held: None` so the next
+                // press of any other key re-fires the override path.
                 self.state = State::Modifying { trigger, held: None };
-                match other {
-                    LogicalKey::Named(nk) => Action::emit([
-                        SyntheticEvent::KeyDown(nk),
-                        SyntheticEvent::KeyUp(nk),
-                    ]),
-                    _ => Action::Forward,
-                }
+                Action::Forward
             }
         }
     }
@@ -532,17 +532,16 @@ space:
     fn capslock_hold_becomes_transparent_ctrl() {
         let mut m = sm(CAPS_CTRL_ESC);
         m.on_event(down(LogicalKey::CapsLock));
-        // Synth pairs KeyDown with KeyUp so the OS doesn't think the key
-        // is physically held — see the comment in the TransparentModifier
-        // arm of `handle_interruption` for the Space+Tab case that
-        // surfaced this.
+        // The transparent-modifier path injects ModifierDown only and
+        // forwards the user's real KeyDown with the modifier flag stamped.
+        // See the TransparentModifier arm in `handle_interruption` for the
+        // Space+Tab case that motivated this.
         assert_eq!(
             m.on_event(down(alpha('C'))),
-            emit(vec![
-                SyntheticEvent::ModifierDown(Modifier::Ctrl),
-                SyntheticEvent::KeyDown(NamedKey::Alpha(b'C')),
-                SyntheticEvent::KeyUp(NamedKey::Alpha(b'C')),
-            ])
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
+                Modifier::Ctrl,
+            )
         );
         // A subsequent key while CapsLock is still held must carry the Ctrl
         // flag forward — the OS saw our synthetic ModifierDown once, but on
@@ -621,13 +620,15 @@ space:
     fn space_plus_unmapped_key_on_mac_uses_fallback_cmd() {
         let mut m = sm(SPACE_MAC);
         m.on_event(down(LogicalKey::Space));
+        // Fallback path injects ModifierDown only and forwards the user's
+        // real KeyDown with the modifier flag stamped, same as
+        // TransparentModifier — see the comment in `handle_interruption`.
         assert_eq!(
             m.on_event(down(alpha('C'))),
-            emit(vec![
-                SyntheticEvent::ModifierDown(Modifier::Cmd),
-                SyntheticEvent::KeyDown(NamedKey::Alpha(b'C')),
-                SyntheticEvent::KeyUp(NamedKey::Alpha(b'C')),
-            ])
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Cmd)],
+                Modifier::Cmd,
+            )
         );
         assert_eq!(
             m.on_event(up(LogicalKey::Space)),
@@ -642,13 +643,10 @@ space:
     fn space_plus_unmapped_without_fallback_emits_naked_key() {
         let mut m = sm(SPACE_WIN);
         m.on_event(down(LogicalKey::Space));
-        assert_eq!(
-            m.on_event(down(alpha('Z'))),
-            emit(vec![
-                SyntheticEvent::KeyDown(NamedKey::Alpha(b'Z')),
-                SyntheticEvent::KeyUp(NamedKey::Alpha(b'Z')),
-            ])
-        );
+        // No override and no fallback: just forward the user's real key
+        // unchanged (state moves to Modifying { held: None } so the next
+        // press of any other key re-runs handle_interruption).
+        assert_eq!(m.on_event(down(alpha('Z'))), Action::Forward);
     }
 
     #[test]
@@ -740,17 +738,25 @@ space:
     }
 
     // Reproduces the user-reported "Space+Tab cycles through every running
-    // app on a single tap" bug. Default macOS template has Space's on_hold
-    // ending in `keys: [any], to_hotkey: [cmd]`, so Space+Tab routes through
-    // the fallback. The pre-fix synth was `[Cmd↓, Tab↓]` — Tab↑ was never
-    // emitted, so macOS believed Tab was physically held and the system app
-    // switcher fired its own autorepeat one app per tick. The user's actual
-    // physical Tab tap was milliseconds long, but the switcher had already
-    // cycled to the end of the app list before they let go. Pairing the
-    // synth KeyDown with a synth KeyUp makes the OS see a clean tap, and
-    // the switcher advances exactly one slot.
+    // app on a single tap, and the next tap doesn't work" bug. Default
+    // macOS template has Space's on_hold ending in `keys: [any],
+    // to_hotkey: [cmd]`, so Space+Tab routes through the fallback. Two
+    // earlier fix attempts didn't work:
+    //
+    //   1. Synth `[Cmd↓, Tab↓]` — Tab↑ never emitted, macOS believed Tab
+    //      was held, app switcher autorepeated through every app.
+    //   2. Synth `[Cmd↓, Tab↓, Tab↑]` — same symptom, because the macOS
+    //      app switcher's input handling appears to filter our
+    //      EVENT_SOURCE_USER_DATA-tagged events. The synth Tab↑ never
+    //      reaches the switcher; from its perspective Tab is still held.
+    //
+    // The fix injects ONLY the modifier-down (so the user's apps see the
+    // Cmd flag stamp) and forwards the user's REAL Tab↓ with the Cmd flag
+    // stamped on top. The switcher receives a real keystroke (no inject
+    // tag, real source PID) it can't filter, and behaves correctly: tap
+    // moves one slot, hold autorepeats via the keyboard hardware.
     #[test]
-    fn space_plus_tab_fallback_emits_paired_press_release() {
+    fn space_plus_tab_fallback_forwards_real_tab_with_modifier_stamped() {
         let yaml = r#"
 tab:
   on_tap: [tab]
@@ -763,27 +769,24 @@ space:
 "#;
         let mut m = sm(yaml);
         m.on_event(down(LogicalKey::Space));
-        // First Tab tap while holding Space synthesizes a complete
-        // press-release pair, not just a press.
+        // First Tab tap: inject Cmd↓, forward the real Tab↓ with Cmd
+        // stamped.
         assert_eq!(
             m.on_event(down(named(NamedKey::Tab))),
-            emit(vec![
-                SyntheticEvent::ModifierDown(Modifier::Cmd),
-                SyntheticEvent::KeyDown(NamedKey::Tab),
-                SyntheticEvent::KeyUp(NamedKey::Tab),
-            ])
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Cmd)],
+                Modifier::Cmd,
+            )
         );
-        // The user's real Tab-up arrives later and forwards with Cmd
-        // stamped — a benign duplicate (the OS already saw our synth
-        // release).
+        // Tab released: forward the real Tab↑ with Cmd stamped — switcher
+        // sees a real release, no synth state to confuse it.
         assert_eq!(
             m.on_event(up(named(NamedKey::Tab))),
             Action::ForwardWithModifier(Modifier::Cmd)
         );
-        // Second physical tap inside the same Space-hold goes through the
-        // ForwardWithModifier path so Cmd stays continuously held — the
-        // switcher stays open and advances by one on each tap, matching
-        // native Cmd+Tab.
+        // Second physical tap inside the same Space-hold: forward path
+        // again. Cmd stays continuously held via the trigger, switcher
+        // stays open, advances one slot per tap (matches native Cmd+Tab).
         assert_eq!(
             m.on_event(down(named(NamedKey::Tab))),
             Action::ForwardWithModifier(Modifier::Cmd)
@@ -912,15 +915,15 @@ shift:
             ])
         );
 
-        // Hold path — Shift+L.
+        // Hold path — Shift+L. Inject ModifierDown only, forward the
+        // user's real L↓ with Shift stamped.
         m.on_event(down(LogicalKey::Shift));
         assert_eq!(
             m.on_event(down(alpha('L'))),
-            emit(vec![
-                SyntheticEvent::ModifierDown(Modifier::Shift),
-                SyntheticEvent::KeyDown(NamedKey::Alpha(b'L')),
-                SyntheticEvent::KeyUp(NamedKey::Alpha(b'L')),
-            ])
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
+                Modifier::Shift,
+            )
         );
         // Second L while still held: forwarded with Shift stamped.
         assert_eq!(
@@ -1110,18 +1113,17 @@ tab:
         // on_hold rules use only `j` and `k` (no shift-qualified rules),
         // so the preempt guard rejects switching into Pending(Tab).
         // Falls through to the interruption arm: Shift's transparent
-        // layer fires, emitting ModifierDown(Shift) + KeyDown(Tab) +
-        // KeyUp(Tab) — the synth pair prevents the OS from thinking Tab
-        // is still held.
+        // layer fires — inject ModifierDown(Shift) and forward the
+        // user's real Tab↓ with the Shift flag stamped, so any system
+        // service that filters synthetic events still sees a real Tab.
         let mut shift = ModifierMask::EMPTY;
         shift.insert(Modifier::Shift);
         assert_eq!(
             m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
-            emit(vec![
-                SyntheticEvent::ModifierDown(Modifier::Shift),
-                SyntheticEvent::KeyDown(NamedKey::Tab),
-                SyntheticEvent::KeyUp(NamedKey::Tab),
-            ])
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
+                Modifier::Shift,
+            )
         );
     }
 
@@ -1238,16 +1240,19 @@ space:
     fn capslock_plus_other_key_emits_ctrl_then_forwards() {
         // Ctrl+F13 (or any other unmapped non-Named key): we can't synth
         // the keystroke, so press Ctrl and let the OS see the original.
+        // Same `EmitThenForwardWithModifier` path the Named-key case uses,
+        // since the platform layer also stamps the modifier flag on the
+        // forwarded event for keys we couldn't synthesize either way.
         let mut m = sm(CAPS_CTRL_ESC);
         m.on_event(down(LogicalKey::CapsLock));
         match m.on_event(down(LogicalKey::Other)) {
-            Action::EmitThenForward(evs) => {
+            Action::EmitThenForwardWithModifier(evs, Modifier::Ctrl) => {
                 assert_eq!(
                     evs.as_slice(),
                     &[SyntheticEvent::ModifierDown(Modifier::Ctrl)]
                 );
             }
-            other => panic!("expected EmitThenForward, got {other:?}"),
+            other => panic!("expected EmitThenForwardWithModifier(.., Ctrl), got {other:?}"),
         }
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
