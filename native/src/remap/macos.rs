@@ -28,7 +28,7 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 
-use super::rules::{Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
+use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
@@ -677,6 +677,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 super::macos_desktop_tracker::set(n.saturating_sub(1));
                 continue;
             }
+            SyntheticEvent::ChangeLanguage(code) => {
+                change_language(*code);
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;
@@ -739,4 +743,131 @@ fn run_hidutil(payload: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Input-source switching via the Carbon TextInputSources API. We enumerate
+// the user's enabled keyboard sources, pick the first one whose declared
+// languages start with the requested code (e.g. `ru` matches the Russian
+// keyboard, `en` matches U.S. English), and call `TISSelectInputSource`.
+//
+// The user must have already added the language as a system input source
+// (System Settings → Keyboard → Input Sources). We only activate; we
+// never install layouts.
+
+use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
+use core_foundation_sys::base::{Boolean, CFRelease, CFTypeRef};
+use core_foundation_sys::dictionary::CFDictionaryRef;
+use core_foundation_sys::string::{
+    kCFStringEncodingUTF8, CFStringGetCString, CFStringGetCStringPtr, CFStringGetLength,
+    CFStringRef,
+};
+
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn TISCreateInputSourceList(
+        properties: CFDictionaryRef,
+        includeAllInstalled: Boolean,
+    ) -> CFArrayRef;
+    fn TISGetInputSourceProperty(
+        inputSource: CFTypeRef,
+        propertyKey: CFStringRef,
+    ) -> CFTypeRef;
+    fn TISSelectInputSource(inputSource: CFTypeRef) -> i32;
+
+    static kTISPropertyInputSourceLanguages: CFStringRef;
+}
+
+fn change_language(code: LanguageCode) {
+    let target = code.as_str();
+    if target.is_empty() {
+        return;
+    }
+    unsafe {
+        let list = TISCreateInputSourceList(std::ptr::null(), 0);
+        if list.is_null() {
+            eprintln!("[keyboard-remap] change_language: TISCreateInputSourceList returned null");
+            return;
+        }
+        let count = CFArrayGetCount(list);
+        let mut activated = false;
+        'outer: for i in 0..count {
+            let source = CFArrayGetValueAtIndex(list, i) as CFTypeRef;
+            if source.is_null() {
+                continue;
+            }
+            let langs_ref =
+                TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages);
+            if langs_ref.is_null() {
+                continue;
+            }
+            let langs = langs_ref as CFArrayRef;
+            let lang_count = CFArrayGetCount(langs);
+            for j in 0..lang_count {
+                let lang_ref = CFArrayGetValueAtIndex(langs, j) as CFStringRef;
+                if lang_ref.is_null() {
+                    continue;
+                }
+                let Some(lang) = cf_string_to_owned(lang_ref) else { continue };
+                let lang_lower = lang.to_ascii_lowercase();
+                // A source's language list may contain `en`, `en-US`, `ru`,
+                // `ru-RU`, etc. Match by prefix so `en` selects U.S.
+                // English and `ru` selects Russian without forcing the user
+                // to spell out a region.
+                let matches = lang_lower == target
+                    || lang_lower.starts_with(&format!("{target}-"))
+                    || lang_lower.starts_with(&format!("{target}_"));
+                if matches {
+                    let status = TISSelectInputSource(source);
+                    if status != 0 {
+                        eprintln!(
+                            "[keyboard-remap] change_language('{target}'): \
+                             TISSelectInputSource failed with OSStatus {status}"
+                        );
+                    } else {
+                        activated = true;
+                    }
+                    break 'outer;
+                }
+            }
+        }
+        CFRelease(list as CFTypeRef);
+        if !activated {
+            eprintln!(
+                "[keyboard-remap] change_language: no enabled input source for '{target}'; \
+                 add it in System Settings → Keyboard → Input Sources"
+            );
+        }
+    }
+}
+
+unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    // Fast path: many CFStrings have a directly-readable C string buffer.
+    let ptr = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+    if !ptr.is_null() {
+        return Some(
+            std::ffi::CStr::from_ptr(ptr)
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    // Slow path: copy out via a UTF-8 buffer big enough for the worst case.
+    let len = CFStringGetLength(s);
+    let cap = (len * 4 + 1).max(1);
+    let mut buf = vec![0u8; cap as usize];
+    let ok = CFStringGetCString(
+        s,
+        buf.as_mut_ptr() as *mut i8,
+        buf.len() as isize,
+        kCFStringEncodingUTF8,
+    );
+    if ok == 0 {
+        return None;
+    }
+    let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    buf.truncate(nul);
+    String::from_utf8(buf).ok()
 }
