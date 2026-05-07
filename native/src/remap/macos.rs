@@ -756,8 +756,9 @@ fn run_hidutil(payload: &str) -> Result<(), String> {
 // never install layouts.
 
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
-use core_foundation_sys::base::{Boolean, CFRelease, CFTypeRef};
+use core_foundation_sys::base::{Boolean, CFEqual, CFRelease, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
+use core_foundation_sys::number::CFBooleanGetValue;
 use core_foundation_sys::string::{
     kCFStringEncodingUTF8, CFStringGetCString, CFStringGetCStringPtr, CFStringGetLength,
     CFStringRef,
@@ -776,6 +777,9 @@ extern "C" {
     fn TISSelectInputSource(inputSource: CFTypeRef) -> i32;
 
     static kTISPropertyInputSourceLanguages: CFStringRef;
+    static kTISPropertyInputSourceCategory: CFStringRef;
+    static kTISPropertyInputSourceIsSelectCapable: CFStringRef;
+    static kTISCategoryKeyboardInputSource: CFStringRef;
 }
 
 fn change_language(code: LanguageCode) {
@@ -791,51 +795,68 @@ fn change_language(code: LanguageCode) {
         }
         let count = CFArrayGetCount(list);
         let mut activated = false;
-        'outer: for i in 0..count {
+        for i in 0..count {
             let source = CFArrayGetValueAtIndex(list, i) as CFTypeRef;
             if source.is_null() {
                 continue;
             }
-            let langs_ref =
-                TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages);
+            // Skip non-keyboard sources (Character Palette, Keyboard Viewer,
+            // Ink, …) — only physical keyboard layouts and IMEs qualify.
+            let category = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory);
+            if category.is_null()
+                || CFEqual(category, kTISCategoryKeyboardInputSource as CFTypeRef) == 0
+            {
+                continue;
+            }
+            // Skip sources the system marks as not user-selectable.
+            let selectable = TISGetInputSourceProperty(
+                source,
+                kTISPropertyInputSourceIsSelectCapable,
+            );
+            if !selectable.is_null() && !CFBooleanGetValue(selectable as _) {
+                continue;
+            }
+            // Match against the PRIMARY language only (first element of the
+            // languages array). Secondary entries are misleading: a Russian
+            // layout often lists `en` as a fallback, so a substring match
+            // would re-select Russian when the user asked for English.
+            let langs_ref = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages);
             if langs_ref.is_null() {
                 continue;
             }
             let langs = langs_ref as CFArrayRef;
-            let lang_count = CFArrayGetCount(langs);
-            for j in 0..lang_count {
-                let lang_ref = CFArrayGetValueAtIndex(langs, j) as CFStringRef;
-                if lang_ref.is_null() {
-                    continue;
-                }
-                let Some(lang) = cf_string_to_owned(lang_ref) else { continue };
-                let lang_lower = lang.to_ascii_lowercase();
-                // A source's language list may contain `en`, `en-US`, `ru`,
-                // `ru-RU`, etc. Match by prefix so `en` selects U.S.
-                // English and `ru` selects Russian without forcing the user
-                // to spell out a region.
-                let matches = lang_lower == target
-                    || lang_lower.starts_with(&format!("{target}-"))
-                    || lang_lower.starts_with(&format!("{target}_"));
-                if matches {
-                    let status = TISSelectInputSource(source);
-                    if status != 0 {
-                        eprintln!(
-                            "[keyboard-remap] change_language('{target}'): \
-                             TISSelectInputSource failed with OSStatus {status}"
-                        );
-                    } else {
-                        activated = true;
-                    }
-                    break 'outer;
-                }
+            if CFArrayGetCount(langs) == 0 {
+                continue;
             }
+            let primary_ref = CFArrayGetValueAtIndex(langs, 0) as CFStringRef;
+            if primary_ref.is_null() {
+                continue;
+            }
+            let Some(primary) = cf_string_to_owned(primary_ref) else { continue };
+            let primary_lower = primary.to_ascii_lowercase();
+            let matches = primary_lower == target
+                || primary_lower.starts_with(&format!("{target}-"))
+                || primary_lower.starts_with(&format!("{target}_"));
+            if !matches {
+                continue;
+            }
+            let status = TISSelectInputSource(source);
+            if status != 0 {
+                eprintln!(
+                    "[keyboard-remap] change_language('{target}'): \
+                     TISSelectInputSource failed with OSStatus {status}"
+                );
+            } else {
+                activated = true;
+            }
+            break;
         }
         CFRelease(list as CFTypeRef);
         if !activated {
             eprintln!(
-                "[keyboard-remap] change_language: no enabled input source for '{target}'; \
-                 add it in System Settings → Keyboard → Input Sources"
+                "[keyboard-remap] change_language: no enabled keyboard input source whose \
+                 primary language is '{target}'; add it in System Settings → Keyboard → \
+                 Input Sources"
             );
         }
     }
