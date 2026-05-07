@@ -28,12 +28,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
-    WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, PostMessageW,
+    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN,
+    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use super::rules::{Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
+use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
@@ -448,6 +449,10 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 vd_move_active_and_follow(*n);
             }
+            SyntheticEvent::ChangeLanguage(code) => {
+                flush_inputs(&mut inputs);
+                change_language(*code);
+            }
         }
     }
     flush_inputs(&mut inputs);
@@ -477,7 +482,6 @@ fn vd_move_active_and_follow(n: u32) {
     let Some(idx) = n.checked_sub(1) else {
         return;
     };
-    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.0.is_null() {
         return;
@@ -488,6 +492,95 @@ fn vd_move_active_and_follow(n: u32) {
     }
     if let Err(e) = winvd::switch_desktop(idx) {
         eprintln!("[keyboard-remap] move_to_workspace {n} (switch): {e:?}");
+    }
+}
+
+/// Switch the foreground window's input language by ISO 639-1 code (`en`,
+/// `ru`, …). Looks for a matching layout among the loaded keyboard
+/// layouts (the user must have already added the language in
+/// Settings → Time & Language → Language) and posts
+/// `WM_INPUTLANGCHANGEREQUEST` to the focused window. Quietly logs and
+/// returns if no matching layout is loaded.
+fn change_language(code: LanguageCode) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayoutList, HKL};
+
+    let Some(primary_lang) = primary_lang_id(code.as_str()) else {
+        eprintln!(
+            "[keyboard-remap] change_language: unsupported code '{}'",
+            code.as_str()
+        );
+        return;
+    };
+
+    // First call with None returns the count; second call fills the buffer.
+    let count = unsafe { GetKeyboardLayoutList(None) };
+    if count <= 0 {
+        return;
+    }
+    let mut layouts: Vec<HKL> = vec![HKL(std::ptr::null_mut()); count as usize];
+    let written = unsafe { GetKeyboardLayoutList(Some(layouts.as_mut_slice())) };
+    if written <= 0 {
+        return;
+    }
+    layouts.truncate(written as usize);
+
+    // The HKL low word is the Locale ID; its low 10 bits are the primary
+    // language ID we match against (e.g. 0x09 = English, 0x19 = Russian).
+    let target = layouts.into_iter().find(|hkl| {
+        let lcid = (hkl.0 as usize) as u16;
+        (lcid & 0x03FF) == primary_lang
+    });
+
+    let Some(hkl) = target else {
+        eprintln!(
+            "[keyboard-remap] change_language: no loaded layout for '{}' \
+             (primary lang 0x{primary_lang:X}); add it in Windows language settings",
+            code.as_str()
+        );
+        return;
+    };
+
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return;
+    }
+    unsafe {
+        if let Err(e) = PostMessageW(
+            hwnd,
+            WM_INPUTLANGCHANGEREQUEST,
+            WPARAM(0),
+            LPARAM(hkl.0 as isize),
+        ) {
+            eprintln!(
+                "[keyboard-remap] change_language: PostMessage failed: {e:?}"
+            );
+        }
+    }
+}
+
+/// Map an ISO 639-1 code to the Windows primary language ID (low 10 bits
+/// of the LCID). Covers the languages most likely to show up alongside
+/// `en` and `ru`; extend as needed.
+fn primary_lang_id(code: &str) -> Option<u16> {
+    match code {
+        "en" => Some(0x09),
+        "ru" => Some(0x19),
+        "uk" => Some(0x22),
+        "de" => Some(0x07),
+        "fr" => Some(0x0C),
+        "es" => Some(0x0A),
+        "it" => Some(0x10),
+        "pt" => Some(0x16),
+        "pl" => Some(0x15),
+        "nl" => Some(0x13),
+        "sv" => Some(0x1D),
+        "tr" => Some(0x1F),
+        "ja" => Some(0x11),
+        "ko" => Some(0x12),
+        "zh" => Some(0x04),
+        "ar" => Some(0x01),
+        "he" => Some(0x0D),
+        _ => None,
     }
 }
 

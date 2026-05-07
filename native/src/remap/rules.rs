@@ -158,6 +158,50 @@ pub enum SyntheticEvent {
     SwitchToWorkspace(u32),
     /// Move the active window to virtual desktop `N` and follow it there.
     MoveToWorkspace(u32),
+    /// Switch the system input language / keyboard layout to the one
+    /// matching this code (e.g. `en`, `ru`). The language must already be
+    /// installed as a system input source — we only activate, never add.
+    ChangeLanguage(LanguageCode),
+}
+
+/// A short ASCII language tag (e.g. `en`, `ru`, `en-us`). Stored as a
+/// fixed-size buffer so `SyntheticEvent` can stay `Copy`. Up to 8 bytes;
+/// trailing zeros pad the tail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LanguageCode([u8; 8]);
+
+impl LanguageCode {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("change_language: empty value".into());
+        }
+        let bytes = trimmed.as_bytes();
+        if bytes.len() > 8 {
+            return Err(format!(
+                "change_language: '{trimmed}' too long (max 8 chars)"
+            ));
+        }
+        if !bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
+        {
+            return Err(format!(
+                "change_language: '{trimmed}' must be ASCII alphanumeric (with optional - / _)"
+            ));
+        }
+        let mut buf = [0u8; 8];
+        for (i, b) in bytes.iter().enumerate() {
+            buf[i] = b.to_ascii_lowercase();
+        }
+        Ok(LanguageCode(buf))
+    }
+
+    pub fn as_str(&self) -> &str {
+        let end = self.0.iter().position(|&b| b == 0).unwrap_or(self.0.len());
+        // Safe: `parse` only stores ASCII bytes.
+        std::str::from_utf8(&self.0[..end]).unwrap_or("")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -311,12 +355,14 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 }
 
 /// A single rule inside an `on_hold:` list. Exactly one of the action
-/// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace`)
-/// must be populated; having zero or multiple is a parse error.
+/// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
+/// `change_language`) must be populated; having zero or multiple is a
+/// parse error.
 ///
-/// `keys` and `to_hotkey` are `Vec<YamlToken>` so YAML can supply either
-/// a string (`keys: [w]`, `keys: [","]`) or an integer (`keys: [1]`) —
-/// both become strings internally.
+/// `keys`, `to_hotkey` and `change_language` are `YamlToken` / lists of
+/// them so YAML can supply either a string (`keys: [w]`, `keys: [","]`,
+/// `change_language: ru`) or an integer (`keys: [1]`) — both become
+/// strings internally.
 #[derive(Debug, Deserialize)]
 struct HoldRule {
     #[serde(default)]
@@ -331,6 +377,8 @@ struct HoldRule {
     switch_to_workspace: Option<u32>,
     #[serde(default)]
     move_to_workspace: Option<u32>,
+    #[serde(default)]
+    change_language: Option<YamlToken>,
 }
 
 /// Accepts a YAML scalar that might be a string or a number; normalizes
@@ -514,9 +562,9 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
 
 /// Pick the action out of a HoldRule and bake it to a synthetic event
 /// sequence. Exactly one of `to_hotkey` / `switch_to_workspace` /
-/// `move_to_workspace` must be populated.
+/// `move_to_workspace` / `change_language` must be populated.
 fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
-    let mut provided: SmallVec<[&'static str; 3]> = SmallVec::new();
+    let mut provided: SmallVec<[&'static str; 4]> = SmallVec::new();
     if rule.to_hotkey.is_some() {
         provided.push("to_hotkey");
     }
@@ -526,10 +574,13 @@ fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
     if rule.move_to_workspace.is_some() {
         provided.push("move_to_workspace");
     }
+    if rule.change_language.is_some() {
+        provided.push("change_language");
+    }
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language"
         )),
         [_, ..] if provided.len() > 1 => Err(format!(
             "rule '{name}' has multiple action fields {provided:?}; pick exactly one"
@@ -557,6 +608,12 @@ fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
                 return Err(format!("rule '{name}': move_to_workspace must be >= 1"));
             }
             Ok(vec![SyntheticEvent::MoveToWorkspace(n)])
+        }
+        ["change_language"] => {
+            let token = rule.change_language.as_ref().unwrap();
+            let code = LanguageCode::parse(token.as_str())
+                .map_err(|e| format!("rule '{name}': {e}"))?;
+            Ok(vec![SyntheticEvent::ChangeLanguage(code)])
         }
         _ => unreachable!(),
     }
@@ -1047,6 +1104,71 @@ space:
     }
 
     #[test]
+    fn change_language_action_parses() {
+        let src = r#"
+space:
+  on_hold:
+    - keys: [e]
+      change_language: en
+    - keys: [r]
+      change_language: ru
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let en = overrides.get(&ov(alpha('E'))).unwrap();
+                match en.as_slice() {
+                    [SyntheticEvent::ChangeLanguage(code)] => {
+                        assert_eq!(code.as_str(), "en");
+                    }
+                    other => panic!("expected ChangeLanguage(en), got {other:?}"),
+                }
+                let ru = overrides.get(&ov(alpha('R'))).unwrap();
+                match ru.as_slice() {
+                    [SyntheticEvent::ChangeLanguage(code)] => {
+                        assert_eq!(code.as_str(), "ru");
+                    }
+                    other => panic!("expected ChangeLanguage(ru), got {other:?}"),
+                }
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn change_language_normalises_case() {
+        let src = r#"
+space:
+  on_hold:
+    - keys: [e]
+      change_language: EN
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let ev = overrides.get(&ov(alpha('E'))).unwrap();
+                match ev.as_slice() {
+                    [SyntheticEvent::ChangeLanguage(code)] => assert_eq!(code.as_str(), "en"),
+                    other => panic!("got {other:?}"),
+                }
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn change_language_rejects_empty() {
+        let src = r#"
+space:
+  on_hold:
+    - keys: [e]
+      change_language: ""
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("empty"), "got: {err}");
+    }
+
+    #[test]
     fn rule_without_action_errors() {
         let src = r#"
 space:
@@ -1174,6 +1296,9 @@ space:
     - { keys: [1], switch_to_workspace: 1 }
     - { keys: [2], switch_to_workspace: 2 }
     - { keys: [3], switch_to_workspace: 3 }
+
+    - { keys: [e], change_language: en }
+    - { keys: [r], change_language: ru }
 
     - { os: macos, keys: [_default], to_hotkey: [cmd] }
 "#;

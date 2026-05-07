@@ -40,6 +40,12 @@
  *         to_hotkey:            [mod, ..., key]    emit this key combo
  *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
  *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
+ *         change_language:      <code>             switch system input language to a code like
+ *                                                  `en` or `ru`. Matches the first installed
+ *                                                  input source whose language tag starts with
+ *                                                  the code. Add the language in OS settings
+ *                                                  first; we only activate, never install.
+ *                                                  (Windows + macOS)
  *
  *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
@@ -53,6 +59,8 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #   to_hotkey: [mod, ..., key]      emit this key combo
 #   switch_to_workspace: N          jump to virtual desktop N (1-indexed)
 #   move_to_workspace:   N          move active window to VD N and follow (1-indexed)
+#   change_language:     <code>     switch system input language (e.g. en, ru); the language
+#                                   must already be installed as a system input source
 
 capslock:
   on_tap: [escape]
@@ -101,6 +109,9 @@ space:
     - { keys: [shift, 7], move_to_workspace: 7 }
     - { keys: [shift, 8], move_to_workspace: 8 }
     - { keys: [shift, 9], move_to_workspace: 9 }
+
+    - { keys: [e], change_language: en }
+    - { keys: [r], change_language: ru }
 
     - { os: windows, keys: [q], to_hotkey: [alt, f4] }
     - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }

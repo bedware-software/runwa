@@ -28,7 +28,7 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 
-use super::rules::{Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
+use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
 use super::synth::INJECT_TAG;
 
@@ -677,6 +677,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 super::macos_desktop_tracker::set(n.saturating_sub(1));
                 continue;
             }
+            SyntheticEvent::ChangeLanguage(code) => {
+                change_language(*code);
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;
@@ -739,4 +743,152 @@ fn run_hidutil(payload: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Input-source switching via the Carbon TextInputSources API. We enumerate
+// the user's enabled keyboard sources, pick the first one whose declared
+// languages start with the requested code (e.g. `ru` matches the Russian
+// keyboard, `en` matches U.S. English), and call `TISSelectInputSource`.
+//
+// The user must have already added the language as a system input source
+// (System Settings → Keyboard → Input Sources). We only activate; we
+// never install layouts.
+
+use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
+use core_foundation_sys::base::{Boolean, CFEqual, CFRelease, CFTypeRef};
+use core_foundation_sys::dictionary::CFDictionaryRef;
+use core_foundation_sys::number::CFBooleanGetValue;
+use core_foundation_sys::string::{
+    kCFStringEncodingUTF8, CFStringGetCString, CFStringGetCStringPtr, CFStringGetLength,
+    CFStringRef,
+};
+
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn TISCreateInputSourceList(
+        properties: CFDictionaryRef,
+        includeAllInstalled: Boolean,
+    ) -> CFArrayRef;
+    fn TISGetInputSourceProperty(
+        inputSource: CFTypeRef,
+        propertyKey: CFStringRef,
+    ) -> CFTypeRef;
+    fn TISSelectInputSource(inputSource: CFTypeRef) -> i32;
+
+    static kTISPropertyInputSourceLanguages: CFStringRef;
+    static kTISPropertyInputSourceCategory: CFStringRef;
+    static kTISPropertyInputSourceIsSelectCapable: CFStringRef;
+    static kTISCategoryKeyboardInputSource: CFStringRef;
+}
+
+fn change_language(code: LanguageCode) {
+    let target = code.as_str();
+    if target.is_empty() {
+        return;
+    }
+    unsafe {
+        let list = TISCreateInputSourceList(std::ptr::null(), 0);
+        if list.is_null() {
+            eprintln!("[keyboard-remap] change_language: TISCreateInputSourceList returned null");
+            return;
+        }
+        let count = CFArrayGetCount(list);
+        let mut activated = false;
+        for i in 0..count {
+            let source = CFArrayGetValueAtIndex(list, i) as CFTypeRef;
+            if source.is_null() {
+                continue;
+            }
+            // Skip non-keyboard sources (Character Palette, Keyboard Viewer,
+            // Ink, …) — only physical keyboard layouts and IMEs qualify.
+            let category = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory);
+            if category.is_null()
+                || CFEqual(category, kTISCategoryKeyboardInputSource as CFTypeRef) == 0
+            {
+                continue;
+            }
+            // Skip sources the system marks as not user-selectable.
+            let selectable = TISGetInputSourceProperty(
+                source,
+                kTISPropertyInputSourceIsSelectCapable,
+            );
+            if !selectable.is_null() && !CFBooleanGetValue(selectable as _) {
+                continue;
+            }
+            // Match against the PRIMARY language only (first element of the
+            // languages array). Secondary entries are misleading: a Russian
+            // layout often lists `en` as a fallback, so a substring match
+            // would re-select Russian when the user asked for English.
+            let langs_ref = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages);
+            if langs_ref.is_null() {
+                continue;
+            }
+            let langs = langs_ref as CFArrayRef;
+            if CFArrayGetCount(langs) == 0 {
+                continue;
+            }
+            let primary_ref = CFArrayGetValueAtIndex(langs, 0) as CFStringRef;
+            if primary_ref.is_null() {
+                continue;
+            }
+            let Some(primary) = cf_string_to_owned(primary_ref) else { continue };
+            let primary_lower = primary.to_ascii_lowercase();
+            let matches = primary_lower == target
+                || primary_lower.starts_with(&format!("{target}-"))
+                || primary_lower.starts_with(&format!("{target}_"));
+            if !matches {
+                continue;
+            }
+            let status = TISSelectInputSource(source);
+            if status != 0 {
+                eprintln!(
+                    "[keyboard-remap] change_language('{target}'): \
+                     TISSelectInputSource failed with OSStatus {status}"
+                );
+            } else {
+                activated = true;
+            }
+            break;
+        }
+        CFRelease(list as CFTypeRef);
+        if !activated {
+            eprintln!(
+                "[keyboard-remap] change_language: no enabled keyboard input source whose \
+                 primary language is '{target}'; add it in System Settings → Keyboard → \
+                 Input Sources"
+            );
+        }
+    }
+}
+
+unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    // Fast path: many CFStrings have a directly-readable C string buffer.
+    let ptr = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+    if !ptr.is_null() {
+        return Some(
+            std::ffi::CStr::from_ptr(ptr)
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    // Slow path: copy out via a UTF-8 buffer big enough for the worst case.
+    let len = CFStringGetLength(s);
+    let cap = (len * 4 + 1).max(1);
+    let mut buf = vec![0u8; cap as usize];
+    let ok = CFStringGetCString(
+        s,
+        buf.as_mut_ptr() as *mut i8,
+        buf.len() as isize,
+        kCFStringEncodingUTF8,
+    );
+    if ok == 0 {
+        return None;
+    }
+    let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    buf.truncate(nul);
+    String::from_utf8(buf).ok()
 }
