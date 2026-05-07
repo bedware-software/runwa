@@ -338,9 +338,24 @@ impl StateMachine {
                 let m = *m;
                 self.state = State::Modifying { trigger, held: Some(m) };
                 match other {
+                    // Synthesize a full press-release pair for the
+                    // interrupting key. Posting only KeyDown leaves the OS
+                    // believing the key is physically held — and macOS
+                    // happily fires its own autorepeat on that "held" state,
+                    // which catastrophically misbehaves under the app
+                    // switcher: holding Space (Cmd-fallback) and tapping
+                    // Tab once spins through every running app instead of
+                    // moving one slot. The user's real KeyUp arrives later
+                    // and is forwarded with the modifier stamped — the OS
+                    // already saw our synth KeyUp, so the duplicate is a
+                    // no-op. Real autorepeat from the keyboard hardware
+                    // still goes through `arm 8` (ForwardWithModifier) and
+                    // re-fires the chord, matching native modifier+key
+                    // hold-to-repeat behaviour.
                     LogicalKey::Named(nk) => Action::emit([
                         SyntheticEvent::ModifierDown(m),
                         SyntheticEvent::KeyDown(nk),
+                        SyntheticEvent::KeyUp(nk),
                     ]),
                     // Key we don't recognize — inject modifier-down, then
                     // let the original event through so the OS sees e.g.
@@ -369,22 +384,34 @@ impl StateMachine {
                     }
                 }
 
-                // No override → fallback modifier, if configured.
+                // No override → fallback modifier, if configured. Same
+                // press-release pairing as TransparentModifier above —
+                // synthesizing a bare KeyDown leaves the OS believing the
+                // key is held, which the macOS app switcher interprets as
+                // "user is holding Tab" and autorepeats one app per tick.
+                // Pairing fixes Space+Tab (and analogous Cmd-fallback
+                // chords) so a single tap moves one selection.
                 if let Some(m) = *fallback {
                     self.state = State::Modifying { trigger, held: Some(m) };
                     return match other {
                         LogicalKey::Named(nk) => Action::emit([
                             SyntheticEvent::ModifierDown(m),
                             SyntheticEvent::KeyDown(nk),
+                            SyntheticEvent::KeyUp(nk),
                         ]),
                         _ => Action::emit_then_forward([SyntheticEvent::ModifierDown(m)]),
                     };
                 }
 
-                // No override, no fallback → forward the naked key.
+                // No override, no fallback → forward the naked key. Same
+                // pairing rationale: don't strand the OS thinking the key
+                // is held.
                 self.state = State::Modifying { trigger, held: None };
                 match other {
-                    LogicalKey::Named(nk) => Action::emit([SyntheticEvent::KeyDown(nk)]),
+                    LogicalKey::Named(nk) => Action::emit([
+                        SyntheticEvent::KeyDown(nk),
+                        SyntheticEvent::KeyUp(nk),
+                    ]),
                     _ => Action::Forward,
                 }
             }
@@ -505,11 +532,16 @@ space:
     fn capslock_hold_becomes_transparent_ctrl() {
         let mut m = sm(CAPS_CTRL_ESC);
         m.on_event(down(LogicalKey::CapsLock));
+        // Synth pairs KeyDown with KeyUp so the OS doesn't think the key
+        // is physically held — see the comment in the TransparentModifier
+        // arm of `handle_interruption` for the Space+Tab case that
+        // surfaced this.
         assert_eq!(
             m.on_event(down(alpha('C'))),
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Ctrl),
                 SyntheticEvent::KeyDown(NamedKey::Alpha(b'C')),
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'C')),
             ])
         );
         // A subsequent key while CapsLock is still held must carry the Ctrl
@@ -594,6 +626,7 @@ space:
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Cmd),
                 SyntheticEvent::KeyDown(NamedKey::Alpha(b'C')),
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'C')),
             ])
         );
         assert_eq!(
@@ -611,7 +644,10 @@ space:
         m.on_event(down(LogicalKey::Space));
         assert_eq!(
             m.on_event(down(alpha('Z'))),
-            emit(vec![SyntheticEvent::KeyDown(NamedKey::Alpha(b'Z'))])
+            emit(vec![
+                SyntheticEvent::KeyDown(NamedKey::Alpha(b'Z')),
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'Z')),
+            ])
         );
     }
 
@@ -700,6 +736,67 @@ space:
                 SyntheticEvent::KeyUp(NamedKey::Backtick),
                 SyntheticEvent::ModifierUp(Modifier::Win),
             ])
+        );
+    }
+
+    // Reproduces the user-reported "Space+Tab cycles through every running
+    // app on a single tap" bug. Default macOS template has Space's on_hold
+    // ending in `keys: [any], to_hotkey: [cmd]`, so Space+Tab routes through
+    // the fallback. The pre-fix synth was `[Cmd↓, Tab↓]` — Tab↑ was never
+    // emitted, so macOS believed Tab was physically held and the system app
+    // switcher fired its own autorepeat one app per tick. The user's actual
+    // physical Tab tap was milliseconds long, but the switcher had already
+    // cycled to the end of the app list before they let go. Pairing the
+    // synth KeyDown with a synth KeyUp makes the OS see a clean tap, and
+    // the switcher advances exactly one slot.
+    #[test]
+    fn space_plus_tab_fallback_emits_paired_press_release() {
+        let yaml = r#"
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [any], to_hotkey: [cmd] }
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        // First Tab tap while holding Space synthesizes a complete
+        // press-release pair, not just a press.
+        assert_eq!(
+            m.on_event(down(named(NamedKey::Tab))),
+            emit(vec![
+                SyntheticEvent::ModifierDown(Modifier::Cmd),
+                SyntheticEvent::KeyDown(NamedKey::Tab),
+                SyntheticEvent::KeyUp(NamedKey::Tab),
+            ])
+        );
+        // The user's real Tab-up arrives later and forwards with Cmd
+        // stamped — a benign duplicate (the OS already saw our synth
+        // release).
+        assert_eq!(
+            m.on_event(up(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        // Second physical tap inside the same Space-hold goes through the
+        // ForwardWithModifier path so Cmd stays continuously held — the
+        // switcher stays open and advances by one on each tap, matching
+        // native Cmd+Tab.
+        assert_eq!(
+            m.on_event(down(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        assert_eq!(
+            m.on_event(up(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        // Releasing Space emits ModifierUp(Cmd) — closes the switcher,
+        // selected app activates.
+        assert_eq!(
+            m.on_event(up(LogicalKey::Space)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Cmd)])
         );
     }
 
@@ -822,6 +919,7 @@ shift:
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Shift),
                 SyntheticEvent::KeyDown(NamedKey::Alpha(b'L')),
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'L')),
             ])
         );
         // Second L while still held: forwarded with Shift stamped.
@@ -1012,7 +1110,9 @@ tab:
         // on_hold rules use only `j` and `k` (no shift-qualified rules),
         // so the preempt guard rejects switching into Pending(Tab).
         // Falls through to the interruption arm: Shift's transparent
-        // layer fires, emitting ModifierDown(Shift) + KeyDown(Tab).
+        // layer fires, emitting ModifierDown(Shift) + KeyDown(Tab) +
+        // KeyUp(Tab) — the synth pair prevents the OS from thinking Tab
+        // is still held.
         let mut shift = ModifierMask::EMPTY;
         shift.insert(Modifier::Shift);
         assert_eq!(
@@ -1020,6 +1120,7 @@ tab:
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Shift),
                 SyntheticEvent::KeyDown(NamedKey::Tab),
+                SyntheticEvent::KeyUp(NamedKey::Tab),
             ])
         );
     }
