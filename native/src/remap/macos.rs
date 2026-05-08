@@ -175,6 +175,16 @@ fn install_tap_on_current_thread() -> Result<CGEventTap<'static>, String> {
         CGEventType::KeyDown,
         CGEventType::KeyUp,
         CGEventType::FlagsChanged,
+        // Mouse-downs are surfaced to the state machine as non-trigger
+        // interruptions so a Shift-held click doesn't leave Pending(Shift)
+        // alive — otherwise releasing Shift fires its `on_tap` (e.g.
+        // Cmd+Space) and the user gets an unwanted Spotlight pop-up after
+        // every Shift+click. Dragged / wheel events stay out: they fire too
+        // often to be worth running through the state machine, and the
+        // initial *Down has already done the interrupting.
+        CGEventType::LeftMouseDown,
+        CGEventType::RightMouseDown,
+        CGEventType::OtherMouseDown,
     ];
 
     let tap = CGEventTap::new(
@@ -259,6 +269,17 @@ fn tap_callback(
             };
             (kind, logical)
         }
+        // Mouse buttons surface as a generic non-trigger key press —
+        // `LogicalKey::Other` already has the right semantics ("interruption
+        // that doesn't itself emit a synthetic keystroke"). For a modifier
+        // trigger like Shift the state machine fires the transparent-modifier
+        // arm, which returns `EmitThenForwardWithModifier(ModifierDown, m)` —
+        // the action handler below stamps the modifier flag onto the click
+        // CGEvent so it reaches the foreground app as e.g. a Shift+click,
+        // not a naked click.
+        CGEventType::LeftMouseDown
+        | CGEventType::RightMouseDown
+        | CGEventType::OtherMouseDown => (EventKind::KeyDown, LogicalKey::Other),
         _ => return CallbackResult::Keep,
     };
 

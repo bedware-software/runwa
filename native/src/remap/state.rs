@@ -1250,4 +1250,32 @@ space:
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
         );
     }
+
+    // Reported user bug: with `shift: { on_tap: [cmd, space] }`, holding
+    // Shift and clicking the mouse and then releasing Shift was firing
+    // Cmd+Space — Spotlight/the palette popped up after every Shift+click.
+    // The macOS platform layer surfaces mouse-downs as `LogicalKey::Other`
+    // KeyDown events, which interrupts Pending(Shift): Shift's transparent
+    // layer fires (so the click is forwarded with the Shift flag stamped)
+    // and Shift-up emits ModifierUp instead of the on_tap.
+    #[test]
+    fn shift_pending_then_mouse_click_does_not_fire_on_tap() {
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+"#;
+        let mut m = sm(yaml);
+        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        assert_eq!(
+            m.on_event(down(LogicalKey::Other)),
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
+                Modifier::Shift,
+            )
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Shift)])
+        );
+    }
 }
