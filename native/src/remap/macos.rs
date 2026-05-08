@@ -787,6 +787,24 @@ fn change_language(code: LanguageCode) {
     if target.is_empty() {
         return;
     }
+    // Run off the event-tap callback thread. `TISSelectInputSource`
+    // synchronously fans out a system-wide
+    // `kTISNotifySelectedKeyboardInputSourceChanged` notification, and
+    // some apps (Electron-based: Claude Desktop, our own settings
+    // window, …) crash if that notification arrives while their main
+    // thread is still inside the keyDown that triggered the remap.
+    // Detaching gives the original key event time to land before we
+    // perturb the input source.
+    let owned = target.to_string();
+    if let Err(e) = thread::Builder::new()
+        .name("runwa-change-language".into())
+        .spawn(move || select_input_source(&owned))
+    {
+        eprintln!("[keyboard-remap] change_language spawn failed: {e}");
+    }
+}
+
+fn select_input_source(target: &str) {
     unsafe {
         let list = TISCreateInputSourceList(std::ptr::null(), 0);
         if list.is_null() {
