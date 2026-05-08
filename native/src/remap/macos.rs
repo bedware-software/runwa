@@ -310,10 +310,6 @@ fn tap_callback(
             inject(events.as_slice(), event_flags);
             CallbackResult::Drop
         }
-        Action::EmitThenForward(events) => {
-            inject(events.as_slice(), event_flags);
-            CallbackResult::Keep
-        }
         Action::EmitThenForwardWithModifier(events, m) => {
             // Inject the synth events (typically ModifierDown), then stamp
             // the modifier flag onto the user's real event before letting
@@ -787,21 +783,46 @@ fn change_language(code: LanguageCode) {
     if target.is_empty() {
         return;
     }
-    // Run off the event-tap callback thread. `TISSelectInputSource`
-    // synchronously fans out a system-wide
-    // `kTISNotifySelectedKeyboardInputSourceChanged` notification, and
-    // some apps (Electron-based: Claude Desktop, our own settings
-    // window, …) crash if that notification arrives while their main
-    // thread is still inside the keyDown that triggered the remap.
-    // Detaching gives the original key event time to land before we
-    // perturb the input source.
-    let owned = target.to_string();
-    if let Err(e) = thread::Builder::new()
-        .name("runwa-change-language".into())
-        .spawn(move || select_input_source(&owned))
-    {
-        eprintln!("[keyboard-remap] change_language spawn failed: {e}");
+    // Hand the work to Runwa's main dispatch queue. Two reasons:
+    //   1. Returning from the event-tap callback fast keeps the tap
+    //      under its `kCGEventTapDisabledByTimeout` budget.
+    //   2. `TISSelectInputSource` fans out
+    //      `kTISNotifySelectedKeyboardInputSourceChanged` to every
+    //      observer in our own process too. When the foreground app is
+    //      Runwa itself (palette input, settings window), running TIS
+    //      on a worker thread races with the renderer's text-input
+    //      client — that crashes Electron with no log trace. Pinning
+    //      the call to the main thread serialises it against the same
+    //      runloop that handles the notification.
+    let owned = Box::new(target.to_string());
+    let ctx = Box::into_raw(owned) as *mut std::ffi::c_void;
+    unsafe {
+        dispatch_async_f(dispatch_get_main_queue(), ctx, change_language_trampoline);
     }
+}
+
+extern "C" fn change_language_trampoline(ctx: *mut std::ffi::c_void) {
+    if ctx.is_null() {
+        return;
+    }
+    let owned = unsafe { Box::from_raw(ctx as *mut String) };
+    select_input_source(&owned);
+}
+
+// libdispatch is part of libSystem and is already linked (CFRunLoop pulls
+// it in). `dispatch_get_main_queue()` is a macro in C that resolves to a
+// reference to the global `_dispatch_main_q` symbol; expose it as a
+// helper so the Rust call site reads cleanly.
+type DispatchQueue = *mut std::ffi::c_void;
+type DispatchFunction = extern "C" fn(*mut std::ffi::c_void);
+
+extern "C" {
+    static _dispatch_main_q: std::ffi::c_void;
+    fn dispatch_async_f(queue: DispatchQueue, context: *mut std::ffi::c_void, work: DispatchFunction);
+}
+
+fn dispatch_get_main_queue() -> DispatchQueue {
+    unsafe { &_dispatch_main_q as *const _ as DispatchQueue }
 }
 
 fn select_input_source(target: &str) {

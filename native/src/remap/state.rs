@@ -87,11 +87,6 @@ pub enum Action {
     /// Shift+Home needs the user's physically-held Shift to carry onto
     /// the synthesized Home events.
     Emit(SmallVec<[SyntheticEvent; 8]>),
-    /// Inject synthetic events AND let the original event through. Used for
-    /// transparent-modifier interruptions by keys we don't have a NamedKey
-    /// for — we need to press the modifier but can't synthesize the key,
-    /// so we pre-inject the modifier and forward the user's keystroke.
-    EmitThenForward(SmallVec<[SyntheticEvent; 8]>),
     /// Inject synthetic events, then forward the original with the given
     /// modifier flag stamped on top of the original's existing flag state.
     /// Used by the transparent-modifier and fallback-modifier interruption
@@ -101,9 +96,9 @@ pub enum Action {
     /// keystroke. Forwarding the user's actual `Tab` event makes Space+Tab
     /// behave like Cmd+Tab: a tap moves the switcher one slot, holding
     /// Tab autorepeats it via the keyboard hardware (still flowing through
-    /// `ForwardWithModifier` for repeat events). Windows treats this as
-    /// `EmitThenForward` — `SendInput` already propagates the modifier
-    /// flag globally so per-event stamping is a no-op there.
+    /// `ForwardWithModifier` for repeat events). On Windows `SendInput`
+    /// already propagates the modifier flag globally so per-event
+    /// stamping is a no-op there — the platform layer just forwards.
     EmitThenForwardWithModifier(SmallVec<[SyntheticEvent; 8]>, Modifier),
     /// Forward the event but assert the given modifier on it. Used when a
     /// transparent modifier is logically held (state is `Modifying{held:
@@ -123,10 +118,6 @@ impl Action {
 
     pub fn emit_tap(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
         Action::EmitTap(events.into_iter().collect())
-    }
-
-    pub fn emit_then_forward(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
-        Action::EmitThenForward(events.into_iter().collect())
     }
 
     pub fn emit_then_forward_with_modifier(
