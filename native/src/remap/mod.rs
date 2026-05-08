@@ -93,6 +93,34 @@ pub fn stop(handle: HandleId) -> Result<(), String> {
     }
 }
 
+/// Switch the system input language to the one matching `code` (e.g. `en`,
+/// `ru`). Same logic as the keyboard-remap `change_language` rule action,
+/// but exposed as a top-level entry point so JS can drive it directly —
+/// e.g. when the palette opens with the "force English" setting on. The
+/// language must already be installed as a system input source; we only
+/// activate, never add. No-op on unsupported platforms.
+pub fn set_input_language(code: &str) -> Result<(), String> {
+    let parsed = rules::LanguageCode::parse(code)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        macos::change_language(parsed);
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        windows::change_language(parsed);
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = parsed;
+        Ok(())
+    }
+}
+
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 struct NoopHandle;
 

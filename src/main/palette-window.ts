@@ -10,6 +10,7 @@ import {
   getForegroundWindow,
   isWindowOnCurrentDesktop
 } from './modules/window-switcher/native'
+import { setInputLanguage } from './modules/keyboard-remap/native'
 
 /** HWND of a BrowserWindow as a decimal string, or `null` if the window is
  * gone or the handle can't be decoded (non-Windows platforms, 32-bit Electron,
@@ -363,6 +364,20 @@ class PaletteWindow {
         } catch (err) {
           console.warn('[palette] forceForeground failed', err)
         }
+      }
+    }
+
+    // "Switch to English on open" — flip the system input source so the
+    // user can type the query without first cycling layouts. Done after
+    // the focus grab so on Windows `WM_INPUTLANGCHANGEREQUEST` lands on
+    // the palette window (the only HWND we care about); on macOS the
+    // change is system-wide and order doesn't matter. The native call
+    // is a no-op when English isn't installed as a system input source.
+    if (settingsStore.get().paletteSwitchToEnglish) {
+      try {
+        setInputLanguage('en')
+      } catch (err) {
+        console.warn('[palette] setInputLanguage(en) failed', err)
       }
     }
 

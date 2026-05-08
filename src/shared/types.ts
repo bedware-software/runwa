@@ -238,6 +238,16 @@ export interface Settings {
    */
   quickLaunchDigits: boolean
   /**
+   * When the palette opens (any search dialog), force the system input
+   * language to English so the user can type their query without first
+   * switching layouts. macOS calls `TISSelectInputSource`; Windows posts
+   * `WM_INPUTLANGCHANGEREQUEST` to the palette window. The English
+   * keyboard layout must already be installed as a system input source —
+   * the toggle only activates, never adds. We never restore on close;
+   * the user keeps whatever language was last active.
+   */
+  paletteSwitchToEnglish: boolean
+  /**
    * Launch runwa automatically when the user logs into their OS session.
    * Cross-platform (Electron's `app.setLoginItemSettings` handles both
    * Windows HKCU\...\Run and macOS LoginItems). Only meaningful in
@@ -262,6 +272,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   quickLaunchDigits: true,
+  paletteSwitchToEnglish: true,
   startAtLogin: false,
   runAsAdmin: false,
   modules: {}

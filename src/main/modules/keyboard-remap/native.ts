@@ -11,6 +11,7 @@ import path from 'path'
 interface NativeAddon {
   startKeyboardRemap(rulesJson: string): number
   stopKeyboardRemap(handle: number): void
+  setInputLanguage(code: string): void
 }
 
 let addon: NativeAddon | null = null
@@ -50,4 +51,15 @@ export function startKeyboardRemap(rulesJson: string): number {
 
 export function stopKeyboardRemap(handle: number): void {
   loadAddon().stopKeyboardRemap(handle)
+}
+
+/**
+ * Activate the system input source whose primary language matches `code`
+ * (ISO 639-1, e.g. `en`, `ru`). Same plumbing as the keyboard-remap
+ * `change_language` rule action — no-ops if the language isn't installed.
+ * Used by the palette window to force English on open when the user has
+ * the corresponding setting enabled.
+ */
+export function setInputLanguage(code: string): void {
+  loadAddon().setInputLanguage(code)
 }

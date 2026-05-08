@@ -495,7 +495,7 @@ fn vd_move_active_and_follow(n: u32) {
 /// Settings → Time & Language → Language) and posts
 /// `WM_INPUTLANGCHANGEREQUEST` to the focused window. Quietly logs and
 /// returns if no matching layout is loaded.
-fn change_language(code: LanguageCode) {
+pub(super) fn change_language(code: LanguageCode) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayoutList, HKL};
 
     let Some(primary_lang) = primary_lang_id(code.as_str()) else {

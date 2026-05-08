@@ -16,6 +16,7 @@ interface SettingsState {
   hydrate: () => Promise<void>
   setTheme: (theme: Theme) => Promise<void>
   setQuickLaunchDigits: (enabled: boolean) => Promise<void>
+  setPaletteSwitchToEnglish: (enabled: boolean) => Promise<void>
   setStartAtLogin: (enabled: boolean) => Promise<void>
   setRunAsAdmin: (enabled: boolean) => Promise<void>
   setModuleEnabled: (moduleId: ModuleId, enabled: boolean) => Promise<void>
@@ -63,6 +64,15 @@ export const useSettingsStore = create<SettingsState>()(
     setQuickLaunchDigits: async (enabled: boolean) => {
       const updated = await window.electronAPI.settingsSet({
         quickLaunchDigits: enabled
+      })
+      set((s) => {
+        s.settings = updated
+      })
+    },
+
+    setPaletteSwitchToEnglish: async (enabled: boolean) => {
+      const updated = await window.electronAPI.settingsSet({
+        paletteSwitchToEnglish: enabled
       })
       set((s) => {
         s.settings = updated

@@ -18,6 +18,13 @@ export function GeneralPanel() {
     (s) => s.settings?.quickLaunchDigits ?? DEFAULT_SETTINGS.quickLaunchDigits
   )
   const setQuickLaunchDigits = useSettingsStore((s) => s.setQuickLaunchDigits)
+  const paletteSwitchToEnglish = useSettingsStore(
+    (s) =>
+      s.settings?.paletteSwitchToEnglish ?? DEFAULT_SETTINGS.paletteSwitchToEnglish
+  )
+  const setPaletteSwitchToEnglish = useSettingsStore(
+    (s) => s.setPaletteSwitchToEnglish
+  )
 
   const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false)
 
@@ -64,6 +71,12 @@ export function GeneralPanel() {
             description="When the result list narrows to 4 or fewer rows, render 1–4 keycaps along the left edge and let the matching digit run that row directly."
             checked={quickLaunchDigits}
             onChange={(v) => void setQuickLaunchDigits(v)}
+          />
+          <ToggleRow
+            title="Switch to English on any search dialog open"
+            description="Whenever a search dialog opens, force the system input language to English so you can type the query without switching layouts first. The English keyboard must already be installed as a system input source."
+            checked={paletteSwitchToEnglish}
+            onChange={(v) => void setPaletteSwitchToEnglish(v)}
           />
         </div>
       </section>

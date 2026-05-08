@@ -778,7 +778,7 @@ extern "C" {
     static kTISCategoryKeyboardInputSource: CFStringRef;
 }
 
-fn change_language(code: LanguageCode) {
+pub(super) fn change_language(code: LanguageCode) {
     let target = code.as_str();
     if target.is_empty() {
         return;
