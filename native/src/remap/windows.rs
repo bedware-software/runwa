@@ -230,12 +230,6 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
             inject(events.as_slice());
             LRESULT(1)
         }
-        Action::EmitThenForward(events) => {
-            // Inject the synthetics (e.g. a prefix modifier-down), then let
-            // the original event continue so the OS sees it naturally.
-            inject(events.as_slice());
-            CallNextHookEx(None, code, wparam, lparam)
-        }
         // SendInput already updates the global key state for any modifier
         // we injected, so subsequent real events (including the original
         // we're about to forward) naturally carry the flag — there's no
