@@ -149,11 +149,28 @@ enum State {
     /// yet (we emit the matching up on trigger release). `None` means no
     /// modifier is outstanding.
     Modifying { trigger: LogicalKey, held: Option<Modifier> },
+    /// A modifier-chord on_hold combo just fired and is "physically
+    /// held" via our synthesized modifier-down events. We're waiting
+    /// for either the combo key or the trigger to come back up; on
+    /// either, we emit the matching release sequence stashed in
+    /// `StateMachine::combo_release`. Autorepeat KeyDowns of the
+    /// combo key while in this state are suppressed — chord
+    /// modifiers are already down, no need to re-emit. This is what
+    /// turns `Space+D → Ctrl+Alt+Cmd+D` from a microsecond tap into
+    /// a real hold-to-talk binding.
+    Comboing { trigger: LogicalKey, combo_key: NamedKey },
 }
 
 pub struct StateMachine {
     rules: ResolvedRules,
     state: State,
+    /// Release-side events for the currently-active push-to-talk
+    /// chord. `Some(_)` iff `state == State::Comboing { .. }`.
+    /// Drained when the combo key or trigger comes back up. Holding
+    /// this on the machine (rather than inside the State variant)
+    /// keeps `State` `Copy`, which the `match (self.state, …)`
+    /// dispatch elsewhere depends on.
+    combo_release: Option<SmallVec<[SyntheticEvent; 4]>>,
 }
 
 impl StateMachine {
@@ -161,6 +178,7 @@ impl StateMachine {
         Self {
             rules,
             state: State::Idle,
+            combo_release: None,
         }
     }
 
@@ -177,11 +195,58 @@ impl StateMachine {
         // when they're pressed from Idle — once another trigger has the
         // layer, modifiers are transparent.
         let is_current_trigger = match self.state {
-            State::Pending { trigger } | State::Modifying { trigger, .. } => trigger == ev.key,
+            State::Pending { trigger }
+            | State::Modifying { trigger, .. }
+            | State::Comboing { trigger, .. } => trigger == ev.key,
             State::Idle => false,
         };
         if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
             return Action::Forward;
+        }
+
+        // Comboing — a modifier chord is held by us. The user's next
+        // input either keeps it held (autorepeat of the same key),
+        // tears it down (combo key up, or trigger up), or breaks out
+        // of it (any other event — we emit the release sequence and
+        // hand control back to Modifying). Handled BEFORE the
+        // generic tuple-match below so we don't need a Copy-stable
+        // SmallVec inside the State variant.
+        if let State::Comboing { trigger, combo_key } = self.state {
+            let combo_key_log = LogicalKey::Named(combo_key);
+            // Combo-key KeyDown (incl. autorepeat) — chord modifiers
+            // already held, just suppress.
+            if ev.kind == EventKind::KeyDown && ev.key == combo_key_log {
+                return Action::Suppress;
+            }
+            // Trigger autorepeat KeyDown (e.g. OS-driven repeat of
+            // physically-held Space) — chord state intact, suppress.
+            if ev.kind == EventKind::KeyDown && ev.key == trigger {
+                return Action::Suppress;
+            }
+            // Combo-key KeyUp — drop the chord, return to layer.
+            if ev.kind == EventKind::KeyUp && ev.key == combo_key_log {
+                let release = self.combo_release.take().unwrap_or_default();
+                self.state = State::Modifying { trigger, held: None };
+                return Action::emit(release);
+            }
+            // Trigger KeyUp while combo still held — full teardown.
+            if ev.kind == EventKind::KeyUp && ev.key == trigger {
+                let release = self.combo_release.take().unwrap_or_default();
+                self.state = State::Idle;
+                return Action::emit(release);
+            }
+            // Anything else — release the chord cleanly and graduate
+            // back to Modifying. The triggering event is dropped on
+            // the floor; user can re-press the new key to fire its
+            // own combo after the modifiers are freed. The
+            // alternative (chaining straight into a new combo) would
+            // need us to splice two Emit lists together AND replay
+            // the new event through the rest of the match — for
+            // little real-world benefit, since the user can just
+            // release the current combo key first.
+            let release = self.combo_release.take().unwrap_or_default();
+            self.state = State::Modifying { trigger, held: None };
+            return Action::emit(release);
         }
 
         let trigger_match = if binding.is_some() { Some(ev.key) } else { None };
@@ -302,33 +367,19 @@ impl StateMachine {
                     self.state = State::Idle;
                     return Action::Forward;
                 };
-                self.handle_interruption(
-                    trigger,
-                    &binding,
-                    ev.key,
-                    ev.modifiers,
-                    ev.is_autorepeat,
-                )
+                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
-            // In Modifying{held: None} (an explicit override just fired),
-            // a new key-down for a non-current-trigger key should re-fire
-            // the override — holding the trigger and tapping the target
-            // key repeatedly works, not just the first tap. EXCEPT when
-            // the KeyDown is an OS autorepeat for a chord-style emit
-            // (one that injects modifiers) — see `handle_interruption`
-            // for why we gate.
+            // In Modifying{held: None} (an explicit override just fired
+            // for a nav-style binding), a new key-down for any other
+            // key should re-fire the override. Chord-style bindings
+            // never come back here — they enter Comboing on press
+            // and are torn down via the Comboing block above.
             (State::Modifying { trigger, held: None }, EventKind::KeyDown, _, _) => {
                 let Some(binding) = self.rules.triggers.get(&trigger).cloned() else {
                     return Action::Forward;
                 };
-                self.handle_interruption(
-                    trigger,
-                    &binding,
-                    ev.key,
-                    ev.modifiers,
-                    ev.is_autorepeat,
-                )
+                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
             // In Modifying with a held modifier: forward the event with the
@@ -355,7 +406,6 @@ impl StateMachine {
         binding: &ResolvedBinding,
         other: LogicalKey,
         mods: ModifierMask,
-        is_autorepeat: bool,
     ) -> Action {
         match &binding.on_hold {
             ResolvedHold::Passthrough => {
@@ -397,39 +447,53 @@ impl StateMachine {
                 // still fire when the user happens to be holding e.g.
                 // Shift. The fallback-modifier path below then stamps the
                 // physical modifier onto the synthesized output.
-                // Chord-style emits (anything that injects modifiers,
-                // e.g. `to_hotkey: [ctrl, alt, cmd, w]`) must fire
-                // EXACTLY ONCE per physical press — even if the user
-                // keeps the combo key held and the OS sends 30
-                // autorepeat KeyDowns per second. Without this gate,
-                // a `Space+D` hold-to-talk binding triggers groq 30×/s
-                // (start → stop → start → stop …) and the indicator
-                // window strobes uselessly. Nav-style emits without
-                // any modifier (e.g. `to_hotkey: [left]` for
-                // `Space+H`) keep their auto-repeat — there the
-                // re-fire IS what users want (cursor moves
-                // continuously while you hold H).
-                let chord_safe_for_repeat = |events: &[SyntheticEvent]| -> bool {
-                    !events
-                        .iter()
-                        .any(|e| matches!(e, SyntheticEvent::ModifierDown(_)))
-                };
+                //
+                // Two output shapes per match:
+                //   * chord-style (any ModifierDown in the press list,
+                //     e.g. `[ctrl, alt, cmd, d]`): emit the press,
+                //     stash the release, enter `Comboing`. The chord
+                //     stays "physically held" until the combo key (or
+                //     trigger) comes up — push-to-talk through remap.
+                //   * nav-style (no modifier injection, e.g.
+                //     `[left]`): emit press+release back-to-back as
+                //     a flat tap and stay in `Modifying { held: None }`.
+                //     Subsequent OS autorepeats of the combo key
+                //     fall back into this same arm and re-fire the
+                //     tap, so Space+H produces a continuous Left
+                //     arrow stream the way users expect from a nav
+                //     binding.
                 if let LogicalKey::Named(nk) = other {
-                    if let Some(events) = overrides.get(&(mods, nk)) {
-                        self.state = State::Modifying { trigger, held: None };
-                        if is_autorepeat && !chord_safe_for_repeat(events) {
-                            return Action::Suppress;
-                        }
-                        return Action::emit(events.iter().copied());
-                    }
-                    if !mods.is_empty() {
-                        if let Some(events) = overrides.get(&(ModifierMask::EMPTY, nk)) {
-                            self.state = State::Modifying { trigger, held: None };
-                            if is_autorepeat && !chord_safe_for_repeat(events) {
-                                return Action::Suppress;
+                    let pair = overrides
+                        .get(&(mods, nk))
+                        .or_else(|| {
+                            if mods.is_empty() {
+                                None
+                            } else {
+                                overrides.get(&(ModifierMask::EMPTY, nk))
                             }
-                            return Action::emit(events.iter().copied());
+                        });
+                    if let Some(pair) = pair {
+                        let has_modifiers = pair
+                            .on_press
+                            .iter()
+                            .any(|e| matches!(e, SyntheticEvent::ModifierDown(_)));
+                        if has_modifiers {
+                            // Push-to-talk: emit press, hold modifiers,
+                            // wait for combo-key release.
+                            self.combo_release = Some(pair.on_release.clone());
+                            self.state = State::Comboing {
+                                trigger,
+                                combo_key: nk,
+                            };
+                            return Action::emit(pair.on_press.iter().copied());
                         }
+                        // Nav-style: flat tap, stay in Modifying so
+                        // OS autorepeats keep re-firing the tap.
+                        self.state = State::Modifying { trigger, held: None };
+                        let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+                        events.extend(pair.on_press.iter().copied());
+                        events.extend(pair.on_release.iter().copied());
+                        return Action::Emit(events);
                     }
                 }
 
@@ -490,6 +554,14 @@ mod tests {
             key: k,
             modifiers: ModifierMask::EMPTY,
             is_autorepeat: false,
+        }
+    }
+    fn down_autorepeat(k: LogicalKey) -> RawEvent {
+        RawEvent {
+            kind: EventKind::KeyDown,
+            key: k,
+            modifiers: ModifierMask::EMPTY,
+            is_autorepeat: true,
         }
     }
     fn up(k: LogicalKey) -> RawEvent {
@@ -638,6 +710,13 @@ space:
 
     #[test]
     fn space_plus_w_fires_override() {
+        // Chord-style override (has modifiers): KeyDown emits the
+        // press half and enters Comboing; KeyUp emits the release
+        // half and falls back to Modifying. Together this is what
+        // used to be a single packed-tap emission, but now the
+        // modifiers stay held for as long as W is physically held —
+        // turning Space+W from a microsecond tap into a real
+        // hold-to-fire chord.
         let mut m = sm(SPACE_MAC);
         m.on_event(down(LogicalKey::Space));
         assert_eq!(
@@ -646,12 +725,18 @@ space:
                 SyntheticEvent::ModifierDown(Modifier::Ctrl),
                 SyntheticEvent::ModifierDown(Modifier::Alt),
                 SyntheticEvent::KeyDown(NamedKey::Alpha(b'S')),
+            ])
+        );
+        assert_eq!(
+            m.on_event(up(alpha('W'))),
+            emit(vec![
                 SyntheticEvent::KeyUp(NamedKey::Alpha(b'S')),
                 SyntheticEvent::ModifierUp(Modifier::Alt),
                 SyntheticEvent::ModifierUp(Modifier::Ctrl),
             ])
         );
-        // Override fired -> no transparent modifier; Space-up suppresses.
+        // Override fired and was torn down -> no transparent
+        // modifier left to release; Space-up suppresses.
         assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
     }
 
@@ -695,11 +780,18 @@ space:
     fn space_plus_q_on_windows_synthesizes_alt_f4() {
         let mut m = sm(SPACE_WIN);
         m.on_event(down(LogicalKey::Space));
+        // Press half: Alt-down, F4-down.
         assert_eq!(
             m.on_event(down(alpha('Q'))),
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Alt),
                 SyntheticEvent::KeyDown(NamedKey::F4),
+            ])
+        );
+        // Release half: F4-up, Alt-up — emitted on Q's KeyUp.
+        assert_eq!(
+            m.on_event(up(alpha('Q'))),
+            emit(vec![
                 SyntheticEvent::KeyUp(NamedKey::F4),
                 SyntheticEvent::ModifierUp(Modifier::Alt),
             ])
@@ -768,11 +860,18 @@ space:
 "#;
         let mut m = sm(src);
         m.on_event(down(LogicalKey::Space));
+        // Press half on `↓.
         assert_eq!(
             m.on_event(down(named(NamedKey::Backtick))),
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Win),
                 SyntheticEvent::KeyDown(NamedKey::Backtick),
+            ])
+        );
+        // Release half on `↑.
+        assert_eq!(
+            m.on_event(up(named(NamedKey::Backtick))),
+            emit(vec![
                 SyntheticEvent::KeyUp(NamedKey::Backtick),
                 SyntheticEvent::ModifierUp(Modifier::Win),
             ])
@@ -846,24 +945,30 @@ space:
     }
 
     // Bug A: holding Space and tapping the target key twice should fire
-    // the explicit override on each tap, not just the first.
+    // the explicit override on each tap, not just the first. With the
+    // push-to-talk model, each tap = press half on Q↓, release half on
+    // Q↑, then another press/release pair on the second tap.
     #[test]
     fn space_plus_q_refires_on_repeat_tap() {
         let mut m = sm(SPACE_WIN);
         m.on_event(down(LogicalKey::Space));
-        let alt_f4 = || {
+        let press = || {
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Alt),
                 SyntheticEvent::KeyDown(NamedKey::F4),
+            ])
+        };
+        let release = || {
+            emit(vec![
                 SyntheticEvent::KeyUp(NamedKey::F4),
                 SyntheticEvent::ModifierUp(Modifier::Alt),
             ])
         };
-        assert_eq!(m.on_event(down(alpha('Q'))), alt_f4());
-        assert_eq!(m.on_event(up(alpha('Q'))), Action::Forward);
+        assert_eq!(m.on_event(down(alpha('Q'))), press());
+        assert_eq!(m.on_event(up(alpha('Q'))), release());
         // Second tap, still holding Space — must fire the override again.
-        assert_eq!(m.on_event(down(alpha('Q'))), alt_f4());
-        assert_eq!(m.on_event(up(alpha('Q'))), Action::Forward);
+        assert_eq!(m.on_event(down(alpha('Q'))), press());
+        assert_eq!(m.on_event(up(alpha('Q'))), release());
         assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
     }
 
@@ -876,12 +981,18 @@ space:
         m.on_event(down(LogicalKey::Space));
         // Shift-down is forwarded without touching state.
         assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Forward);
-        // Q still fires the override.
+        // Q still fires the override (press half on Q↓).
         assert_eq!(
             m.on_event(down(alpha('Q'))),
             emit(vec![
                 SyntheticEvent::ModifierDown(Modifier::Alt),
                 SyntheticEvent::KeyDown(NamedKey::F4),
+            ])
+        );
+        // Q↑ emits the release half.
+        assert_eq!(
+            m.on_event(up(alpha('Q'))),
+            emit(vec![
                 SyntheticEvent::KeyUp(NamedKey::F4),
                 SyntheticEvent::ModifierUp(Modifier::Alt),
             ])
@@ -1328,6 +1439,146 @@ shift:
         assert_eq!(
             m.on_event(up(LogicalKey::Shift)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Shift)])
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Push-to-talk through remap: modifier-chord on_hold bindings hold
+    // their modifiers for as long as the combo key is physically held,
+    // and only emit the release sequence when the user lets it go.
+
+    const SPACE_PTT: &str = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [d], to_hotkey: [ctrl, alt, cmd, d] }
+    - { keys: [h], to_hotkey: [left] }
+"#;
+
+    #[test]
+    fn space_plus_d_holds_chord_until_combo_key_up() {
+        let mut m = sm(SPACE_PTT);
+        m.on_event(down(LogicalKey::Space));
+        // D-down emits PRESS half only — modifiers stay held.
+        assert_eq!(
+            m.on_event(down(alpha('D'))),
+            emit(vec![
+                SyntheticEvent::ModifierDown(Modifier::Ctrl),
+                SyntheticEvent::ModifierDown(Modifier::Alt),
+                SyntheticEvent::ModifierDown(Modifier::Cmd),
+                SyntheticEvent::KeyDown(NamedKey::Alpha(b'D')),
+            ])
+        );
+        // OS autorepeats of D while user keeps it held — modifiers
+        // already held, just suppress so the chord doesn't strobe.
+        assert_eq!(
+            m.on_event(down_autorepeat(alpha('D'))),
+            Action::Suppress
+        );
+        assert_eq!(
+            m.on_event(down_autorepeat(alpha('D'))),
+            Action::Suppress
+        );
+        // D-up emits the matching RELEASE half (mirror order).
+        assert_eq!(
+            m.on_event(up(alpha('D'))),
+            emit(vec![
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'D')),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+                SyntheticEvent::ModifierUp(Modifier::Alt),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
+        );
+        // Chord already torn down — Space-up has nothing left to clean
+        // up, just suppress.
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn space_plus_d_releasing_trigger_first_tears_down_chord() {
+        // User releases Space while still holding D. We must emit the
+        // release sequence so the OS doesn't see stuck modifiers.
+        let mut m = sm(SPACE_PTT);
+        m.on_event(down(LogicalKey::Space));
+        m.on_event(down(alpha('D')));
+        assert_eq!(
+            m.on_event(up(LogicalKey::Space)),
+            emit(vec![
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'D')),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+                SyntheticEvent::ModifierUp(Modifier::Alt),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
+        );
+    }
+
+    #[test]
+    fn space_plus_h_nav_emits_flat_tap_per_press() {
+        // Nav-style emit (no modifiers in to_hotkey): the chord is
+        // emitted as a back-to-back press+release tap. State stays in
+        // Modifying so the next H KeyDown — autorepeat or fresh —
+        // re-fires the tap. Continuous Left arrow on Space+H hold is
+        // exactly what users expect for nav bindings.
+        let mut m = sm(SPACE_PTT);
+        m.on_event(down(LogicalKey::Space));
+        let left_tap = || {
+            emit(vec![
+                SyntheticEvent::KeyDown(NamedKey::Left),
+                SyntheticEvent::KeyUp(NamedKey::Left),
+            ])
+        };
+        assert_eq!(m.on_event(down(alpha('H'))), left_tap());
+        // Autorepeat KeyDown: re-fires the tap.
+        assert_eq!(m.on_event(down_autorepeat(alpha('H'))), left_tap());
+        assert_eq!(m.on_event(down_autorepeat(alpha('H'))), left_tap());
+    }
+
+    #[test]
+    fn comboing_other_keydown_releases_chord_drops_event() {
+        // User does Space+D, then presses W without releasing D. We
+        // emit D's release sequence (so D + modifiers don't stay
+        // stuck) and drop the W press on the floor. User needs to
+        // release D first to fire W's own combo — documented UX.
+        let mut m = sm(SPACE_PTT);
+        m.on_event(down(LogicalKey::Space));
+        m.on_event(down(alpha('D'))); // enter Comboing(D)
+        assert_eq!(
+            m.on_event(down(alpha('W'))),
+            emit(vec![
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'D')),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+                SyntheticEvent::ModifierUp(Modifier::Alt),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
+        );
+        // Now in Modifying { held: None }. User releases W and D
+        // physically — both forwarded normally (no chord state).
+        assert_eq!(m.on_event(up(alpha('W'))), Action::Forward);
+        assert_eq!(m.on_event(up(alpha('D'))), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn comboing_suppresses_trigger_autorepeat() {
+        // OS-driven autorepeat KeyDowns of the layer trigger (Space)
+        // while a chord is held must NOT tear down the chord. They're
+        // not real new presses, just kernel re-asserting the held key.
+        let mut m = sm(SPACE_PTT);
+        m.on_event(down(LogicalKey::Space));
+        m.on_event(down(alpha('D')));
+        assert_eq!(
+            m.on_event(down_autorepeat(LogicalKey::Space)),
+            Action::Suppress
+        );
+        // Chord state is still intact — D-up still emits the release.
+        assert_eq!(
+            m.on_event(up(alpha('D'))),
+            emit(vec![
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'D')),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+                SyntheticEvent::ModifierUp(Modifier::Alt),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
         );
     }
 }

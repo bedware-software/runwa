@@ -252,7 +252,7 @@ pub enum ResolvedHold {
     /// press (the fallback-modifier path stamps the physical modifier on
     /// the synthesized output).
     Explicit {
-        overrides: HashMap<(ModifierMask, NamedKey), Vec<SyntheticEvent>>,
+        overrides: HashMap<(ModifierMask, NamedKey), EmitPair>,
         /// Fallback modifier for unmapped combos. Sourced from a rule
         /// whose `keys: [_default]` + `to_hotkey: [<modifier>]`.
         fallback: Option<Modifier>,
@@ -260,6 +260,46 @@ pub enum ResolvedHold {
     /// Hold does nothing special — behave as the raw key. Used when the
     /// user wants to remap only `on_tap` without a layer.
     Passthrough,
+}
+
+/// Split synthesis sequence for an on_hold combo emit. The state
+/// machine fires `on_press` when the user's combo KeyDown lands and
+/// stashes `on_release` for the matching KeyUp — that turns a
+/// keyboard-remap chord into a real "hold the modifiers while the
+/// physical key is held" event stream, instead of a microsecond tap.
+///
+/// Most rules produce a balanced pair: `to_hotkey: [ctrl, alt, cmd, d]`
+/// emits `[ModDown(Ctrl), ModDown(Alt), ModDown(Cmd), KeyDown(D)]` on
+/// press and the inverse on release. Workspace / language actions are
+/// fire-and-forget — they all go into `on_press` and leave `on_release`
+/// empty.
+#[derive(Debug, Clone)]
+pub struct EmitPair {
+    pub on_press: SmallVec<[SyntheticEvent; 4]>,
+    pub on_release: SmallVec<[SyntheticEvent; 4]>,
+}
+
+impl EmitPair {
+    /// Empty pair — used for fire-and-forget actions that have nothing
+    /// to undo on release (`switch_to_workspace`, `change_language`).
+    pub fn press_only(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
+        EmitPair {
+            on_press: events.into_iter().collect(),
+            on_release: SmallVec::new(),
+        }
+    }
+
+    /// Flatten the pair into a single `press+release` tap sequence. Used
+    /// when the same `to_hotkey: […]` token list is also wired up as an
+    /// `on_tap` (a momentary chord on tap-and-release), where push-to-
+    /// talk semantics don't apply.
+    pub fn into_flat_tap(self) -> Vec<SyntheticEvent> {
+        let mut out =
+            Vec::with_capacity(self.on_press.len() + self.on_release.len());
+        out.extend(self.on_press);
+        out.extend(self.on_release);
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,8 +493,15 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
     let on_tap = match &remap.on_tap {
         None => None,
         Some(v) => match parse_tap_spec(v)? {
-            TapSpec::Single(s) => Some(bake_hotkey_tokens(std::slice::from_ref(&s))?),
-            TapSpec::Combo(items) => Some(bake_hotkey_tokens(items.as_slice())?),
+            // `on_tap` IS a press-and-release tap by definition — flatten
+            // the split pair back into a single event list so the state
+            // machine's tap-emit path stays a Vec<SyntheticEvent>.
+            TapSpec::Single(s) => {
+                Some(bake_hotkey_tokens(std::slice::from_ref(&s))?.into_flat_tap())
+            }
+            TapSpec::Combo(items) => {
+                Some(bake_hotkey_tokens(items.as_slice())?.into_flat_tap())
+            }
         },
     };
 
@@ -470,7 +517,7 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 }
             },
             HoldSpec::Rules(list) => {
-            let mut overrides: HashMap<(ModifierMask, NamedKey), Vec<SyntheticEvent>> =
+            let mut overrides: HashMap<(ModifierMask, NamedKey), EmitPair> =
                 HashMap::new();
             let mut fallback: Option<Modifier> = None;
 
@@ -560,10 +607,16 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
     Ok(ResolvedBinding { on_tap, on_hold })
 }
 
-/// Pick the action out of a HoldRule and bake it to a synthetic event
-/// sequence. Exactly one of `to_hotkey` / `switch_to_workspace` /
+/// Pick the action out of a HoldRule and bake it into an `EmitPair`.
+/// Exactly one of `to_hotkey` / `switch_to_workspace` /
 /// `move_to_workspace` / `change_language` must be populated.
-fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
+///
+/// `to_hotkey` produces a balanced press/release pair (modifiers held
+/// while the combo key is held). Workspace + language actions are
+/// fire-and-forget — they go in `on_press` with an empty
+/// `on_release`, because there's nothing to undo when the user lets
+/// the combo key up.
+fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     let mut provided: SmallVec<[&'static str; 4]> = SmallVec::new();
     if rule.to_hotkey.is_some() {
         provided.push("to_hotkey");
@@ -600,29 +653,35 @@ fn bake_rule_action(rule: &HoldRule) -> Result<Vec<SyntheticEvent>, String> {
             if n == 0 {
                 return Err(format!("rule '{name}': switch_to_workspace must be >= 1"));
             }
-            Ok(vec![SyntheticEvent::SwitchToWorkspace(n)])
+            Ok(EmitPair::press_only([SyntheticEvent::SwitchToWorkspace(n)]))
         }
         ["move_to_workspace"] => {
             let n = rule.move_to_workspace.unwrap();
             if n == 0 {
                 return Err(format!("rule '{name}': move_to_workspace must be >= 1"));
             }
-            Ok(vec![SyntheticEvent::MoveToWorkspace(n)])
+            Ok(EmitPair::press_only([SyntheticEvent::MoveToWorkspace(n)]))
         }
         ["change_language"] => {
             let token = rule.change_language.as_ref().unwrap();
             let code = LanguageCode::parse(token.as_str())
                 .map_err(|e| format!("rule '{name}': {e}"))?;
-            Ok(vec![SyntheticEvent::ChangeLanguage(code)])
+            Ok(EmitPair::press_only([SyntheticEvent::ChangeLanguage(code)]))
         }
         _ => unreachable!(),
     }
 }
 
-/// Pre-bake a hotkey token list into a synthetic event sequence. Every
-/// entry is a modifier except (optionally) the last — which may be a
-/// named key or a single alpha.
-fn bake_hotkey_tokens(tokens: &[String]) -> Result<Vec<SyntheticEvent>, String> {
+/// Pre-bake a hotkey token list into a split press/release sequence.
+/// Every entry is a modifier except (optionally) the last — which may
+/// be a named key or a single alpha.
+///
+/// The `EmitPair` shape exists so the state machine can hold the
+/// chord for as long as the combo key is physically held: press
+/// fires on KeyDown, release fires on KeyUp. Existing `on_tap`
+/// users who want the old "all events at once" tap behaviour flatten
+/// the pair via `EmitPair::into_flat_tap`.
+fn bake_hotkey_tokens(tokens: &[String]) -> Result<EmitPair, String> {
     if tokens.is_empty() {
         return Err("empty hotkey".into());
     }
@@ -649,31 +708,38 @@ fn bake_hotkey_tokens(tokens: &[String]) -> Result<Vec<SyntheticEvent>, String> 
     // shape (single modifier, e.g. `[cmd]`) but generalised.
     if let Some(m) = parse_modifier(last) {
         if mods.is_empty() {
-            // e.g. `to_hotkey: [cmd]` — pure modifier press-and-release.
-            return Ok(vec![
-                SyntheticEvent::ModifierDown(m),
-                SyntheticEvent::ModifierUp(m),
-            ]);
+            // e.g. `to_hotkey: [cmd]` — modifier-only press/release.
+            let mut press = SmallVec::new();
+            press.push(SyntheticEvent::ModifierDown(m));
+            let mut release = SmallVec::new();
+            release.push(SyntheticEvent::ModifierUp(m));
+            return Ok(EmitPair {
+                on_press: press,
+                on_release: release,
+            });
         }
         return Err(format!(
             "hotkey {tokens:?} is all-modifiers; the last token must be a key"
         ));
     }
 
-    // Normal path: mods..., key down, key up, mods... (reversed).
+    // Normal path: mods-down + key-down on press; mirror-image on release.
     let key = parse_named_key(last)
         .ok_or_else(|| format!("unknown key '{last}' in hotkey {tokens:?}"))?;
 
-    let mut out: Vec<SyntheticEvent> = Vec::with_capacity(modifier_events.len() * 2 + 2);
-    out.extend(modifier_events.iter().copied());
-    out.push(SyntheticEvent::KeyDown(key));
-    out.push(SyntheticEvent::KeyUp(key));
+    let mut on_press: SmallVec<[SyntheticEvent; 4]> = SmallVec::new();
+    on_press.extend(modifier_events.iter().copied());
+    on_press.push(SyntheticEvent::KeyDown(key));
+
+    let mut on_release: SmallVec<[SyntheticEvent; 4]> = SmallVec::new();
+    on_release.push(SyntheticEvent::KeyUp(key));
     for ev in modifier_events.iter().rev() {
         if let SyntheticEvent::ModifierDown(m) = ev {
-            out.push(SyntheticEvent::ModifierUp(*m));
+            on_release.push(SyntheticEvent::ModifierUp(*m));
         }
     }
-    Ok(out)
+
+    Ok(EmitPair { on_press, on_release })
 }
 
 fn parse_modifier(s: &str) -> Option<Modifier> {
@@ -900,13 +966,18 @@ space:
         match &s.on_hold {
             ResolvedHold::Explicit { overrides, fallback } => {
                 assert_eq!(*fallback, Some(Modifier::Cmd));
-                let events = overrides.get(&ov(alpha('W'))).expect("W override present");
+                let pair = overrides.get(&ov(alpha('W'))).expect("W override present");
                 assert_eq!(
-                    events.as_slice(),
+                    pair.on_press.as_slice(),
                     &[
                         SyntheticEvent::ModifierDown(Modifier::Ctrl),
                         SyntheticEvent::ModifierDown(Modifier::Alt),
                         SyntheticEvent::KeyDown(alpha('S')),
+                    ]
+                );
+                assert_eq!(
+                    pair.on_release.as_slice(),
+                    &[
                         SyntheticEvent::KeyUp(alpha('S')),
                         SyntheticEvent::ModifierUp(Modifier::Alt),
                         SyntheticEvent::ModifierUp(Modifier::Ctrl),
@@ -986,13 +1057,18 @@ space:
                 assert!(overrides.contains_key(&ov(NamedKey::Comma)));
                 assert!(overrides.contains_key(&ov(NamedKey::Backtick)));
                 assert!(overrides.contains_key(&ov(NamedKey::Period)));
-                // Win+` output has Win-down, `-down, `-up, Win-up.
-                let events = overrides.get(&ov(NamedKey::Backtick)).unwrap();
+                // Win+` press: Win-down + `-down. Release: mirror.
+                let pair = overrides.get(&ov(NamedKey::Backtick)).unwrap();
                 assert_eq!(
-                    events.as_slice(),
+                    pair.on_press.as_slice(),
                     &[
                         SyntheticEvent::ModifierDown(Modifier::Win),
                         SyntheticEvent::KeyDown(NamedKey::Backtick),
+                    ]
+                );
+                assert_eq!(
+                    pair.on_release.as_slice(),
+                    &[
                         SyntheticEvent::KeyUp(NamedKey::Backtick),
                         SyntheticEvent::ModifierUp(Modifier::Win),
                     ]
@@ -1015,21 +1091,25 @@ space:
         let r = parse(src).unwrap();
         match &binding(&r, LogicalKey::Space).on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
+                // Bare arrow emit (no modifiers): press = KeyDown,
+                // release = KeyUp.
                 let down = overrides.get(&ov(alpha('J'))).unwrap();
                 assert_eq!(
-                    down.as_slice(),
-                    &[
-                        SyntheticEvent::KeyDown(NamedKey::Down),
-                        SyntheticEvent::KeyUp(NamedKey::Down),
-                    ]
+                    down.on_press.as_slice(),
+                    &[SyntheticEvent::KeyDown(NamedKey::Down)]
+                );
+                assert_eq!(
+                    down.on_release.as_slice(),
+                    &[SyntheticEvent::KeyUp(NamedKey::Down)]
                 );
                 let up = overrides.get(&ov(alpha('K'))).unwrap();
                 assert_eq!(
-                    up.as_slice(),
-                    &[
-                        SyntheticEvent::KeyDown(NamedKey::Up),
-                        SyntheticEvent::KeyUp(NamedKey::Up),
-                    ]
+                    up.on_press.as_slice(),
+                    &[SyntheticEvent::KeyDown(NamedKey::Up)]
+                );
+                assert_eq!(
+                    up.on_release.as_slice(),
+                    &[SyntheticEvent::KeyUp(NamedKey::Up)]
                 );
             }
             _ => panic!(),
@@ -1090,14 +1170,20 @@ space:
         let r = parse(src).expect("parse");
         match &binding(&r, LogicalKey::Space).on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
+                // Workspace actions are fire-and-forget: press only,
+                // no release events.
+                let p1 = overrides.get(&ov(alpha('1'))).unwrap();
                 assert_eq!(
-                    overrides.get(&ov(alpha('1'))).unwrap().as_slice(),
+                    p1.on_press.as_slice(),
                     &[SyntheticEvent::SwitchToWorkspace(1)]
                 );
+                assert!(p1.on_release.is_empty());
+                let p2 = overrides.get(&ov(alpha('2'))).unwrap();
                 assert_eq!(
-                    overrides.get(&ov(alpha('2'))).unwrap().as_slice(),
+                    p2.on_press.as_slice(),
                     &[SyntheticEvent::MoveToWorkspace(2)]
                 );
+                assert!(p2.on_release.is_empty());
             }
             _ => panic!(),
         }
@@ -1117,19 +1203,21 @@ space:
         match &binding(&r, LogicalKey::Space).on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
                 let en = overrides.get(&ov(alpha('E'))).unwrap();
-                match en.as_slice() {
+                match en.on_press.as_slice() {
                     [SyntheticEvent::ChangeLanguage(code)] => {
                         assert_eq!(code.as_str(), "en");
                     }
                     other => panic!("expected ChangeLanguage(en), got {other:?}"),
                 }
+                assert!(en.on_release.is_empty());
                 let ru = overrides.get(&ov(alpha('R'))).unwrap();
-                match ru.as_slice() {
+                match ru.on_press.as_slice() {
                     [SyntheticEvent::ChangeLanguage(code)] => {
                         assert_eq!(code.as_str(), "ru");
                     }
                     other => panic!("expected ChangeLanguage(ru), got {other:?}"),
                 }
+                assert!(ru.on_release.is_empty());
             }
             _ => panic!(),
         }
@@ -1147,7 +1235,7 @@ space:
         match &binding(&r, LogicalKey::Space).on_hold {
             ResolvedHold::Explicit { overrides, .. } => {
                 let ev = overrides.get(&ov(alpha('E'))).unwrap();
-                match ev.as_slice() {
+                match ev.on_press.as_slice() {
                     [SyntheticEvent::ChangeLanguage(code)] => assert_eq!(code.as_str(), "en"),
                     other => panic!("got {other:?}"),
                 }
