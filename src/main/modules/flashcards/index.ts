@@ -36,7 +36,7 @@ interface StartQuizAction {
   kind: 'start-quiz'
   deckId: string
   /** Skip the SRS due-filter and quiz the entire deck — for cramming
-   * before an interview. Triggered with Shift+Enter on a deck row. */
+   * before an interview. Triggered with Ctrl+Enter on a deck row. */
   cram: boolean
 }
 
@@ -174,7 +174,7 @@ export function createFlashcardsModule(): PaletteModule {
           revealPath: deck.filePath,
           actionKind: 'start-quiz',
           // Default action: review-only. The renderer can mutate the
-          // payload to set `cram: true` on Shift+Enter before invoking
+          // payload to set `cram: true` on Ctrl+Enter before invoking
           // execute — see palette-store.executeSelected.
           action: {
             kind: 'start-quiz',

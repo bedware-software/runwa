@@ -50,7 +50,7 @@ export function QuizView({ quiz }: { quiz: QuizSession }) {
         <div className="text-sm text-muted-foreground max-w-md">
           {quiz.cram
             ? 'This deck has no well-formed cards yet. Add a "## question" with at least two `- [ ] / [x]` options to get started.'
-            : 'No cards are due for review right now. Press Esc to go back, or use Shift+Enter on the deck row to cram every card regardless of schedule.'}
+            : 'No cards are due for review right now. Press Esc to go back, or use Ctrl+Enter on the deck row to cram every card regardless of schedule.'}
         </div>
       </div>
     )

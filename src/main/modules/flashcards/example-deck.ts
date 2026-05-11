@@ -39,22 +39,22 @@ export const EXAMPLE_DECK = `# Example Deck
 
 ### Which key reveals the answer without picking?
 - [ ] Tab
-- [ ] Enter
-- [x] Space
+- [x] Enter
+- [ ] Space
 - [ ] Backspace
 
-> Pressing Space counts as "Again" for SRS — the card comes back
+> Pressing Enter counts as "Again" for SRS — the card comes back
 > tomorrow. Wrong picks also count as Again. Right picks push the next
 > review further out, growing exponentially with each successful repeat.
 
 ### Which keys advance to the next card?
 - [ ] Only Enter
 - [ ] Only the right arrow
-- [x] Enter, the right arrow, OR W
+- [x] Space, the right arrow, OR W
 - [ ] Tab
 
-> W is the one-handed alias — keep your fingers on 1-9 and tap W to
-> advance instead of stretching across the keyboard.
+> Space is the primary one-handed advance — keep your thumb on it while
+> the same hand answers with 1-9. W and the right arrow are aliases.
 `
 
 /**
@@ -145,6 +145,53 @@ export const LEGACY_EXAMPLE_DECKS: readonly string[] = [
 - [ ] Tab
 
 > F is the one-handed alias — keep your fingers on 1-9 and tap F to
+> advance instead of stretching across the keyboard.
+`,
+  // v3 — switched F → W. Replaced by v4 which swapped Space ↔ Enter
+  // (Space is now next-card, Enter is reveal).
+  `# Example Deck
+
+## Basics
+
+### What does this app do for me right now?
+- [ ] Plays a podcast
+- [x] Quizzes me on flashcards stored as Markdown files
+- [ ] Renders a PDF
+- [ ] Sends an email
+
+> The flashcards module reads .md files from this folder, one deck per
+> file. Each \`###\` heading is a card; \`##\` headings group cards into
+> topics. Checkboxes are options; blockquotes are explanations.
+
+### What happens to a card when I edit its question text?
+- [ ] Nothing, SRS state stays attached
+- [x] It becomes a new card with fresh SRS state
+- [ ] The whole deck is reset
+
+> Card identity is a hash of the question text. Cosmetic edits
+> (whitespace, casing) are normalised, but a real wording change creates
+> a new card — which is what you want, since the question is now
+> semantically different.
+
+## Keyboard
+
+### Which key reveals the answer without picking?
+- [ ] Tab
+- [ ] Enter
+- [x] Space
+- [ ] Backspace
+
+> Pressing Space counts as "Again" for SRS — the card comes back
+> tomorrow. Wrong picks also count as Again. Right picks push the next
+> review further out, growing exponentially with each successful repeat.
+
+### Which keys advance to the next card?
+- [ ] Only Enter
+- [ ] Only the right arrow
+- [x] Enter, the right arrow, OR W
+- [ ] Tab
+
+> W is the one-handed alias — keep your fingers on 1-9 and tap W to
 > advance instead of stretching across the keyboard.
 `
 ]

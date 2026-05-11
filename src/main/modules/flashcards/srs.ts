@@ -26,7 +26,7 @@ export const MIN_EF = 1.3
 
 export function qualityFromAnswer(outcome: AnswerOutcome): number {
   // SM-2 quality scale: 0–2 = fail (resets reps), 3–5 = pass.
-  // Skipped (Space pressed without selecting) → 0 (Again, hardest miss).
+  // Skipped (Enter pressed without selecting) → 0 (Again, hardest miss).
   // Wrong pick → 1 (Again, near-miss). Correct pick → 4 (Good).
   if (outcome === 'correct') return 4
   if (outcome === 'incorrect') return 1

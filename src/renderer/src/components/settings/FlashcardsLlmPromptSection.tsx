@@ -181,8 +181,8 @@ function HowReviewWorksSection() {
             ease drops a notch. The card comes back tomorrow.
           </li>
           <li>
-            <strong>Space (give up)</strong> — same as wrong; ease
-            drops harder. Use Space deliberately when you don't know
+            <strong>Enter (give up)</strong> — same as wrong; ease
+            drops harder. Use Enter deliberately when you don't know
             the answer at all so the schedule reflects that.
           </li>
         </ul>
@@ -191,7 +191,7 @@ function HowReviewWorksSection() {
       <Subsection title="Card life cycle (new → mature)">
         A card starts <strong>new</strong> (no SRS state, always due).
         Each correct review grows its interval; each wrong answer
-        (or Space) resets it to 1 day. When the scheduled interval
+        (or Enter) resets it to 1 day. When the scheduled interval
         crosses 21 days the card is <strong>mature</strong>.
         Typical path for a card you keep getting right:
         <pre className="mt-1.5 px-2 py-1.5 rounded bg-card border border-input/60 text-[11px] leading-5 font-mono whitespace-pre overflow-x-auto">
@@ -252,7 +252,7 @@ function HowReviewWorksSection() {
             </tr>
           </tbody>
         </table>
-        Shift+Enter on any deck row crams every well-formed card
+        Ctrl+Enter on any deck row crams every well-formed card
         regardless of schedule — useful for a refresher before an
         interview.
       </Subsection>

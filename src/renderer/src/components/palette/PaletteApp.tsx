@@ -338,11 +338,11 @@ export function PaletteApp() {
     }
     if (e.key === 'Enter') {
       e.preventDefault()
-      // Shift+Enter on a flashcards deck row cram-launches (skip
+      // Ctrl+Enter on a flashcards deck row cram-launches (skip
       // SRS due-filter and quiz every well-formed card). For any
-      // other module Shift+Enter behaves like Enter.
+      // other module Ctrl+Enter behaves like Enter.
       const cram =
-        e.shiftKey && items[selectedIndex]?.actionKind === 'start-quiz'
+        e.ctrlKey && items[selectedIndex]?.actionKind === 'start-quiz'
       void executeSelected(cram ? { cram: true } : undefined)
       return
     }
@@ -403,19 +403,20 @@ export function PaletteApp() {
       : undefined
     const result = cardId ? quiz.results[cardId] : undefined
 
-    // `w` doubles as a one-handed "next" so the same hand that pressed
-    // 1-9 to answer can advance without reaching for Enter / →. Both
-    // cases (lower- and upper-case) are matched so Caps Lock doesn't
-    // strand the binding.
+    // Space is the primary "next" so a single hand stays on 1-9 + the
+    // thumb on Space — Right and `w` are aliases. Both cases of W are
+    // matched so Caps Lock doesn't strand the binding. Space keeps its
+    // modifier guard so Ctrl/Meta/Alt + Space stays free for system
+    // chords.
     if (
       key === 'ArrowRight' ||
-      key === 'Enter' ||
       key === 'w' ||
-      key === 'W'
+      key === 'W' ||
+      (key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey)
     ) {
       e.preventDefault()
-      // Pre-Enter without an answer = treat as "skip and advance"; users
-      // who want to read but not commit press Space to reveal first.
+      // Pre-Space without an answer = treat as "skip and advance"; users
+      // who want to read but not commit press Enter to reveal first.
       if (!result) {
         void skipCurrent().then(nextCard)
       } else {
@@ -428,9 +429,9 @@ export function PaletteApp() {
       prevCard()
       return
     }
-    if (key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (key === 'Enter') {
       e.preventDefault()
-      // Space = reveal-without-picking. No-op once the user has
+      // Enter = reveal-without-picking. No-op once the user has
       // already answered (the answer is the reveal).
       if (!result) void skipCurrent()
       return
@@ -527,11 +528,13 @@ export function PaletteApp() {
                   label="Answer"
                   keys={<span className="font-mono text-[11px]">1-9</span>}
                 />
-                <FooterHint label="Reveal" keys={<Hotkey value="Space" />} />
+                <FooterHint label="Reveal" keys={<Hotkey value="Enter" />} />
                 <FooterHint
                   label="Next"
                   keys={
                     <span className="inline-flex items-center gap-1">
+                      <Hotkey value="Space" />
+                      <span className="text-[11px] opacity-60">/</span>
                       <Hotkey value="Right" />
                       <span className="text-[11px] opacity-60">/</span>
                       <Hotkey value="W" />
@@ -569,7 +572,7 @@ export function PaletteApp() {
               )}
               {activeModuleId === 'flashcards' &&
                 items[selectedIndex]?.actionKind === 'start-quiz' && (
-                  <FooterHint label="Cram" keys={<Hotkey value="Shift+Enter" />} />
+                  <FooterHint label="Cram" keys={<Hotkey value="Ctrl+Enter" />} />
                 )}
               <FooterHint label="Dismiss" keys={<Hotkey value="Esc" />} />
             </>

@@ -147,7 +147,7 @@ export const usePaletteStore = create<PaletteState>()(
       const { items, selectedIndex } = get()
       const item = items[selectedIndex]
       if (!item) return
-      // Shift+Enter on a flashcards deck row sets cram=true. We mutate
+      // Ctrl+Enter on a flashcards deck row sets cram=true. We mutate
       // a shallow clone of `item.action` so the in-store version (and
       // anyone re-clicking the row) stays in default review mode.
       let payload = item
