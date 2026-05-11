@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen, Tag } from 'lucide-react'
+import { FolderOpen, RotateCcw, Tag } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,6 +28,10 @@ export interface ContextMenuAction {
   label: string
   Icon: LucideIcon
   disabled?: boolean
+  /** Renders the row in destructive (red) styling. Use for actions
+   * that wipe data — Reset deck, Delete file, etc. The caller is
+   * still responsible for showing a confirmation dialog. */
+  destructive?: boolean
   onActivate: () => void
 }
 
@@ -126,7 +130,11 @@ export function ContextMenu({ open, onClose, actions }: Props) {
               'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
               action.disabled
                 ? 'opacity-50 cursor-not-allowed'
-                : idx === selected && 'bg-accent text-accent-foreground'
+                : action.destructive
+                  ? idx === selected
+                    ? 'bg-destructive text-destructive-foreground'
+                    : 'text-destructive hover:bg-destructive/10'
+                  : idx === selected && 'bg-accent text-accent-foreground'
             )}
           >
             <action.Icon size={14} className="shrink-0" />
@@ -168,5 +176,20 @@ export function setAliasAction(
     label: hasExisting ? 'Change alias…' : 'Set alias…',
     Icon: Tag,
     onActivate: openModal
+  }
+}
+
+/**
+ * "Reset deck data…" — flashcards-module-specific destructive
+ * action. Caller passes a confirm-opener so the destructive write
+ * goes through a ConfirmDialog instead of firing inline.
+ */
+export function resetDeckAction(openConfirm: () => void): ContextMenuAction {
+  return {
+    id: 'reset-deck',
+    label: 'Reset deck data…',
+    Icon: RotateCcw,
+    destructive: true,
+    onActivate: openConfirm
   }
 }

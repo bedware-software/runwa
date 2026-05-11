@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { ModuleId, PaletteItem } from '@shared/types'
+import type {
+  FlashcardAnswerOutcome,
+  FlashcardsStartQuizPayload,
+  ModuleId,
+  PaletteItem
+} from '@shared/types'
 
 /**
  * Palette store: search query, current results, selection, debounced search.
@@ -16,6 +21,27 @@ import type { ModuleId, PaletteItem } from '@shared/types'
 
 const DEBOUNCE_MS = 120
 
+/** One card's result inside the active quiz session — sparse map keyed
+ * by cardId. `selected` is the option index the user picked, or null
+ * for a skipped card. */
+export interface QuizCardResult {
+  selected: number | null
+  outcome: FlashcardAnswerOutcome
+  /** ISO date returned by main after recording the SRS update. Drives
+   * the "next review" line on the quiz summary. */
+  nextReview?: string
+}
+
+export interface QuizSession extends FlashcardsStartQuizPayload {
+  /** 0-based index into `quizCardIds`. */
+  index: number
+  /** Keyed by cardId. Cards without an entry haven't been answered yet. */
+  results: Record<string, QuizCardResult>
+  /** True once the user has moved past the last card — the renderer
+   * shows the summary screen instead of a card. */
+  finished: boolean
+}
+
 interface PaletteState {
   query: string
   items: PaletteItem[]
@@ -25,11 +51,17 @@ interface PaletteState {
   isLoading: boolean
   requestId: number
 
+  /** Active quiz session, or null when the palette is in normal
+   * search mode. Switched on by `flashcards:start-quiz` (sent by the
+   * flashcards module's execute() in main), switched off by
+   * `exitQuiz()` (Esc inside the quiz UI). */
+  quiz: QuizSession | null
+
   setQuery: (query: string) => void
   selectNext: () => void
   selectPrev: () => void
   setSelectedIndex: (index: number) => void
-  executeSelected: () => Promise<void>
+  executeSelected: (overrides?: { cram?: boolean }) => Promise<void>
   reset: () => void
   onPaletteShow: (initialModuleId?: ModuleId) => void
   /**
@@ -44,6 +76,22 @@ interface PaletteState {
    * we fall back to index 0 like a normal refresh.
    */
   refresh: (opts?: { preserveSelection?: boolean }) => void
+
+  /* ─── Quiz mode ─────────────────────────────────────────────────── */
+
+  startQuiz: (payload: FlashcardsStartQuizPayload) => void
+  exitQuiz: () => void
+  /** Record the user's MCQ answer. Computes outcome from
+   * `correctIndex` and posts to main; the new SRS state is written
+   * back into results[cardId].nextReview. */
+  submitAnswer: (optionIndex: number) => Promise<void>
+  /** Mark the current card as skipped (Space pressed without choosing
+   * an option). Equivalent to a hard fail in SM-2. */
+  skipCurrent: () => Promise<void>
+  /** Advance to the next card; sets `finished` past the last card. */
+  nextCard: () => void
+  /** Go back one card (read-only — doesn't reset the result). */
+  prevCard: () => void
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -56,6 +104,7 @@ export const usePaletteStore = create<PaletteState>()(
     selectedIndex: 0,
     isLoading: false,
     requestId: 0,
+    quiz: null,
 
     setQuery: (query: string) => {
       set((state) => {
@@ -94,12 +143,20 @@ export const usePaletteStore = create<PaletteState>()(
       })
     },
 
-    executeSelected: async () => {
+    executeSelected: async (overrides) => {
       const { items, selectedIndex } = get()
       const item = items[selectedIndex]
       if (!item) return
+      // Shift+Enter on a flashcards deck row sets cram=true. We mutate
+      // a shallow clone of `item.action` so the in-store version (and
+      // anyone re-clicking the row) stays in default review mode.
+      let payload = item
+      if (overrides?.cram && item.actionKind === 'start-quiz') {
+        const action = (item.action ?? {}) as Record<string, unknown>
+        payload = { ...item, action: { ...action, cram: true } }
+      }
       try {
-        await window.electronAPI.modulesExecute(item)
+        await window.electronAPI.modulesExecute(payload)
       } catch (err) {
         console.warn('[palette] execute failed', err)
       }
@@ -157,12 +214,134 @@ export const usePaletteStore = create<PaletteState>()(
         s.activeModuleId = initialModuleId
         s.isLoading = true
         s.query = ''
+        // A new palette session always lands in search mode, even if a
+        // quiz was abandoned mid-card by the user closing the window.
+        s.quiz = null
       })
 
       // Run the initial search immediately (no debounce) and signal main
       // when results are ready so it can reveal the window.
       pendingReadySignal = true
       void runSearch('', get, set)
+    },
+
+    /* ─── Quiz mode ─────────────────────────────────────────────── */
+
+    startQuiz: (payload) => {
+      set((s) => {
+        s.quiz = {
+          ...payload,
+          index: 0,
+          results: {},
+          finished: payload.quizCardIds.length === 0
+        }
+        // Quiz takes over the whole window — clear the search state so
+        // returning to the deck list (Esc) lands clean.
+        s.items = []
+        s.isLoading = false
+      })
+    },
+
+    exitQuiz: () => {
+      set((s) => {
+        s.quiz = null
+        // Reset to a fresh search so the deck-list view comes back
+        // showing the loading state while the refresh below lands.
+        s.items = []
+        s.selectedIndex = 0
+        s.isLoading = true
+        s.query = ''
+      })
+      // Re-fetch the deck list so due-counts reflect any answers we
+      // just recorded.
+      void runSearch('', get, set)
+    },
+
+    submitAnswer: async (optionIndex) => {
+      const quiz = get().quiz
+      if (!quiz || quiz.finished) return
+      const cardId = quiz.quizCardIds[quiz.index]
+      if (!cardId) return
+      // Guard against double-submit: once a card has a result, the next
+      // 1-4 keystroke is a no-op (renderer's onKeyDown should also
+      // gate on `result` to avoid even reaching here).
+      if (quiz.results[cardId]) return
+
+      const card = quiz.deck.cards.find((c) => c.id === cardId)
+      if (!card) return
+      const outcome: FlashcardAnswerOutcome =
+        optionIndex === card.correctIndex ? 'correct' : 'incorrect'
+
+      set((s) => {
+        if (!s.quiz) return
+        s.quiz.results[cardId] = { selected: optionIndex, outcome }
+      })
+
+      try {
+        const newState = await window.electronAPI.flashcardsAnswer({
+          deckId: quiz.deck.id,
+          cardId,
+          outcome
+        })
+        set((s) => {
+          if (!s.quiz) return
+          const r = s.quiz.results[cardId]
+          if (r) r.nextReview = newState.nextReview
+        })
+      } catch (err) {
+        console.warn('[flashcards] answer record failed', err)
+      }
+    },
+
+    skipCurrent: async () => {
+      const quiz = get().quiz
+      if (!quiz || quiz.finished) return
+      const cardId = quiz.quizCardIds[quiz.index]
+      if (!cardId) return
+      if (quiz.results[cardId]) return
+      set((s) => {
+        if (!s.quiz) return
+        s.quiz.results[cardId] = { selected: null, outcome: 'skipped' }
+      })
+      try {
+        const newState = await window.electronAPI.flashcardsAnswer({
+          deckId: quiz.deck.id,
+          cardId,
+          outcome: 'skipped'
+        })
+        set((s) => {
+          if (!s.quiz) return
+          const r = s.quiz.results[cardId]
+          if (r) r.nextReview = newState.nextReview
+        })
+      } catch (err) {
+        console.warn('[flashcards] skip record failed', err)
+      }
+    },
+
+    nextCard: () => {
+      set((s) => {
+        if (!s.quiz) return
+        if (s.quiz.index >= s.quiz.quizCardIds.length - 1) {
+          s.quiz.finished = true
+          return
+        }
+        s.quiz.index++
+      })
+    },
+
+    prevCard: () => {
+      set((s) => {
+        if (!s.quiz) return
+        if (s.quiz.finished) {
+          // Pressing ← from the summary jumps back to the last card so
+          // the user can re-read the explanation without re-answering.
+          s.quiz.finished = false
+          return
+        }
+        if (s.quiz.index === 0) return
+        s.quiz.index--
+      })
     }
   }))
 )

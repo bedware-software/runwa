@@ -13,7 +13,7 @@ const MANIFEST: ModuleManifest = {
   description: 'Launch installed applications. Indexes Start Menu (Windows) / Applications (macOS), plus Store apps and optional extra locations.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+A',
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+A',
   configFields: [
     {
       key: 'includeStartMenu',

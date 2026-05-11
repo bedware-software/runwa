@@ -6,11 +6,44 @@ import { moduleRegistry } from './modules/registry'
 import {
   acceleratorToKeyBinding,
   getLoadErrorMessage,
-  isModifierOnlyAccelerator,
   isUiohookAvailable,
   uiohookBridge,
   type KeyBinding
 } from './modules/groq-stt/uiohook-bridge'
+
+const MODIFIER_TOKENS = new Set([
+  'ctrl',
+  'control',
+  'cmdorctrl',
+  'commandorcontrol',
+  'alt',
+  'option',
+  'shift',
+  'super',
+  'meta',
+  'cmd',
+  'command',
+  'win'
+])
+
+/**
+ * True if the accelerator is exactly two-or-more modifiers with no
+ * non-modifier key. Modifier-only chords used to be accepted (routed
+ * through uiohook for WhisperFlow-style push-to-talk) but were too
+ * easy to trigger by accident — any synthetic chord from
+ * keyboard-remap that briefly held the same modifiers would fire them.
+ * We keep this detector around to print a friendly migration warning
+ * when a user has a legacy modifier-only chord stored in their
+ * settings.json from a previous version.
+ */
+function looksModifierOnly(accel: string): boolean {
+  const parts = accel
+    .split('+')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+  if (parts.length < 2) return false
+  return parts.every((p) => MODIFIER_TOKENS.has(p))
+}
 
 /**
  * Owns all global shortcut registrations. Re-registers everything whenever
@@ -56,40 +89,18 @@ class HotkeyManager {
         ? () => module!.handleDirectLaunch!('press')
         : () => paletteWindow.toggle(moduleId as ModuleId)
 
-      // Modifier-only chord (Ctrl+Super, Alt+Shift, …): Electron's
-      // globalShortcut rejects these with a "conversion failure"
-      // TypeError, so we route them through uiohook regardless of
-      // whether push-to-talk is on. No uiohook → no binding.
-      const modifierOnly = isModifierOnlyAccelerator(key)
-      if (modifierOnly) {
-        if (!isUiohookAvailable()) {
-          console.warn(
-            `[hotkey] module:${moduleId}: modifier-only chord "${key}" requires uiohook-napi, which isn't loaded (${
-              getLoadErrorMessage() || 'unknown reason'
-            }). Run \`npm install\` and restart runwa, or rebind to a chord with a regular key.`
-          )
-          continue
-        }
-        const binding = acceleratorToKeyBinding(key)
-        if (!binding) {
-          console.warn(
-            `[hotkey] module:${moduleId}: cannot parse modifier-only chord "${key}"`
-          )
-          continue
-        }
-        const onRelease = hasCustomHandler
-          ? () => module!.handleDirectLaunch!('release')
-          : () => {
-              /* no release semantics for palette-opens */
-            }
-        const ok = uiohookBridge.registerHoldToTalk(binding, onPress, onRelease)
-        if (ok) {
-          this.uiohookBindings.push({ binding, onPress, onRelease })
-        } else {
-          console.warn(
-            `[hotkey] module:${moduleId}: uiohook refused to register "${key}"`
-          )
-        }
+      // Modifier-only chords (`Ctrl+Super`, `Alt+Shift`, …) are no
+      // longer accepted — they used to route through uiohook for
+      // WhisperFlow-style push-to-talk but were too easy to trigger
+      // by accident: any synthetic chord with the same modifier
+      // prefix (e.g. keyboard-remap emitting `Ctrl+Alt+Cmd+W`)
+      // brushed them mid-emission. Warn the user with an explicit
+      // migration hint and skip the binding so they're not confused
+      // by a silent failure.
+      if (looksModifierOnly(key)) {
+        console.warn(
+          `[hotkey] module:${moduleId}: modifier-only hotkey "${key}" is no longer supported — too easy to trigger by accident. Rebind to a chord that includes a regular key (e.g. Ctrl+Alt+Super+D) or a function key (F13–F19) in Settings.`
+        )
         continue
       }
 

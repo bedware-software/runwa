@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppInfo,
   ElectronAPI,
+  FlashcardAnswerRequest,
+  FlashcardCardState,
+  FlashcardsDeckMastery,
+  FlashcardsLlmPromptView,
+  FlashcardsStartQuizPayload,
   KeyboardRemapRulesView,
   ModuleMeta,
   ModuleId,
@@ -86,6 +91,16 @@ const api: ElectronAPI = {
   keyboardRemapReload: (): Promise<KeyboardRemapRulesView> =>
     ipcRenderer.invoke('keyboard-remap:reload'),
 
+  // Flashcards — record an answer and get the new SRS state back.
+  flashcardsAnswer: (req: FlashcardAnswerRequest): Promise<FlashcardCardState> =>
+    ipcRenderer.invoke('flashcards:answer', req),
+  flashcardsGetLlmPrompt: (): Promise<FlashcardsLlmPromptView> =>
+    ipcRenderer.invoke('flashcards:get-llm-prompt'),
+  flashcardsGetDeckMastery: (deckId: string): Promise<FlashcardsDeckMastery> =>
+    ipcRenderer.invoke('flashcards:get-deck-mastery', deckId),
+  flashcardsResetDeck: (deckId: string): Promise<void> =>
+    ipcRenderer.invoke('flashcards:reset-deck', deckId),
+
   // Auto-update: trigger a check + poll current state. Push updates
   // stream over the `app:update-status` channel via the subscription
   // helper below.
@@ -143,6 +158,19 @@ const api: ElectronAPI = {
     ipcRenderer.on('settings:open-tab', listener)
     return () => {
       ipcRenderer.removeListener('settings:open-tab', listener)
+    }
+  },
+
+  onFlashcardsStartQuiz: (cb: (payload: FlashcardsStartQuizPayload) => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      payload: FlashcardsStartQuizPayload
+    ): void => {
+      cb(payload)
+    }
+    ipcRenderer.on('flashcards:start-quiz', listener)
+    return () => {
+      ipcRenderer.removeListener('flashcards:start-quiz', listener)
     }
   }
 }

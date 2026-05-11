@@ -66,6 +66,15 @@ pub struct RawEvent {
     /// and unqualified ones (`keys: [1]`). Platform layers populate this
     /// from the event's flag state (macOS) or `GetAsyncKeyState` (Windows).
     pub modifiers: ModifierMask,
+    /// True iff this is an OS-driven autorepeat KeyDown (the key was already
+    /// physically held and the kernel synthesised another KeyDown at the
+    /// system key-repeat rate). Used to gate the on_hold combo emit path:
+    /// a launcher chord like `to_hotkey: [ctrl, alt, cmd, w]` must NOT
+    /// re-fire 30 times/sec while the user keeps W held, but a nav-style
+    /// emit like `to_hotkey: [left]` should keep auto-repeating. macOS
+    /// reads this from `kCGKeyboardEventAutorepeat`; Windows passes
+    /// `false` (its low-level hook doesn't expose the bit cleanly).
+    pub is_autorepeat: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -293,18 +302,33 @@ impl StateMachine {
                     self.state = State::Idle;
                     return Action::Forward;
                 };
-                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
+                self.handle_interruption(
+                    trigger,
+                    &binding,
+                    ev.key,
+                    ev.modifiers,
+                    ev.is_autorepeat,
+                )
             }
 
             // In Modifying{held: None} (an explicit override just fired),
             // a new key-down for a non-current-trigger key should re-fire
             // the override — holding the trigger and tapping the target
-            // key repeatedly works, not just the first tap.
+            // key repeatedly works, not just the first tap. EXCEPT when
+            // the KeyDown is an OS autorepeat for a chord-style emit
+            // (one that injects modifiers) — see `handle_interruption`
+            // for why we gate.
             (State::Modifying { trigger, held: None }, EventKind::KeyDown, _, _) => {
                 let Some(binding) = self.rules.triggers.get(&trigger).cloned() else {
                     return Action::Forward;
                 };
-                self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
+                self.handle_interruption(
+                    trigger,
+                    &binding,
+                    ev.key,
+                    ev.modifiers,
+                    ev.is_autorepeat,
+                )
             }
 
             // In Modifying with a held modifier: forward the event with the
@@ -331,6 +355,7 @@ impl StateMachine {
         binding: &ResolvedBinding,
         other: LogicalKey,
         mods: ModifierMask,
+        is_autorepeat: bool,
     ) -> Action {
         match &binding.on_hold {
             ResolvedHold::Passthrough => {
@@ -372,14 +397,37 @@ impl StateMachine {
                 // still fire when the user happens to be holding e.g.
                 // Shift. The fallback-modifier path below then stamps the
                 // physical modifier onto the synthesized output.
+                // Chord-style emits (anything that injects modifiers,
+                // e.g. `to_hotkey: [ctrl, alt, cmd, w]`) must fire
+                // EXACTLY ONCE per physical press — even if the user
+                // keeps the combo key held and the OS sends 30
+                // autorepeat KeyDowns per second. Without this gate,
+                // a `Space+D` hold-to-talk binding triggers groq 30×/s
+                // (start → stop → start → stop …) and the indicator
+                // window strobes uselessly. Nav-style emits without
+                // any modifier (e.g. `to_hotkey: [left]` for
+                // `Space+H`) keep their auto-repeat — there the
+                // re-fire IS what users want (cursor moves
+                // continuously while you hold H).
+                let chord_safe_for_repeat = |events: &[SyntheticEvent]| -> bool {
+                    !events
+                        .iter()
+                        .any(|e| matches!(e, SyntheticEvent::ModifierDown(_)))
+                };
                 if let LogicalKey::Named(nk) = other {
                     if let Some(events) = overrides.get(&(mods, nk)) {
                         self.state = State::Modifying { trigger, held: None };
+                        if is_autorepeat && !chord_safe_for_repeat(events) {
+                            return Action::Suppress;
+                        }
                         return Action::emit(events.iter().copied());
                     }
                     if !mods.is_empty() {
                         if let Some(events) = overrides.get(&(ModifierMask::EMPTY, nk)) {
                             self.state = State::Modifying { trigger, held: None };
+                            if is_autorepeat && !chord_safe_for_repeat(events) {
+                                return Action::Suppress;
+                            }
                             return Action::emit(events.iter().copied());
                         }
                     }
@@ -441,6 +489,7 @@ mod tests {
             kind: EventKind::KeyDown,
             key: k,
             modifiers: ModifierMask::EMPTY,
+            is_autorepeat: false,
         }
     }
     fn up(k: LogicalKey) -> RawEvent {
@@ -448,6 +497,7 @@ mod tests {
             kind: EventKind::KeyUp,
             key: k,
             modifiers: ModifierMask::EMPTY,
+            is_autorepeat: false,
         }
     }
     fn down_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
@@ -455,6 +505,7 @@ mod tests {
             kind: EventKind::KeyDown,
             key: k,
             modifiers,
+            is_autorepeat: false,
         }
     }
     fn alpha(c: char) -> LogicalKey {
@@ -1049,6 +1100,7 @@ space:
             kind: EventKind::KeyUp,
             key: LogicalKey::Space,
             modifiers: cmd,
+            is_autorepeat: false,
         };
         assert_eq!(m.on_event(space_up_with_cmd), Action::Forward);
     }

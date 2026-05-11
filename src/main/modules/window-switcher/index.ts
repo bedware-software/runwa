@@ -21,16 +21,15 @@ const MANIFEST: ModuleManifest = {
   description: 'Jump to any open window on your desktop — like PowerToys Window Walker.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+W',
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+W',
   configFields: [
-    {
-      key: 'currentDesktopOnly',
-      type: 'checkbox',
-      label: 'Current desktop only',
-      description:
-        'Only list windows on the active virtual desktop (Virtual Desktop on Windows, Space on macOS). Turn off to see every open window across all desktops.',
-      defaultValue: true
-    },
+    // The `currentDesktopOnly` flag still lives in the module's
+    // config bag — it's just no longer surfaced in the settings UI.
+    // It's flipped inline from the palette top bar (the "This
+    // desktop / All desktops" chip + Tab key) since that's the
+    // moment where the user actually cares about the filter.
+    // Defaults to `true` when the value isn't present — search()
+    // reads `context.config.currentDesktopOnly !== false`.
     {
       key: 'hideSystemWindows',
       type: 'checkbox',

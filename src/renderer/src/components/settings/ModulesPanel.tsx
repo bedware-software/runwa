@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
 import { ConfigField } from './ConfigField'
 import { KeyboardRemapSection } from './KeyboardRemapSection'
+import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
 import { PermissionSection } from './PermissionSection'
 
 interface Props {
@@ -104,6 +105,8 @@ export function ModulePanel({ moduleId }: Props) {
 
       {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
 
+      {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
+
       {module.enabled && module.id === 'window-switcher' && (
         <PermissionSection
           heading="Permissions"
@@ -174,61 +177,73 @@ function ConfigGroup({ label, fields, values, onPatch, onAction }: ConfigGroupPr
     onPatch(patch)
   }
 
+  // If the group has no checkboxes at all (e.g. action-only group like
+  // flashcards' "Decks" cluster), there's no meaningful "toggle all"
+  // operation — render the label as a plain section header instead of
+  // a fake disabled-looking checkbox row.
+  const hasCheckboxes = checkboxFields.length > 0
+
   return (
     <div className="flex flex-col gap-3 border border-border rounded-md p-3 bg-card/40">
-      <label
-        className={cn(
-          'flex items-center gap-3 select-none',
-          masterReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'
-        )}
-        title={masterReadOnly ? 'Built-in — always on.' : undefined}
-      >
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={mixed ? 'mixed' : allOn}
-          aria-disabled={masterReadOnly || undefined}
-          disabled={masterReadOnly}
-          onClick={toggleAll}
+      {hasCheckboxes ? (
+        <label
           className={cn(
-            'h-4 w-4 rounded-[3px] border flex items-center justify-center shrink-0 transition-colors',
-            allOn || mixed
-              ? 'bg-primary border-primary'
-              : 'bg-secondary border-input hover:border-muted-foreground',
-            masterReadOnly && 'opacity-60 cursor-not-allowed'
+            'flex items-center gap-3 select-none',
+            masterReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'
           )}
+          title={masterReadOnly ? 'Built-in — always on.' : undefined}
         >
-          {allOn && (
-            <svg
-              viewBox="0 0 16 16"
-              className="h-3 w-3 text-primary-foreground"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={3}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="3 8.5 6.5 12 13 4.5" />
-            </svg>
-          )}
-          {mixed && (
-            <svg
-              viewBox="0 0 16 16"
-              className="h-3 w-3 text-primary-foreground"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={3}
-              strokeLinecap="round"
-            >
-              <line x1="4" y1="8" x2="12" y2="8" />
-            </svg>
-          )}
-        </button>
-        <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={mixed ? 'mixed' : allOn}
+            aria-disabled={masterReadOnly || undefined}
+            disabled={masterReadOnly}
+            onClick={toggleAll}
+            className={cn(
+              'h-4 w-4 rounded-[3px] border flex items-center justify-center shrink-0 transition-colors',
+              allOn || mixed
+                ? 'bg-primary border-primary'
+                : 'bg-secondary border-input hover:border-muted-foreground',
+              masterReadOnly && 'opacity-60 cursor-not-allowed'
+            )}
+          >
+            {allOn && (
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3 w-3 text-primary-foreground"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 8.5 6.5 12 13 4.5" />
+              </svg>
+            )}
+            {mixed && (
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3 w-3 text-primary-foreground"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={3}
+                strokeLinecap="round"
+              >
+                <line x1="4" y1="8" x2="12" y2="8" />
+              </svg>
+            )}
+          </button>
+          <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+            {label}
+          </span>
+        </label>
+      ) : (
+        <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
           {label}
-        </span>
-      </label>
-      <div className="flex flex-col gap-3 pl-7">
+        </div>
+      )}
+      <div className={cn('flex flex-col gap-3', hasCheckboxes && 'pl-7')}>
         {fields.map((field) => (
           <ConfigField
             key={field.key}

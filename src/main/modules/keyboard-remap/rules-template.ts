@@ -67,7 +67,7 @@ capslock:
   on_hold: [ctrl]
 
 shift:
-  on_tap: [ctrl, alt, a]
+  on_tap: [ctrl, alt, cmd, a]
 
 tab:
   on_tap: [tab]
@@ -78,9 +78,11 @@ tab:
 space:
   on_tap: [space]
   on_hold:
-    - { keys: [w], to_hotkey: [ctrl, alt, w] }
-    - { keys: [a], to_hotkey: [ctrl, alt, a] }
-    - { keys: [p], to_hotkey: [ctrl, alt, p] }
+    - { keys: [w], to_hotkey: [ctrl, alt, cmd, w] }
+    - { keys: [a], to_hotkey: [ctrl, alt, cmd, a] }
+    - { keys: [p], to_hotkey: [ctrl, alt, cmd, p] }
+    - { keys: [f], to_hotkey: [ctrl, alt, cmd, f] }
+    - { keys: [d], to_hotkey: [ctrl, alt, cmd, d] }
 
     - { keys: [h], to_hotkey: [left] }
     - { keys: [j], to_hotkey: [down] }

@@ -3,6 +3,10 @@ import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type {
+  FlashcardAnswerRequest,
+  FlashcardCardState,
+  FlashcardsDeckMastery,
+  FlashcardsLlmPromptView,
   SearchRequest,
   PaletteItem,
   Settings,
@@ -17,6 +21,9 @@ import { moduleRegistry } from '../modules/registry'
 import { paletteWindow } from '../palette-window'
 import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
+import { flashcardsStore } from '../modules/flashcards/store'
+import { flashcardsService } from '../modules/flashcards/service'
+import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
@@ -124,6 +131,51 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle('keyboard-remap:reload', async () =>
     keyboardRemapService.reload()
+  )
+
+  // Flashcards — record an answer for one card and return the
+  // freshly-computed SRS state so the renderer can show "next review
+  // in N days" on the summary screen.
+  ipcMain.handle(
+    'flashcards:answer',
+    async (_e, req: FlashcardAnswerRequest): Promise<FlashcardCardState> => {
+      const quality = qualityFromAnswer(req.outcome)
+      return flashcardsStore.recordAnswer(req.deckId, req.cardId, quality)
+    }
+  )
+
+  // Flashcards — read the LLM prompt file (path + current content)
+  // for the read-only preview in settings. ensureFile is idempotent
+  // so a fresh install resolves to a freshly-seeded file on the
+  // first call.
+  ipcMain.handle(
+    'flashcards:get-llm-prompt',
+    async (): Promise<FlashcardsLlmPromptView> => {
+      flashcardsService.ensureLlmPromptFile()
+      return {
+        filePath: flashcardsService.llmPromptPath(),
+        content: flashcardsService.readLlmPrompt()
+      }
+    }
+  )
+
+  // Flashcards — current deck mastery (mature / total). Called from
+  // the quiz summary screen to show "was X mature → now Y mature".
+  ipcMain.handle(
+    'flashcards:get-deck-mastery',
+    async (_e, deckId: string): Promise<FlashcardsDeckMastery> => {
+      return flashcardsService.getDeckMastery(deckId)
+    }
+  )
+
+  // Flashcards — drop SRS state for the given deck (every card
+  // reverts to "new"). Destructive; the renderer confirms with the
+  // user before firing.
+  ipcMain.handle(
+    'flashcards:reset-deck',
+    async (_e, deckId: string): Promise<void> => {
+      flashcardsStore.clearDeck(deckId)
+    }
   )
 
   // macOS permission status surface for the settings UI. Returns null on

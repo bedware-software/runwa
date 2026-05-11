@@ -15,10 +15,12 @@
 //! blocks, so the state machine path must stay allocation-light and lock
 //! durations must be short.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -67,6 +69,14 @@ impl super::HookHandle for WindowsHook {
 
 static HOOK_SLOT: once_cell::sync::Lazy<Mutex<Option<ActiveHook>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
+
+/// Set of VK codes currently considered "physically held" by the
+/// hook. KeyDown for a code already present in the set is treated as
+/// an OS-driven autorepeat. KeyUp removes the entry. Cleared on
+/// hook teardown so a re-install starts fresh — stale entries from
+/// the previous session would mistake a fresh press for autorepeat.
+static PRESSED_VK_CODES: Lazy<Mutex<HashSet<u32>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
 
 struct ActiveHook {
     sm: StateMachine,
@@ -141,6 +151,10 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
             let _ = UnhookWindowsHookEx(hhook);
             let mut slot = HOOK_SLOT.lock();
             *slot = None;
+            // Drop the autorepeat-tracking set so a subsequent install
+            // doesn't start with stale "key X is held" carry-overs from
+            // the previous session.
+            PRESSED_VK_CODES.lock().clear();
         })
         .map_err(|e| format!("spawn hook thread: {e}"))?;
 
@@ -192,6 +206,30 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     };
 
     let key = vk_to_logical(info.vkCode);
+
+    // KBDLLHOOKSTRUCT doesn't expose an autorepeat bit, so we infer
+    // it ourselves: track the set of currently-pressed VK codes
+    // (per-OS hook, single-threaded callback, so a Mutex<HashSet>
+    // costs nothing in practice). A KeyDown for a vkCode already in
+    // the set means the kernel is autorepeating — same effect as
+    // macOS reading the AUTOREPEAT field on CGEvent. KeyUp clears
+    // the entry. Without this gate, launcher chords like
+    // `Space+D → Ctrl+Alt+Cmd+D` would re-fire at the Windows
+    // key-repeat rate while the user keeps D held — the same
+    // bug-fix that landed for macOS.
+    let is_autorepeat = if matches!(kind, EventKind::KeyDown) {
+        // `HashSet::insert` returns `false` when the value was
+        // already present — exactly the autorepeat signal we want.
+        !PRESSED_VK_CODES.lock().insert(info.vkCode)
+    } else {
+        // KeyUp: clear the entry so the next physical press
+        // re-fires. KeyUp's autorepeat flag itself is meaningless
+        // (Windows doesn't synthesise repeat KeyUps), so the value
+        // we put on the event doesn't matter — keep it false.
+        PRESSED_VK_CODES.lock().remove(&info.vkCode);
+        false
+    };
+
     let ev = RawEvent {
         kind,
         key,
@@ -200,6 +238,7 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         // Needed so `keys: [shift, 1]` rules can match against the user's
         // held Shift at the moment 1 was pressed.
         modifiers: current_modifier_mask(),
+        is_autorepeat,
     };
 
     // Short critical section: only hold while calling the state machine.

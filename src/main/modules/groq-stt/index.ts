@@ -44,7 +44,7 @@ const MANIFEST: ModuleManifest = {
     'Hold (or toggle) a hotkey to record your voice; Groq Whisper transcribes it and the result lands on your clipboard.',
   defaultEnabled: false,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Super',
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+D',
   configFields: [
     {
       key: 'apiKey',
@@ -197,7 +197,24 @@ export function createGroqSttModule(): PaletteModule {
       state.state = 'idle'
       state.recordingResult = null
       indicatorWindow.setState('hidden')
-      notify('Groq Transcription', `Recording failed: ${(err as Error).message}`, 'critical')
+      const msg = (err as Error).message
+      // "Released too fast" / "no audio captured" / "mic not ready"
+      // all map to the same user-facing reality: the push-to-talk
+      // chord was held for less than getUserMedia's boot time, or a
+      // synthetic chord from keyboard-remap brushed the hotkey
+      // accidentally. Log it for diagnosis but don't pop a critical
+      // notification — these are routine when push-to-talk overlaps
+      // a user macro, and the indicator window disappearing already
+      // signals "nothing was transcribed".
+      if (
+        msg.includes('no audio') ||
+        msg.includes('mic not ready') ||
+        msg.includes('released too fast')
+      ) {
+        console.warn(`[groq-stt] short / empty recording skipped: ${msg}`)
+        return
+      }
+      notify('Groq Transcription', `Recording failed: ${msg}`, 'critical')
       return
     }
     state.recordingResult = null

@@ -7,11 +7,14 @@
  *
  * Accepted shapes:
  *   - ≥1 modifier + main key       →  `Ctrl+Alt+W`, `Shift+F5`
- *   - ≥2 modifiers, no main key    →  `Ctrl+Super`, `Alt+Shift`
- *     (WhisperFlow-style push-to-talk — needs uiohook, Electron's
- *     globalShortcut can't register these)
  *   - single "safe" non-modifier key → `F13`, `Pause`, `ScrollLock`,
  *     `PrintScreen`, `NumLock` (can't be confused with typing)
+ *
+ * Modifier-only chords (`Ctrl+Super`, `Alt+Shift`, …) used to be
+ * accepted for WhisperFlow-style push-to-talk, but they were too
+ * easy to trigger accidentally — any synthetic chord from
+ * keyboard-remap that briefly held the same modifiers fired them
+ * during the prefix window. They're no longer allowed.
  */
 
 const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'OS', 'Super'])
@@ -86,13 +89,10 @@ export function keyEventToAccelerator(e: KeyboardEventLike): string | null {
 
   const key = normalizeKey(e.key)
 
-  // 1. No main key (user is still adjusting modifiers OR wants a
-  //    modifier-only chord like Ctrl+Super). Accept with ≥2 modifiers —
-  //    those chords are useful for push-to-talk but need uiohook since
-  //    Electron's globalShortcut refuses to register them. A single lone
-  //    modifier would hijack that key globally, so we wait for more.
+  // 1. No main key — user is still adjusting modifiers. Wait for a
+  //    non-modifier keypress before producing an accelerator string.
   if (!key) {
-    return modifiers.length >= 2 ? modifiers.join('+') : null
+    return null
   }
 
   // 2. Main key + modifier(s): standard accelerator.

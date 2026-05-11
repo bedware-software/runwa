@@ -130,7 +130,7 @@ const MANIFEST: ModuleManifest = {
     'System commands you can run from the palette. Ships an "Open Settings" entry plus window-management commands (Maximize, Minimize, Restore); each command is toggleable below except the built-in Settings entry.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+P',
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
   configFields: COMMANDS.map((c) => ({
     key: c.configKey,
     type: 'checkbox' as const,

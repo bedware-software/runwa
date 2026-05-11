@@ -1,4 +1,4 @@
-import { app, Menu, MenuItemConstructorOptions, nativeImage, nativeTheme, Tray } from 'electron'
+import { app, Menu, MenuItemConstructorOptions, nativeImage, Tray } from 'electron'
 import { readFileSync } from 'fs'
 import path from 'path'
 import { settingsWindow } from './settings-window'
@@ -13,21 +13,13 @@ import {
 
 /**
  * System tray icon. On Windows, the icon reflects the current virtual
- * desktop number (1..10, `+` for 11+). Two icon themes — `black-on-white`
- * and `white-on-black` — swap based on the OS light/dark preference so the
- * glyph stays readable against whatever taskbar/menu-bar color is in
- * effect.
+ * desktop number (1..10, `+` for 11+). A single `black-on-white` icon set
+ * is used regardless of the OS light/dark preference.
  *
- * Detection strategy:
- *  - Desktop: polled every 500ms via the native addon. On Windows the
- *    `winvd` crate returns the real ordinal; on macOS / Linux the native
- *    addon returns 0 (Spaces have no public ordinal API), so the icon
- *    stays on "1" regardless of the current Space. Still useful: users
- *    get the same runwa glyph in the menu bar, and the theme-based
- *    light/dark swap still works.
- *  - Theme: `nativeTheme.shouldUseDarkColors` + its `updated` event.
- *    Reads `AppsUseLightTheme` on Windows and the `AppleInterfaceStyle`
- *    default on macOS.
+ * Desktop detection: polled every 500ms via the native addon. On Windows
+ * the `winvd` crate returns the real ordinal; on macOS / Linux the native
+ * addon returns 0 (Spaces have no public ordinal API), so the icon stays
+ * on "1" regardless of the current Space.
  */
 
 const DESKTOP_POLL_INTERVAL_MS = 500
@@ -36,17 +28,14 @@ const MAX_NUMBERED_DESKTOP = 10 // we ship 1.ico…10.ico, then +.ico
 class TrayManager {
   private tray: Tray | null = null
   private pollTimer: NodeJS.Timeout | null = null
-  private themeListener: (() => void) | null = null
   private settingsListener: (() => void) | null = null
   private lastDesktop = -1
-  private lastDark: boolean | null = null
   private lastShowNumber: boolean | null = null
 
   init(): void {
     const initialDesktop = this.readDesktopNumber()
-    const initialDark = nativeTheme.shouldUseDarkColors
     const initialShowNumber = this.readShowNumberSetting()
-    const initialIcon = this.resolveIcon(initialDesktop, initialDark, initialShowNumber)
+    const initialIcon = this.resolveIcon(initialDesktop, initialShowNumber)
 
     this.tray = new Tray(initialIcon)
     this.tray.setToolTip(this.tooltipFor(initialDesktop, initialShowNumber))
@@ -54,7 +43,6 @@ class TrayManager {
 
     // Prime state so the first poll tick recognises changes correctly.
     this.lastDesktop = initialDesktop
-    this.lastDark = initialDark
     this.lastShowNumber = initialShowNumber
 
     // Poll for desktop changes. Cheap — one native call per tick. On
@@ -62,11 +50,6 @@ class TrayManager {
     // fires, but we keep the timer running so there's a single code path
     // across platforms.
     this.pollTimer = setInterval(() => this.tick(), DESKTOP_POLL_INTERVAL_MS)
-
-    // Theme change fires when the user flips system light/dark mode.
-    const themeListener = (): void => this.applyIcon()
-    nativeTheme.on('updated', themeListener)
-    this.themeListener = (): void => nativeTheme.off('updated', themeListener)
 
     // React to the keyboard-remap module's "show desktop number" toggle
     // being flipped in settings, so the tray switches between the
@@ -86,10 +69,6 @@ class TrayManager {
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
-    }
-    if (this.themeListener) {
-      this.themeListener()
-      this.themeListener = null
     }
     if (this.settingsListener) {
       this.settingsListener()
@@ -154,33 +133,25 @@ class TrayManager {
   }
 
   /**
-   * Render whatever icon the current (desktop, theme, show-number) tuple
+   * Render whatever icon the current (desktop, show-number) tuple
    * resolves to, plus the matching tooltip. Cheap — called on each poll
-   * tick that detects a change, on theme updates, and on the module's
-   * settings toggle.
+   * tick that detects a change and on the module's settings toggle.
    */
   private applyIcon(): void {
     if (!this.tray) return
-    const dark = nativeTheme.shouldUseDarkColors
-    this.lastDark = dark
     const showNumber = this.lastShowNumber ?? SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT
-    const icon = this.resolveIcon(this.lastDesktop, dark, showNumber)
+    const icon = this.resolveIcon(this.lastDesktop, showNumber)
     this.tray.setImage(icon)
     this.tray.setToolTip(this.tooltipFor(this.lastDesktop, showNumber))
   }
 
   /**
    * Pick an icon based on whether the user wants the numbered desktop
-   * glyph or the plain runwa mark. The numbered path still honours the
-   * light/dark theme swap — the fallback just returns the static PNG.
+   * glyph or the plain runwa mark.
    */
-  private resolveIcon(
-    zeroBasedDesktop: number,
-    dark: boolean,
-    showNumber: boolean
-  ): Electron.NativeImage {
+  private resolveIcon(zeroBasedDesktop: number, showNumber: boolean): Electron.NativeImage {
     if (!showNumber) return this.fallbackIcon()
-    return this.iconForDesktop(zeroBasedDesktop, dark)
+    return this.iconForDesktop(zeroBasedDesktop)
   }
 
   /**
@@ -219,27 +190,19 @@ class TrayManager {
   }
 
   /**
-   * Resolve the path to the .ico file for the given desktop index (0-based)
-   * and system theme, then hand Electron the NativeImage.
-   *
-   * Theme mapping is intentionally inverted vs the taskbar — dark taskbar
-   * gets `black-on-white` (light tile, dark digit), light taskbar gets
-   * `white-on-black`. Gives the glyph a pop-through-background look so the
-   * current-desktop indicator reads at a glance. Mirrors the AHK script in
-   * the user's .dotfiles.
+   * Resolve the path to the .png file for the given desktop index (0-based)
+   * and hand Electron the NativeImage.
    */
-  private iconForDesktop(zeroBased: number, dark: boolean): Electron.NativeImage {
+  private iconForDesktop(zeroBased: number): Electron.NativeImage {
     const humanNum = zeroBased + 1
     const fileBase = humanNum > MAX_NUMBERED_DESKTOP ? '+' : String(humanNum)
-    const themeDir = dark ? 'black-on-white' : 'white-on-black'
-    // One 44×44 PNG per number per theme — single source, no Retina
-    // sibling file, no Windows-specific .ico. On macOS we read the bytes
-    // ourselves and hand them to `createFromBuffer` with width/height 22
-    // and scaleFactor 2 so the 44px image reports itself as a 22pt @2x
-    // asset (correct menu-bar size, sharp on Retina). On Windows/Linux
-    // `createFromPath` loads the raw 44×44 and the tray shell downscales
-    // to fit the notification slot.
-    const iconPath = path.join(this.iconsRoot(), themeDir, `${fileBase}.png`)
+    // One 44×44 PNG per number — single source, no Retina sibling file, no
+    // Windows-specific .ico. On macOS we read the bytes ourselves and hand
+    // them to `createFromBuffer` with width/height 22 and scaleFactor 2 so
+    // the 44px image reports itself as a 22pt @2x asset (correct menu-bar
+    // size, sharp on Retina). On Windows/Linux `createFromPath` loads the
+    // raw 44×44 and the tray shell downscales to fit the notification slot.
+    const iconPath = path.join(this.iconsRoot(), 'black-on-white', `${fileBase}.png`)
     const img =
       process.platform === 'darwin'
         ? this.loadAt2x(iconPath)

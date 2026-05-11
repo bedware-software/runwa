@@ -1,6 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import * as Icons from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
+
+function lucideIconFromHint(hint: string | undefined): LucideIcon | null {
+  if (!hint) return null
+  const name = hint
+    .split('-')
+    .map((s) => (s[0] ?? '').toUpperCase() + s.slice(1))
+    .join('')
+  const lookup = Icons as unknown as Record<string, LucideIcon>
+  return lookup[name] ?? null
+}
 
 interface Props {
   field: ModuleConfigField
@@ -16,6 +28,7 @@ interface Props {
  */
 export function ConfigField({ field, value, onChange, onAction }: Props) {
   if (field.type === 'action') {
+    const ActionIcon = lucideIconFromHint(field.icon)
     return (
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
@@ -31,9 +44,11 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
           onClick={() => onAction?.(field.key)}
           className={cn(
             'h-7 px-3 rounded-md text-xs font-medium border transition-colors shrink-0',
-            'bg-secondary text-secondary-foreground border-input hover:bg-accent'
+            'bg-secondary text-secondary-foreground border-input hover:bg-accent',
+            ActionIcon && 'flex items-center gap-1.5'
           )}
         >
+          {ActionIcon && <ActionIcon size={12} strokeWidth={2} />}
           {field.buttonLabel}
         </button>
       </div>

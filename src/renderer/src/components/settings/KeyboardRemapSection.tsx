@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Pencil, RefreshCw } from 'lucide-react'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { Hotkey } from '../ui/Kbd'
@@ -63,10 +63,11 @@ export function KeyboardRemapSection() {
             type="button"
             onClick={onEdit}
             className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors',
+              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
               'bg-secondary text-secondary-foreground border-input hover:bg-accent'
             )}
           >
+            <Pencil size={12} />
             Edit
           </button>
           <button

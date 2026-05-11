@@ -80,6 +80,11 @@ export interface ModuleConfigFieldAction extends ModuleConfigFieldBase {
   type: 'action'
   /** Button label shown to the user. */
   buttonLabel: string
+  /** Optional lucide icon name (kebab-case, e.g. `refresh-cw`,
+   * `pencil`). Rendered to the left of the button label so action
+   * buttons can match the visual weight of bespoke buttons elsewhere
+   * in the settings UI. Omit for label-only actions. */
+  icon?: string
 }
 
 export type ModuleConfigField =
@@ -144,6 +149,15 @@ export interface PaletteItem {
   subtitle?: string
   /** Lucide icon name or data URL. Iteration 1 uses lucide names only. */
   iconHint?: string
+  /**
+   * Optional hover tooltip for the leading icon. Rendered via the
+   * native `title` attribute on the icon container — shows on
+   * pointer hover, OS-styled. Modules use it to explain status
+   * icons that aren't self-evident (e.g. flashcards' deck row
+   * icons: book/clock/check/graduation-cap each map to a specific
+   * learning state). Undefined = no tooltip.
+   */
+  iconTooltip?: string
   /**
    * Absolute filesystem path the context menu's "Show in file explorer"
    * action targets. When set, the palette surfaces a Ctrl+K context menu
@@ -374,6 +388,84 @@ export interface AppInfo {
  */
 export type SettingsTabId = 'general' | 'about' | `module:${string}`
 
+/* ─── Flashcards module types (shared with renderer) ────────────────── */
+
+export interface FlashcardOption {
+  text: string
+}
+
+export interface FlashcardCard {
+  /** Stable card id — sha1 of the question text. */
+  id: string
+  question: string
+  options: FlashcardOption[]
+  /** Index into `options` of the correct answer, or -1 for malformed
+   * cards (kept in the list so warnings can mention them; the quiz UI
+   * filters them out before showing). */
+  correctIndex: number
+  explanation?: string
+  /** Topic the card belongs to (from `## heading` in topic-mode files).
+   * Undefined when the deck has no topics. Rendered as a small chip
+   * above the question in the quiz UI. */
+  topic?: string
+}
+
+export interface FlashcardDeck {
+  id: string
+  name: string
+  cards: FlashcardCard[]
+  warnings: string[]
+}
+
+/** SRS state echoed back to the renderer after recording an answer
+ * — surfaced on the quiz summary card to show "next review in N days". */
+export interface FlashcardCardState {
+  ef: number
+  interval: number
+  reps: number
+  lastReview: string
+  nextReview: string
+}
+
+export type FlashcardAnswerOutcome = 'correct' | 'incorrect' | 'skipped'
+
+export interface FlashcardAnswerRequest {
+  deckId: string
+  cardId: string
+  outcome: FlashcardAnswerOutcome
+}
+
+/** Sent main → renderer when a deck is selected in the palette.
+ * Contains the full deck and the pre-shuffled review order so the
+ * renderer doesn't need to know SRS internals. */
+/** Deck-level learning snapshot. "Mature" = SRS interval ≥ 21 days
+ * (Anki convention) — used as the "have I actually learned this"
+ * signal in both the palette subtitle and the post-session summary. */
+export interface FlashcardsDeckMastery {
+  mature: number
+  total: number
+}
+
+export interface FlashcardsStartQuizPayload {
+  deck: FlashcardDeck
+  /** Card ids to quiz, in display order. In review mode this is just
+   * the due cards; in cram mode it's every well-formed card. */
+  quizCardIds: string[]
+  cram: boolean
+  /** Mastery snapshot taken right before the session starts. The
+   * summary screen compares this against the post-session mastery
+   * to show "was X → now Y mature". */
+  initialMastery: FlashcardsDeckMastery
+}
+
+/** Snapshot of the LLM prompt file shown in the settings panel. */
+export interface FlashcardsLlmPromptView {
+  /** Absolute path — surfaced under the read-only preview so the user
+   * knows where the file lives if they want to grep / version it. */
+  filePath: string
+  content: string
+}
+
 /**
  * GitHub Releases-backed auto-update state machine, as observed from
  * the renderer. The main process is the source of truth — the
@@ -451,6 +543,26 @@ export interface ElectronAPI {
   keyboardRemapGetRules: () => Promise<KeyboardRemapRulesView>
   keyboardRemapReload: () => Promise<KeyboardRemapRulesView>
 
+  // Flashcards — record the user's answer for a single card and get
+  // the freshly-computed SRS state back (used by the quiz summary).
+  flashcardsAnswer: (req: FlashcardAnswerRequest) => Promise<FlashcardCardState>
+
+  /** Fetch the current LLM prompt file content + path for the
+   * settings preview. Re-reads from disk on every call so external
+   * edits show up the next time the user opens / reloads the
+   * section. */
+  flashcardsGetLlmPrompt: () => Promise<FlashcardsLlmPromptView>
+
+  /** Post-session deck mastery snapshot — used by the quiz summary
+   * to compare against `initialMastery` from the start payload and
+   * show "was N → now M mature". */
+  flashcardsGetDeckMastery: (deckId: string) => Promise<FlashcardsDeckMastery>
+
+  /** Wipe SRS state for a single deck. Doesn't touch the .md file —
+   * only the per-card history under `runwa-flashcards.json`. After
+   * this, every card in the deck reverts to "new". */
+  flashcardsResetDeck: (deckId: string) => Promise<void>
+
   // Auto-update: getter + push-update subscription.
   checkForUpdates: () => Promise<void>
   getUpdateStatus: () => Promise<UpdateStatus>
@@ -473,6 +585,13 @@ export interface ElectronAPI {
 
   // Events (main → renderer). Return an unsubscribe function.
   onPaletteShow: (cb: (payload: PaletteShowPayload) => void) => () => void
+
+  /**
+   * Fired by the flashcards module's `execute()` when a deck row is
+   * selected in the palette — the renderer switches into quiz mode in
+   * the same window (no separate BrowserWindow is opened).
+   */
+  onFlashcardsStartQuiz: (cb: (payload: FlashcardsStartQuizPayload) => void) => () => void
   onSettingsChanged: (cb: (settings: Settings) => void) => () => void
   /**
    * Main asks the settings renderer to switch to a specific tab. Fired when

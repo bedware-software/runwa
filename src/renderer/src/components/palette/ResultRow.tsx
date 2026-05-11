@@ -3,6 +3,7 @@ import * as Icons from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { Tooltip } from '../ui/Tooltip'
 
 interface Props {
   item: PaletteItem
@@ -87,31 +88,33 @@ export function ResultRow({
           {numberHint}
         </kbd>
       )}
-      <div
-        className={cn(
-          'h-8 w-8 rounded-md flex items-center justify-center shrink-0',
-          // Real app icons (PNGs with their own artwork) render on a
-          // transparent tile so the extracted icon isn't boxed into a
-          // coloured square. Lucide glyphs keep the tinted tile so they
-          // still read as framed icons.
-          Icon
-            ? isSelected
-              ? 'bg-accent-foreground/10 text-accent-foreground'
-              : 'bg-secondary text-muted-foreground'
-            : ''
-        )}
-      >
-        {Icon ? (
-          <Icon size={18} />
-        ) : (
-          <img
-            src={hint}
-            alt=""
-            className="h-8 w-8 object-contain"
-            draggable={false}
-          />
-        )}
-      </div>
+      <Tooltip content={item.iconTooltip} className="shrink-0">
+        <div
+          className={cn(
+            'h-8 w-8 rounded-md flex items-center justify-center',
+            // Real app icons (PNGs with their own artwork) render on a
+            // transparent tile so the extracted icon isn't boxed into a
+            // coloured square. Lucide glyphs keep the tinted tile so they
+            // still read as framed icons.
+            Icon
+              ? isSelected
+                ? 'bg-accent-foreground/10 text-accent-foreground'
+                : 'bg-secondary text-muted-foreground'
+              : ''
+          )}
+        >
+          {Icon ? (
+            <Icon size={18} />
+          ) : (
+            <img
+              src={hint}
+              alt=""
+              className="h-8 w-8 object-contain"
+              draggable={false}
+            />
+          )}
+        </div>
+      </Tooltip>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-medium truncate">{item.title}</span>

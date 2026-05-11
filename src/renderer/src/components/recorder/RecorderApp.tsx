@@ -32,6 +32,17 @@ export function RecorderApp() {
     let activeRequestId: number | null = null
     let chunks: Blob[] = []
     let mimeType = ''
+    // Edge-trigger memory for the start↔stop race. When `onStop`
+    // arrives while `onStart` is still inside `await openStream()` or
+    // `await MediaRecorder.start()`, the recorder isn't ready to be
+    // stopped — the naive "check recorder && state != inactive" path
+    // sees nothing to do, and the audio promise on the main side
+    // never resolves (stuck in `transcribing` forever). The flag
+    // lets onStart bail cleanly the moment the mic comes online.
+    // Triggered in practice by synthetic key chords from
+    // keyboard-remap that hold our push-to-talk hotkey for only
+    // microseconds — far shorter than getUserMedia's ~200ms boot.
+    let pendingStop = false
 
     const openStream = async (): Promise<MediaStream> => {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -66,13 +77,26 @@ export function RecorderApp() {
     }
 
     const onStart = async (payload: { requestId: number }): Promise<void> => {
+      activeRequestId = payload.requestId
+      pendingStop = false
       try {
         const s = await openStream()
+        // If onStop already came in while getUserMedia was blocking, bail.
+        // No audio was captured; tell main so it can drop the indicator.
+        if (pendingStop) {
+          pendingStop = false
+          releaseStream()
+          const reqId = activeRequestId
+          activeRequestId = null
+          if (reqId != null) {
+            api.sendError(reqId, 'released too fast (mic not ready)')
+          }
+          return
+        }
         mimeType = pickMimeType()
         const options: MediaRecorderOptions = mimeType ? { mimeType } : {}
         recorder = new MediaRecorder(s, options)
         chunks = []
-        activeRequestId = payload.requestId
 
         recorder.ondataavailable = (ev) => {
           if (ev.data && ev.data.size > 0) chunks.push(ev.data)
@@ -111,7 +135,24 @@ export function RecorderApp() {
           }
         }
         recorder.start()
+        // Race window #2: onStop could have landed between the
+        // MediaRecorder constructor and recorder.start(). At this
+        // point recorder.state === 'recording', so the regular
+        // onStop path would handle it — but only if onStop fires
+        // AFTER us. The flag covers the case where it fired during.
+        if (pendingStop) {
+          pendingStop = false
+          try {
+            recorder.stop()
+          } catch (err) {
+            const reqId = activeRequestId
+            activeRequestId = null
+            releaseStream()
+            if (reqId != null) api.sendError(reqId, (err as Error).message)
+          }
+        }
       } catch (err) {
+        pendingStop = false
         activeRequestId = null
         releaseStream()
         api.sendError(payload.requestId, (err as Error).message)
@@ -128,6 +169,12 @@ export function RecorderApp() {
           releaseStream()
           if (reqId != null) api.sendError(reqId, (err as Error).message)
         }
+        return
+      }
+      // Recorder not yet built (still inside onStart's await chain).
+      // Stamp the flag so onStart aborts as soon as control returns.
+      if (activeRequestId != null) {
+        pendingStop = true
       }
     }
 

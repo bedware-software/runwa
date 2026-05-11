@@ -5,6 +5,7 @@ import { createCommandPaletteModule } from './command-palette'
 import { createKeyboardRemapModule } from './keyboard-remap'
 import { createGroqSttModule } from './groq-stt'
 import { createHotstringsModule } from './hotstrings'
+import { createFlashcardsModule } from './flashcards'
 
 /**
  * Hard-coded module registration. Adding a new module is a one-file change:
@@ -21,6 +22,7 @@ export async function registerModules(): Promise<void> {
   moduleRegistry.register(createAppSearchModule())
   moduleRegistry.register(createWindowSwitcherModule())
   moduleRegistry.register(createCommandPaletteModule())
+  moduleRegistry.register(createFlashcardsModule())
   moduleRegistry.register(createKeyboardRemapModule())
   moduleRegistry.register(createHotstringsModule())
   moduleRegistry.register(createGroqSttModule())

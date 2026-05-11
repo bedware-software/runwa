@@ -151,6 +151,13 @@ class PaletteWindow {
 
   create(): void {
     if (this.window && !this.window.isDestroyed()) return
+    // Single source of truth for "I just built a BrowserWindow" — the
+    // log fires regardless of who called us (startup pre-warm, a
+    // cold show() after a Windows desktop-affinity teardown, etc.).
+    // Previously this lived inside show(), which made it look like
+    // the window was always reused — startup-time create() was
+    // silent, so the first show() only saw the existing window.
+    console.log('[palette] create: building new BrowserWindow')
 
     const saved = settingsStore.get().paletteSize
     const initialWidth = Math.max(saved?.width ?? DEFAULT_WIDTH, MIN_WIDTH)
@@ -305,11 +312,19 @@ class PaletteWindow {
         this.window.destroy()
         this.window = null
       }
-    } else {
-      console.log(`[palette] show: no existing window (will create)`)
     }
 
-    if (!this.window || this.window.isDestroyed()) this.create()
+    // create() is idempotent and logs from inside itself when it
+    // actually builds a new BrowserWindow, so the `reusing` line
+    // here just documents the common path (existing window kept
+    // alive across hide/show cycles). On macOS the only way we hit
+    // a fresh create() at this point is if the window crashed; on
+    // Windows it's the desktop-affinity teardown above.
+    const reusing = !!this.window && !this.window.isDestroyed()
+    if (reusing) {
+      console.log('[palette] show: reusing existing window')
+    }
+    this.create()
     const win = this.window!
 
     // Remember which window had focus so we can restore it on dismiss.
@@ -410,6 +425,16 @@ class PaletteWindow {
       // Collapse the blur-grace window so the blur event that `hide()`
       // itself fires can't trigger a re-focus into the now-hidden window.
       this.lastShownAt = 0
+      // macOS animates `NSWindow.orderOut:` by default — a ~150ms
+      // soft fade. Setting alphaValue to 0 BEFORE hide() makes the
+      // visual disappearance instant from the user's POV: pixels go
+      // transparent the moment Esc is pressed, the OS animation
+      // then runs on a window that's already invisible. Cheap no-op
+      // on Windows / Linux where hide() is already snap-instant.
+      // show() always re-sets opacity to 0 then 1 (the reveal
+      // dance), so leaving alphaValue at 0 here is fine — the next
+      // show pass takes the window back to opaque cleanly.
+      this.window.setOpacity(0)
       this.window.hide()
       if (restoreFocus && this.previousWindowId) {
         try {

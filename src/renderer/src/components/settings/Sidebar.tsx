@@ -15,6 +15,16 @@ export type SettingsTab = SettingsTabId
  */
 const KEYBOARD_MODULE_IDS = new Set(['keyboard-remap', 'hotstrings'])
 
+/**
+ * Search-kind modules that should still render under "Other" in the
+ * sidebar. Flashcards is a `kind: 'search'` module (it does open the
+ * palette like a search), but conceptually it's an in-app tool rather
+ * than a system launcher, so it groups better with non-launcher
+ * modules. The runtime kind is unchanged — only the sidebar bucket
+ * shifts.
+ */
+const OTHER_OVERRIDE_IDS = new Set(['flashcards'])
+
 interface Props {
   current: SettingsTab
   onChange: (tab: SettingsTab) => void
@@ -67,7 +77,9 @@ export function Sidebar({ current, onChange }: Props) {
           */}
           <ModuleGroup
             label="Searches"
-            modules={modules.filter((m) => m.kind === 'search')}
+            modules={modules.filter(
+              (m) => m.kind === 'search' && !OTHER_OVERRIDE_IDS.has(m.id)
+            )}
             current={current}
             onChange={onChange}
             onToggle={(id, v) => void setEnabled(id, v)}
@@ -84,7 +96,9 @@ export function Sidebar({ current, onChange }: Props) {
           <ModuleGroup
             label="Other"
             modules={modules.filter(
-              (m) => m.kind !== 'search' && !KEYBOARD_MODULE_IDS.has(m.id)
+              (m) =>
+                (m.kind !== 'search' && !KEYBOARD_MODULE_IDS.has(m.id)) ||
+                (m.kind === 'search' && OTHER_OVERRIDE_IDS.has(m.id))
             )}
             current={current}
             onChange={onChange}

@@ -14,6 +14,7 @@ import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { hotstringService } from './modules/hotstrings/service'
 import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
+import { flashcardsStore } from './modules/flashcards/store'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import { syncStartupIntegrations } from './startup-integration'
@@ -51,6 +52,70 @@ app.on('second-instance', () => {
   settingsWindow.open()
 })
 
+// Explicit POSIX-signal handlers. Electron *says* it catches
+// SIGINT/SIGTERM and calls app.quit() for us, but in `npm run dev`
+// (electron-vite pipes our stdio and may put us in its own process
+// group) the signal often never reaches us at all. We keep these
+// handlers as a belt-and-suspenders measure for the case where
+// signals DO arrive; the ppid watcher below is the real backstop.
+let signalShutdownInFlight = false
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    if (signalShutdownInFlight) {
+      console.log(`[shutdown] second ${signal} — force-kill`)
+      forceKillSelf()
+      process.exit(1)
+      return
+    }
+    signalShutdownInFlight = true
+    console.log(`[shutdown] received ${signal} — quitting`)
+    app.quit()
+    setTimeout(() => {
+      console.warn(
+        '[shutdown] graceful quit did not complete in 2s — force-killing'
+      )
+      forceKillSelf()
+      process.exit(1)
+    }, 2000).unref()
+  })
+}
+
+// Parent-PID watcher (dev only). When the terminal user presses
+// Ctrl+C, the terminal sends SIGINT to `electron-vite`'s process
+// group; electron-vite exits, but the Electron child we're running
+// in often DOESN'T receive the signal — observed empirically and
+// confirmed by the absent `[shutdown]` log lines on the user's
+// terminal. The pipe to vite then 502s on every renderer URL load
+// (`ERR_EMPTY_RESPONSE` / `ERR_CONNECTION_REFUSED`) but we keep
+// running silently.
+//
+// Trick: when our parent dies, the OS reparents us to launchd
+// (PID 1 on macOS) / init. Poll ppid; when it flips, force-quit.
+// Platform-guaranteed, doesn't depend on any signal plumbing.
+// Production builds have no parent to monitor (Spotlight launches
+// us with parent=launchd from the start), so we restrict to
+// unpackaged dev runs.
+if (!app.isPackaged) {
+  const initialPpid = process.ppid
+  console.log(
+    `[main] dev parent watcher: pid=${process.pid} ppid=${initialPpid}`
+  )
+  const watcher = setInterval(() => {
+    const current = process.ppid
+    if (current !== initialPpid) {
+      console.log(
+        `[shutdown] dev parent died (ppid ${initialPpid} → ${current}) — force-quit`
+      )
+      clearInterval(watcher)
+      forceKillSelf()
+      process.exit(0)
+    }
+  }, 1000)
+  // Don't keep the event loop alive solely for the watcher — when
+  // the rest of the app shuts down cleanly we want to exit too.
+  watcher.unref()
+}
+
 app.whenReady().then(async () => {
   // Very first thing: what was already alive when we came up? If the
   // previous session's orphan is still there, the startup snapshot
@@ -86,6 +151,7 @@ app.whenReady().then(async () => {
 
   // 1. Persistence layer
   settingsStore.init()
+  flashcardsStore.init()
 
   // 2. Module registry (cache hydrated from settings internally)
   moduleRegistry.init()

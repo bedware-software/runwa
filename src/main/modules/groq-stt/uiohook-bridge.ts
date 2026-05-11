@@ -16,15 +16,14 @@ import { createRequire } from 'module'
 const nodeRequire = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
 
 /**
- * Parsed Electron Accelerator. `key` is the uiohook hardware keycode for the
- * main (non-modifier) key, or null for a modifier-only chord like Ctrl+Win
- * (WhisperFlow-style push-to-talk). The boolean flags describe required
- * modifier state.
+ * Parsed Electron Accelerator. `key` is the uiohook hardware keycode for
+ * the main (non-modifier) key. The boolean flags describe required
+ * modifier state. Modifier-only chords (no main key) are no longer
+ * accepted — see the comment in `acceleratorToKeyBinding`.
  */
 export interface KeyBinding {
-  /** uiohook-napi keycode for the non-modifier key. Null = modifier-only
-   *  chord — the press/release fires on modifier-state transitions alone. */
-  key: number | null
+  /** uiohook-napi keycode for the non-modifier key. */
+  key: number
   ctrl: boolean
   alt: boolean
   shift: boolean
@@ -198,43 +197,17 @@ export function acceleratorToKeyBinding(accel: string): KeyBinding | null {
   }
 
   if (!keyToken) {
-    // Modifier-only chord like "Ctrl+Super" or "Alt+Shift". Only allow it
-    // if at least two modifiers are pressed — a single modifier alone
-    // (e.g. just "Ctrl") would grab every press of that key globally.
-    const modCount = (ctrl ? 1 : 0) + (alt ? 1 : 0) + (shift ? 1 : 0) + (meta ? 1 : 0)
-    if (modCount < 2) return null
-    return { key: null, ctrl, alt, shift, meta }
+    // Modifier-only chords (no non-modifier key) used to be accepted
+    // for WhisperFlow-style push-to-talk. Removed: any synthetic
+    // chord with the same modifier prefix would trigger them in the
+    // microsecond window before the trailing keypress, which broke
+    // the keyboard-remap launcher chords (Space+W → Ctrl+Alt+Cmd+W
+    // would brush a `Ctrl+Alt` push-to-talk binding mid-emission).
+    return null
   }
   const key = keycodeFor(keyToken, mod)
   if (key == null) return null
   return { key, ctrl, alt, shift, meta }
-}
-
-/** True if the binding fires purely on modifier-state transitions — no
- *  main key. Used by the hotkey manager to skip Electron's globalShortcut
- *  (which rejects such chords with a conversion failure) and require
- *  uiohook for the binding. */
-export function isModifierOnlyAccelerator(accel: string): boolean {
-  const parts = accel.split('+').map((p) => p.trim()).filter(Boolean)
-  if (parts.length < 2) return false
-  for (const p of parts) {
-    const lower = p.toLowerCase()
-    const isMod =
-      lower === 'ctrl' ||
-      lower === 'control' ||
-      lower === 'cmdorctrl' ||
-      lower === 'commandorcontrol' ||
-      lower === 'alt' ||
-      lower === 'option' ||
-      lower === 'shift' ||
-      lower === 'super' ||
-      lower === 'meta' ||
-      lower === 'cmd' ||
-      lower === 'command' ||
-      lower === 'win'
-    if (!isMod) return false
-  }
-  return true
 }
 
 /**
@@ -270,10 +243,10 @@ interface BindingEntry {
   /** True while the chord is currently held. Used as edge-trigger memory
    *  to fire press/release exactly once per hold cycle. */
   pressed: boolean
-  /** Keyed bindings only: whether the main key is currently held. Updated
-   *  on every keydown/keyup of the binding's keycode so we can recompute
-   *  the chord state on modifier-only events too (e.g. chord broken by
-   *  an early Ctrl-up). Irrelevant for modifier-only bindings. */
+  /** Whether the binding's main key is currently held. Updated on every
+   *  keydown/keyup of the binding's keycode so we can recompute the
+   *  chord state on modifier-only events too (e.g. chord broken by an
+   *  early Ctrl-up while the user is still holding the main key). */
   mainKeyDown: boolean
 }
 
@@ -413,14 +386,12 @@ class UiohookBridge {
     }
   }
 
-  /** Keep `mainKeyDown` in sync with physical state. No-op for modifier-only
-   *  bindings, since `binding.key` is null. */
+  /** Keep `mainKeyDown` in sync with physical state. */
   private updateMainKey(
     entry: BindingEntry,
     e: UiohookKeyboardEvent,
     isDown: boolean
   ): void {
-    if (entry.binding.key == null) return
     if (e.keycode === entry.binding.key) {
       entry.mainKeyDown = isDown
     }
@@ -431,12 +402,10 @@ class UiohookBridge {
    * event's modifier snapshot plus our tracked main-key state. Fire
    * onPress / onRelease on transitions only.
    *
-   * Keyed binding: inChord = modifiers match AND main key is held.
-   * Modifier-only binding: inChord = modifiers match.
-   *
-   * Strict modifier match: if the user binds Ctrl+F13, a stray Shift
-   * press breaks the chord. Keeps the hotkey feel predictable and avoids
-   * accidental triggers.
+   * `inChord` = modifiers match exactly AND the binding's main key is
+   * held. Strict modifier match: if the user binds Ctrl+F13, a stray
+   * Shift press breaks the chord. Keeps the hotkey feel predictable
+   * and avoids accidental triggers.
    */
   private recomputeChord(entry: BindingEntry, e: UiohookKeyboardEvent): void {
     const b = entry.binding
@@ -445,7 +414,7 @@ class UiohookBridge {
       b.alt === e.altKey &&
       b.shift === e.shiftKey &&
       b.meta === e.metaKey
-    const inChord = b.key == null ? modsOk : modsOk && entry.mainKeyDown
+    const inChord = modsOk && entry.mainKeyDown
     if (inChord && !entry.pressed) {
       entry.pressed = true
       try {

@@ -82,36 +82,56 @@ export function scheduleOrphanCleanup(): void {
 }
 
 /**
- * Windows-only: force-terminate the current process via `taskkill /F /PID`.
+ * Force-terminate the current process via the platform's "kill from
+ * a separate process" tool — bypasses every atexit hook, every
+ * stdio-pipe drain, every Electron / Chromium shutdown queue. The
+ * kernel honours the signal unconditionally and the process is gone
+ * by the time the spawnSync returns (if it returns at all).
  *
- * Observed in dev (see `%TEMP%\runwa-diag.log`): `app.exit(0)` fires the
- * `quit` event and then hangs — the main process stays alive while
- * Electron's (or electron-vite's) internal shutdown machinery waits on
- * something. `process.exit(0)` goes through Node's atexit hooks and
- * sometimes also doesn't complete in the wipe / autoUpdate timeframe.
- * `taskkill /F` goes straight to `TerminateProcess`, which the kernel
- * honours unconditionally — no hooks, no cleanup, no hang.
+ * Why we need this:
+ *  - On Windows: `app.exit(0)` fires the `quit` event then hangs —
+ *    Electron's internal shutdown waits on something the pipe-stdio
+ *    of `npm run dev` never unblocks. `taskkill /F` goes straight
+ *    to `TerminateProcess`.
+ *  - On macOS / Linux: same symptom from the other side. In dev
+ *    `electron-vite` pipes our stdio, and Electron 9+'s shutdown
+ *    sequence stalls on Chromium DLL teardown when stdio is piped
+ *    (electron/electron#27084). `process.exit(0)` runs `exit()`
+ *    which runs the same atexit hooks and hangs the same way.
+ *    `/bin/kill -9` from a separate /bin/kill process delivers
+ *    SIGKILL via the kernel — no hooks, no cleanup, no hang.
  *
  * Caller must NOT expect this function to return. If it does (e.g.
- * because we're on a non-Windows platform or taskkill spawn failed),
- * the caller should fall through to `process.exit(1)` as a last resort.
+ * because the spawnSync failed for some reason), the caller should
+ * fall through to `process.exit(1)` as a last resort.
  */
 export function forceKillSelf(): void {
-  if (process.platform !== 'win32') return
+  if (process.platform === 'win32') {
+    try {
+      // Just our PID — NOT `/T`. `taskkill /T` would kill our whole
+      // process tree, which on Windows includes the wipe-data helper
+      // (spawn's `detached: true` on Win doesn't reparent — the helper
+      // still shows as our child in the snapshot tree). Without the
+      // helper alive, there's no one to wipe + respawn. Chromium helper
+      // children orphan briefly after we die, but they self-terminate via
+      // IPC-disconnect within a couple hundred ms; the wipe helper's
+      // separately-issued cleanup step (see the helper script) mops up
+      // any stragglers before the new main is spawned.
+      spawnSync('taskkill', ['/F', '/PID', String(process.pid)], {
+        windowsHide: true,
+        timeout: 5000
+      })
+    } catch {
+      /* fall through to caller's fallback */
+    }
+    return
+  }
+  // macOS / Linux. `/bin/kill` is part of every base install (POSIX
+  // requires `kill` in `/usr/bin/kill` and macOS / most Linux distros
+  // also have `/bin/kill`). Using the absolute path side-steps any
+  // weirdness with the launcher's PATH in piped-stdio dev mode.
   try {
-    // Just our PID — NOT `/T`. `taskkill /T` would kill our whole
-    // process tree, which on Windows includes the wipe-data helper
-    // (spawn's `detached: true` on Win doesn't reparent — the helper
-    // still shows as our child in the snapshot tree). Without the
-    // helper alive, there's no one to wipe + respawn. Chromium helper
-    // children orphan briefly after we die, but they self-terminate via
-    // IPC-disconnect within a couple hundred ms; the wipe helper's
-    // separately-issued cleanup step (see the helper script) mops up
-    // any stragglers before the new main is spawned.
-    spawnSync('taskkill', ['/F', '/PID', String(process.pid)], {
-      windowsHide: true,
-      timeout: 5000
-    })
+    spawnSync('/bin/kill', ['-9', String(process.pid)], { timeout: 5000 })
   } catch {
     /* fall through to caller's fallback */
   }
