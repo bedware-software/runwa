@@ -66,15 +66,6 @@ pub struct RawEvent {
     /// and unqualified ones (`keys: [1]`). Platform layers populate this
     /// from the event's flag state (macOS) or `GetAsyncKeyState` (Windows).
     pub modifiers: ModifierMask,
-    /// True iff this is an OS-driven autorepeat KeyDown (the key was already
-    /// physically held and the kernel synthesised another KeyDown at the
-    /// system key-repeat rate). Used to gate the on_hold combo emit path:
-    /// a launcher chord like `to_hotkey: [ctrl, alt, cmd, w]` must NOT
-    /// re-fire 30 times/sec while the user keeps W held, but a nav-style
-    /// emit like `to_hotkey: [left]` should keep auto-repeating. macOS
-    /// reads this from `kCGKeyboardEventAutorepeat`; Windows passes
-    /// `false` (its low-level hook doesn't expose the bit cleanly).
-    pub is_autorepeat: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -643,23 +634,21 @@ mod tests {
             kind: EventKind::KeyDown,
             key: k,
             modifiers: ModifierMask::EMPTY,
-            is_autorepeat: false,
         }
     }
+    /// Stand-in for an OS-driven autorepeat KeyDown. The state
+    /// machine treats it identically to a fresh KeyDown (Comboing
+    /// suppresses any duplicate combo-key down; nav paths re-fire on
+    /// every KeyDown) so the alias is just naming-for-intent in test
+    /// bodies.
     fn down_autorepeat(k: LogicalKey) -> RawEvent {
-        RawEvent {
-            kind: EventKind::KeyDown,
-            key: k,
-            modifiers: ModifierMask::EMPTY,
-            is_autorepeat: true,
-        }
+        down(k)
     }
     fn up(k: LogicalKey) -> RawEvent {
         RawEvent {
             kind: EventKind::KeyUp,
             key: k,
             modifiers: ModifierMask::EMPTY,
-            is_autorepeat: false,
         }
     }
     fn down_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
@@ -667,7 +656,6 @@ mod tests {
             kind: EventKind::KeyDown,
             key: k,
             modifiers,
-            is_autorepeat: false,
         }
     }
     fn up_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
@@ -675,7 +663,6 @@ mod tests {
             kind: EventKind::KeyUp,
             key: k,
             modifiers,
-            is_autorepeat: false,
         }
     }
     fn alpha(c: char) -> LogicalKey {
@@ -1336,7 +1323,6 @@ space:
             kind: EventKind::KeyUp,
             key: LogicalKey::Space,
             modifiers: cmd,
-            is_autorepeat: false,
         };
         assert_eq!(m.on_event(space_up_with_cmd), Action::Forward);
     }

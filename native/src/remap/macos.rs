@@ -292,21 +292,10 @@ fn tap_callback(
 
     // Mirror the flag state into the logical ModifierMask so rule lookup
     // can distinguish `keys: [shift, 1]` from `keys: [1]`.
-    //
-    // Pull the OS autorepeat bit too. CGEvent's
-    // `kCGKeyboardEventAutorepeat` is 1 on KeyDowns the kernel
-    // synthesised for held keys, 0 on the original physical press.
-    // The state machine uses it to gate on_hold combo emissions —
-    // launcher chords (`to_hotkey: [ctrl, alt, cmd, w]`) fire ONCE
-    // per physical press, nav-style emits (`to_hotkey: [left]`)
-    // keep auto-repeating.
-    let is_autorepeat = matches!(kind, EventKind::KeyDown)
-        && event.get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT) != 0;
     let raw = RawEvent {
         kind,
         key,
         modifiers: modifier_mask_from_flags(event_flags),
-        is_autorepeat,
     };
     let action = {
         let mut guard = SM_SLOT.lock();
