@@ -143,7 +143,17 @@ impl Action {
 enum State {
     Idle,
     /// Trigger is physically down, nothing else has been seen yet.
-    Pending { trigger: LogicalKey },
+    /// `suppress_tap` is set when the trigger was pressed while an
+    /// external modifier was already held AND the trigger's on_hold
+    /// is `TransparentModifier`. In that case the user's intent is
+    /// to combine modifiers for a chord (e.g. Shift held, then
+    /// CapsLock-as-Ctrl → user wants Ctrl+Shift+<next>), not to
+    /// emit the trigger's on_tap. If the user releases the trigger
+    /// without an interruption, we still want to swallow the press
+    /// silently rather than fire the tap (e.g. CapsLock's on_tap is
+    /// Escape — Shift+CapsLock by itself shouldn't ghost-emit
+    /// Shift+Escape).
+    Pending { trigger: LogicalKey, suppress_tap: bool },
     /// Trigger is held and we've processed at least one other key. `held`
     /// tracks the modifier we've injected a down-for but haven't released
     /// yet (we emit the matching up on trigger release). `None` means no
@@ -194,13 +204,27 @@ impl StateMachine {
         // Shift+Home. Modifiers DO act as triggers themselves, but only
         // when they're pressed from Idle — once another trigger has the
         // layer, modifiers are transparent.
+        //
+        // Subtle: when we're in `Modifying { held: Some(m) }` — i.e.
+        // an active fallback-modifier or transparent-modifier layer
+        // is asserting `m` (typically Cmd, e.g. Space+Tab keeping the
+        // macOS app switcher open) — the real modifier event must
+        // carry our held flag forward, otherwise macOS' modifier-
+        // state reconciliation on the real event can drop the synth-
+        // asserted bit and close the switcher / break the chord
+        // (user-visible as "pressing Shift while in Space+Tab kills
+        // app-switching"). We forward the event WITH the held flag
+        // stamped so macOS sees the combined state.
         let is_current_trigger = match self.state {
-            State::Pending { trigger }
+            State::Pending { trigger, .. }
             | State::Modifying { trigger, .. }
             | State::Comboing { trigger, .. } => trigger == ev.key,
             State::Idle => false,
         };
         if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
+            if let State::Modifying { held: Some(m), .. } = self.state {
+                return Action::ForwardWithModifier(m);
+            }
             return Action::Forward;
         }
 
@@ -257,31 +281,77 @@ impl StateMachine {
             // -----------------------------------------------------------
 
             // Idle + trigger-down: enter Pending — UNLESS an external
-            // (non-self) modifier is already held, in which case the user
-            // is reaching for an OS-level chord (Cmd+Space → Spotlight,
-            // Cmd+Tab → app switcher, Shift+Tab → reverse focus, Win+L,
-            // Alt+Space, …). Forward the keydown so the chord reaches
-            // the OS / app instead of being swallowed into our trigger
-            // layer. Pre-emption of an already-Pending modifier trigger
-            // (Shift-then-Space-then-N) is handled by the dedicated arm
-            // below; that path runs from Pending, not Idle, so this
-            // guard doesn't interfere with it.
-            (State::Idle, EventKind::KeyDown, Some(t), Some(_)) => {
+            // (non-self) modifier is already held AND the trigger's
+            // hold layer is a regular Explicit layer, in which case
+            // the user is reaching for an OS-level chord (Cmd+Space →
+            // Spotlight, Cmd+Tab → app switcher, Shift+Tab → reverse
+            // focus, Win+L, Alt+Space, …). Forward the keydown so the
+            // chord reaches the OS / app instead of being swallowed
+            // into our trigger layer.
+            //
+            // Transparent-modifier triggers (CapsLock → Ctrl,
+            // Shift → Shift, …) take a different path: with an
+            // external modifier held the user's intent is to stack
+            // modifiers (e.g. Shift held + CapsLock = "Ctrl+Shift+
+            // next key"), not invoke an OS chord — CapsLock+Shift
+            // isn't a real OS shortcut. Enter Pending but stamp
+            // `suppress_tap` so a release-without-interruption
+            // doesn't ghost-emit the on_tap (CapsLock's on_tap is
+            // Escape — Shift+CapsLock alone shouldn't fire
+            // Shift+Escape).
+            //
+            // Pre-emption of an already-Pending modifier trigger
+            // (Shift-then-Space-then-N) is handled by the dedicated
+            // arm below; that path runs from Pending, not Idle, so
+            // this guard doesn't interfere with it.
+            (State::Idle, EventKind::KeyDown, Some(t), Some(b)) => {
                 let mut external = ev.modifiers;
                 if let Some(self_mod) = key_self_modifier(t) {
                     external.remove(self_mod);
                 }
                 if !external.is_empty() {
-                    Action::Forward
+                    // Two sub-cases when an external modifier is held.
+                    //
+                    // (a) Non-modifier trigger whose on_hold is
+                    //     TransparentModifier — e.g. CapsLock-as-Ctrl.
+                    //     CapsLock+Shift isn't a real OS shortcut, the
+                    //     user's intent is to stack Ctrl on top of the
+                    //     held Shift for "Ctrl+Shift+<next>". Enter
+                    //     Pending with `suppress_tap=true` so a release-
+                    //     without-interruption doesn't ghost-fire
+                    //     CapsLock's on_tap (Escape) as Shift+Escape.
+                    //
+                    // (b) Anything else — forward the keydown so the OS
+                    //     gets the chord (Cmd+Space → Spotlight,
+                    //     Cmd+Tab → app switcher, Cmd+Shift+R, etc.).
+                    //     Note that real modifier-key triggers
+                    //     (Shift-as-trigger) fall into this bucket
+                    //     deliberately: when the user holds Cmd and
+                    //     taps Shift, we must NOT consume Shift —
+                    //     they're reaching for Cmd+Shift+X.
+                    if !t.is_modifier()
+                        && matches!(b.on_hold, ResolvedHold::TransparentModifier(_))
+                    {
+                        self.state = State::Pending {
+                            trigger: t,
+                            suppress_tap: true,
+                        };
+                        Action::Suppress
+                    } else {
+                        Action::Forward
+                    }
                 } else {
-                    self.state = State::Pending { trigger: t };
+                    self.state = State::Pending {
+                        trigger: t,
+                        suppress_tap: false,
+                    };
                     Action::Suppress
                 }
             }
 
             // Autorepeat trigger-down on the CURRENT trigger: suppress.
             (
-                State::Pending { trigger: ts } | State::Modifying { trigger: ts, .. },
+                State::Pending { trigger: ts, .. } | State::Modifying { trigger: ts, .. },
                 EventKind::KeyDown,
                 Some(te),
                 _,
@@ -292,9 +362,21 @@ impl StateMachine {
             // the synthesized events with flags=0 rather than inheriting
             // the trigger-up event's flag state — which can include stale
             // synthetic-modifier flags and make e.g. Esc arrive as
-            // Ctrl+Esc in Zed.
-            (State::Pending { trigger: ts }, EventKind::KeyUp, Some(te), Some(b)) if ts == te => {
+            // Ctrl+Esc in Zed. `suppress_tap` (set when the trigger
+            // entered Pending under a held external modifier on a
+            // transparent-modifier layer) gates the on_tap emission so
+            // CapsLock-as-Ctrl can be combined with Shift without
+            // ghost-emitting Escape.
+            (
+                State::Pending { trigger: ts, suppress_tap },
+                EventKind::KeyUp,
+                Some(te),
+                Some(b),
+            ) if ts == te => {
                 self.state = State::Idle;
+                if suppress_tap {
+                    return Action::Suppress;
+                }
                 match &b.on_tap {
                     Some(events) => Action::emit_tap(events.iter().copied()),
                     None => Action::Suppress,
@@ -337,13 +419,21 @@ impl StateMachine {
             // weirdness reported users see, after which Shift is still
             // held and a second press lands at Idle and forwards
             // correctly).
-            (State::Pending { trigger: ts }, EventKind::KeyDown, Some(te), Some(b))
+            (State::Pending { trigger: ts, .. }, EventKind::KeyDown, Some(te), Some(b))
                 if ts != te
                     && ts.is_modifier()
                     && !te.is_modifier()
-                    && key_self_modifier(ts).is_some_and(|m| b.uses_modifier(m)) =>
+                    && (key_self_modifier(ts).is_some_and(|m| b.uses_modifier(m))
+                        || matches!(b.on_hold, ResolvedHold::TransparentModifier(_))) =>
             {
-                self.state = State::Pending { trigger: te };
+                // Stamp `suppress_tap` so the preempted trigger doesn't
+                // ghost-fire its on_tap if the user releases it without
+                // pressing anything else (Shift held + tap CapsLock-as-Ctrl
+                // shouldn't emit CapsLock's Escape into the app).
+                self.state = State::Pending {
+                    trigger: te,
+                    suppress_tap: true,
+                };
                 Action::Suppress
             }
 
@@ -360,7 +450,7 @@ impl StateMachine {
             // In Pending, a key-down for anything that isn't the current
             // trigger = interruption. Dispatch according to the current
             // binding's on_hold mode.
-            (State::Pending { trigger }, EventKind::KeyDown, _, _) => {
+            (State::Pending { trigger, .. }, EventKind::KeyDown, _, _) => {
                 let Some(binding) = self.rules.triggers.get(&trigger).cloned() else {
                     // Shouldn't happen — we only enter Pending when the
                     // binding exists. Defensive fallback.
@@ -575,6 +665,14 @@ mod tests {
     fn down_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
         RawEvent {
             kind: EventKind::KeyDown,
+            key: k,
+            modifiers,
+            is_autorepeat: false,
+        }
+    }
+    fn up_with_mods(k: LogicalKey, modifiers: ModifierMask) -> RawEvent {
+        RawEvent {
+            kind: EventKind::KeyUp,
             key: k,
             modifiers,
             is_autorepeat: false,
@@ -934,6 +1032,33 @@ space:
         );
         assert_eq!(
             m.on_event(up(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        // User reaches for Shift to do Cmd+Shift+Tab (previous app).
+        // Without the modifier-passthrough's `held` stamp, a real
+        // Shift FlagsChanged event would let macOS reconcile its
+        // modifier state against real hardware and drop the
+        // synth-asserted Cmd bit — the switcher would close as if
+        // the user had let go of Cmd. Stamping our held modifier on
+        // the forwarded event keeps Cmd in the OS-visible flag set.
+        assert_eq!(
+            m.on_event(down(LogicalKey::Shift)),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        // Now Cmd+Shift+Tab: Tab forwarded with Cmd stamped + Shift
+        // bit from the still-held physical Shift → app switcher
+        // sees Cmd+Shift+Tab, goes BACKWARDS one slot.
+        assert_eq!(
+            m.on_event(down(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        assert_eq!(
+            m.on_event(up(named(NamedKey::Tab))),
+            Action::ForwardWithModifier(Modifier::Cmd)
+        );
+        // Shift released — same stamping rule keeps Cmd alive.
+        assert_eq!(
+            m.on_event(up(LogicalKey::Shift)),
             Action::ForwardWithModifier(Modifier::Cmd)
         );
         // Releasing Space emits ModifierUp(Cmd) — closes the switcher,
@@ -1579,6 +1704,131 @@ space:
                 SyntheticEvent::ModifierUp(Modifier::Alt),
                 SyntheticEvent::ModifierUp(Modifier::Ctrl),
             ])
+        );
+    }
+
+    // Regression: user reported that with Runwa running, Warp's
+    // Ctrl+Shift+R (history palette) worked only if Ctrl came first.
+    // Shift first → CapsLock-as-Ctrl → R chained Shift+R, NOT
+    // Ctrl+Shift+R. Cause: the Idle-trigger-down guard forwarded
+    // CapsLock when an external modifier was held, treating it as
+    // an OS-chord attempt — but CapsLock+anything isn't an OS chord.
+    // Fix relaxes the guard for non-modifier triggers whose on_hold
+    // is TransparentModifier, while also stamping `suppress_tap`
+    // so the modifier-stack case doesn't ghost-emit on_tap.
+    #[test]
+    fn capslock_as_ctrl_stacks_with_held_shift() {
+        let yaml = r#"
+capslock:
+  on_tap: [escape]
+  on_hold: [ctrl]
+"#;
+        let mut m = sm(yaml);
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        // Shift held when CapsLock comes down: enter Pending (not
+        // Forward) so the Ctrl layer can fire on the next key.
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::CapsLock, shift)),
+            Action::Suppress
+        );
+        // R press while CapsLock is pending: TransparentModifier(Ctrl)
+        // path emits ModifierDown(Ctrl) and forwards R with the Ctrl
+        // flag stamped. Combined with the held Shift, the app sees
+        // Ctrl+Shift+R.
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('R'), shift)),
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
+                Modifier::Ctrl,
+            )
+        );
+        // CapsLock-up emits ModifierUp(Ctrl), returns to Idle.
+        assert_eq!(
+            m.on_event(up_with_mods(LogicalKey::CapsLock, shift)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
+        );
+    }
+
+    // Same Ctrl+Shift+R intent, but Shift is ALSO configured as a
+    // trigger in the user's yaml (`shift: on_tap: …`). The original
+    // path: Shift down enters Pending(Shift) and suppresses the
+    // physical KeyDown. CapsLock then arrives as an INTERRUPTION
+    // of Shift's layer, not as a fresh trigger — so the Idle-arm
+    // relaxation doesn't kick in. The fix widens the preempt arm
+    // to fire when the new trigger's on_hold is a
+    // TransparentModifier (CapsLock-as-Ctrl), so state hands off
+    // from Pending(Shift) to Pending(CapsLock) and R goes through
+    // CapsLock's Ctrl layer.
+    #[test]
+    fn shift_trigger_then_capslock_preempts_to_capslock_layer() {
+        let yaml = r#"
+shift:
+  on_tap: [ctrl, alt, cmd, a]
+capslock:
+  on_tap: [escape]
+  on_hold: [ctrl]
+"#;
+        let mut m = sm(yaml);
+        // Shift physical KeyDown — own self-flag is set on the event.
+        let mut shift_self = ModifierMask::EMPTY;
+        shift_self.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::Shift, shift_self)),
+            Action::Suppress
+        );
+        // CapsLock physical KeyDown while Shift is held — preempt to
+        // CapsLock's layer instead of treating CapsLock as a shifted
+        // interruption of Shift's layer.
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::CapsLock, shift_self)),
+            Action::Suppress
+        );
+        // R arrives, still with Shift physically held. CapsLock's
+        // TransparentModifier(Ctrl) fires — emit ModifierDown(Ctrl),
+        // forward R with the Ctrl flag stamped. Combined with the
+        // physically-held Shift, the receiving app sees Ctrl+Shift+R.
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('R'), shift_self)),
+            Action::EmitThenForwardWithModifier(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
+                Modifier::Ctrl,
+            )
+        );
+        // Tear down: R-up → ForwardWithModifier(Ctrl).
+        assert_eq!(
+            m.on_event(up_with_mods(alpha('R'), shift_self)),
+            Action::ForwardWithModifier(Modifier::Ctrl)
+        );
+        // CapsLock-up emits ModifierUp(Ctrl), back to Idle.
+        assert_eq!(
+            m.on_event(up_with_mods(LogicalKey::CapsLock, shift_self)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
+        );
+    }
+
+    // Companion: if the user releases CapsLock WITHOUT pressing
+    // anything else (so the Ctrl layer never had a chance to fire),
+    // we must NOT emit CapsLock's on_tap (Escape) — that would
+    // chord with the held Shift and the app would see Shift+Escape.
+    #[test]
+    fn capslock_tap_with_held_shift_suppresses_escape() {
+        let yaml = r#"
+capslock:
+  on_tap: [escape]
+  on_hold: [ctrl]
+"#;
+        let mut m = sm(yaml);
+        let mut shift = ModifierMask::EMPTY;
+        shift.insert(Modifier::Shift);
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::CapsLock, shift)),
+            Action::Suppress
+        );
+        // CapsLock-up without an interrupting key: suppress the tap.
+        assert_eq!(
+            m.on_event(up_with_mods(LogicalKey::CapsLock, shift)),
+            Action::Suppress
         );
     }
 }
