@@ -12,11 +12,27 @@ import path from 'path'
  * bundle — no separate HTML entry point.
  */
 
-export type IndicatorState = 'hidden' | 'recording' | 'transcribing'
+export type IndicatorState =
+  | 'hidden'
+  | 'recording'
+  | 'transcribing'
+  /** Hotstrings module: replacement is on the clipboard but secure
+   * input is locking the focused field (NSSecureTextField — password,
+   * sudo, screensaver). We didn't try to type it; surface a hint
+   * telling the user to Cmd+V manually. The window owns its own
+   * auto-hide timer — see `setState`. */
+  | 'manual-paste'
 
 const WIDTH = 180
 const HEIGHT = 44
 const BOTTOM_MARGIN = 56
+
+/** How long the `manual-paste` hint stays on screen before it
+ * self-hides. The hotstrings module that surfaces this state has no
+ * follow-up event to call `setState('hidden')` — once the user has
+ * seen the hint, the toast needs to go away on its own. ~4 seconds
+ * is long enough to register without overstaying. */
+const MANUAL_PASTE_HIDE_DELAY_MS = 4000
 
 class IndicatorWindow {
   private window: BrowserWindow | null = null
@@ -24,6 +40,7 @@ class IndicatorWindow {
   private pendingState: IndicatorState = 'hidden'
   private currentState: IndicatorState = 'hidden'
   private ipcWired = false
+  private manualPasteTimer: NodeJS.Timeout | null = null
 
   init(): void {
     if (this.window && !this.window.isDestroyed()) return
@@ -97,10 +114,28 @@ class IndicatorWindow {
   }
 
   setState(state: IndicatorState): void {
+    // Cancel any in-flight auto-hide so a fresh state (groq recording
+    // starting up, another hotstring firing) doesn't get hidden by
+    // the previous toast's timer.
+    if (this.manualPasteTimer) {
+      clearTimeout(this.manualPasteTimer)
+      this.manualPasteTimer = null
+    }
     this.pendingState = state
     this.init()
     if (this.ready) {
       this.applyState(state)
+    }
+    if (state === 'manual-paste') {
+      this.manualPasteTimer = setTimeout(() => {
+        this.manualPasteTimer = null
+        // Only auto-hide if we're still showing the manual-paste hint
+        // — if something else (groq recording, another hotstring)
+        // grabbed the indicator since, leave it alone.
+        if (this.currentState === 'manual-paste') {
+          this.setState('hidden')
+        }
+      }, MANUAL_PASTE_HIDE_DELAY_MS)
     }
   }
 
@@ -134,6 +169,10 @@ class IndicatorWindow {
   }
 
   dispose(): void {
+    if (this.manualPasteTimer) {
+      clearTimeout(this.manualPasteTimer)
+      this.manualPasteTimer = null
+    }
     if (this.window && !this.window.isDestroyed()) {
       this.window.destroy()
     }

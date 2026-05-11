@@ -4,6 +4,7 @@ import {
   simulatePaste,
   uiohookBridge
 } from '../groq-stt/uiohook-bridge'
+import { indicatorWindow } from '../groq-stt/indicator-window'
 import { keycodeToChar } from './keymap'
 import {
   parseHotstringRules,
@@ -22,9 +23,14 @@ import {
  *      reset the buffer so a pending trigger can't span unrelated edits.
  *   4. After each character lands, check whether the buffer's tail matches
  *      any configured trigger. On match, fire the replacement: synthesise
- *      N backspaces to erase the trigger, stash the replacement text in
- *      the clipboard, send Ctrl+V (or Cmd+V on macOS), and restore the
- *      previous clipboard value once the paste has had time to land.
+ *      N backspaces to erase the trigger, then either:
+ *        - paste mode (`->`): stash the replacement in the clipboard and
+ *          send Cmd+V (or Ctrl+V on non-macOS), restoring the previous
+ *          clipboard once the paste has had time to land.
+ *        - clipboard mode (`=>`): stash the replacement and show a
+ *          "Press ⌘V to paste" indicator. The user pastes manually
+ *          somewhere else — typical use case is "type trigger in a
+ *          normal field, then paste into a password field".
  *
  * The replacement path is clipboard-based rather than synthesising each
  * character, because `uiohook-napi.keyTap` requires a reverse char→keycode
@@ -41,6 +47,11 @@ import {
 const BUFFER_LIMIT = 64
 const CLIPBOARD_RESTORE_DELAY_MS = 120
 const REPLACEMENT_QUIET_WINDOW_MS = 150
+/** Clipboard-mode rules wait for the user to ⌘V manually somewhere else,
+ *  so the staged replacement has to survive long enough for them to switch
+ *  focus and paste. The indicator's own auto-hide is 4s; match it loosely
+ *  so the clipboard stays live for at least as long as the visible hint. */
+const CLIPBOARD_MODE_HOLD_MS = 8000
 
 class HotstringService {
   private rules: HotstringRule[] = []
@@ -183,18 +194,33 @@ class HotstringService {
     this.buffer = ''
 
     const saved = safeReadClipboard()
+
     try {
-      // Erase the trigger characters the user just typed.
+      // Erase the trigger characters the user just typed. Done in both
+      // modes — clipboard mode still wants the trigger gone from the
+      // field where it was typed.
       uiohookBridge.simulateBackspaces(rule.trigger.length)
       clipboard.writeText(rule.replacement)
-      if (!simulatePaste()) {
-        // Paste failed — restore the clipboard immediately so the user
-        // doesn't lose their previous clipboard contents for nothing.
-        restoreClipboard(saved)
-        return
-      }
     } catch (err) {
       console.warn('[hotstrings] replacement failed:', err)
+      restoreClipboard(saved)
+      return
+    }
+
+    if (rule.clipboardOnly) {
+      // Clipboard mode: don't synthesise Cmd+V. The user will paste
+      // manually — usually in a different field (e.g. a password field
+      // that drops synth keystrokes). Show the indicator so they know
+      // the clipboard is now armed, and hold the clipboard contents
+      // long enough for them to switch focus and ⌘V.
+      indicatorWindow.setState('manual-paste')
+      setTimeout(() => restoreClipboard(saved), CLIPBOARD_MODE_HOLD_MS)
+      return
+    }
+
+    if (!simulatePaste()) {
+      // Paste failed — restore the clipboard immediately so the user
+      // doesn't lose their previous clipboard contents for nothing.
       restoreClipboard(saved)
       return
     }

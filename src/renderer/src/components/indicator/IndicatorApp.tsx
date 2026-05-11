@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Mic, Loader2 } from 'lucide-react'
+import { Mic, Loader2, Clipboard } from 'lucide-react'
 
-type IndicatorState = 'hidden' | 'recording' | 'transcribing'
+type IndicatorState = 'hidden' | 'recording' | 'transcribing' | 'manual-paste'
 
 /**
  * Bottom-of-screen pill that shows Groq transcription state. Driven over
@@ -27,13 +27,23 @@ export function IndicatorApp() {
   return (
     <div className="fixed inset-0 flex items-end justify-center pointer-events-none">
       <div className="flex items-center gap-2.5 px-4 h-9 rounded-full bg-zinc-900/90 backdrop-blur-md shadow-lg border border-white/10 text-zinc-100 text-xs font-medium select-none">
-        {state === 'recording' ? <RecordingIcon /> : <TranscribingIcon />}
-        <span className="tracking-tight">
-          {state === 'recording' ? 'Listening…' : 'Transcribing…'}
-        </span>
+        {renderIcon(state)}
+        <span className="tracking-tight">{renderLabel(state)}</span>
       </div>
     </div>
   )
+}
+
+function renderIcon(state: Exclude<IndicatorState, 'hidden'>) {
+  if (state === 'recording') return <RecordingIcon />
+  if (state === 'transcribing') return <TranscribingIcon />
+  return <ManualPasteIcon />
+}
+
+function renderLabel(state: Exclude<IndicatorState, 'hidden'>) {
+  if (state === 'recording') return 'Listening…'
+  if (state === 'transcribing') return 'Transcribing…'
+  return 'Press ⌘V to paste'
 }
 
 function RecordingIcon() {
@@ -47,4 +57,8 @@ function RecordingIcon() {
 
 function TranscribingIcon() {
   return <Loader2 size={14} className="text-zinc-300 animate-spin" />
+}
+
+function ManualPasteIcon() {
+  return <Clipboard size={14} className="text-amber-300" />
 }
