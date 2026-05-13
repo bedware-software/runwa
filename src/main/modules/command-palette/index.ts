@@ -1,4 +1,4 @@
-import type { ModuleManifest, PaletteItem } from '@shared/types'
+import type { ModuleId, ModuleManifest, PaletteItem, SettingsTabId } from '@shared/types'
 import type { PaletteModule } from '../types'
 import { paletteWindow } from '../../palette-window'
 import { settingsWindow } from '../../settings-window'
@@ -6,8 +6,10 @@ import { simulateWindowCommand, type WindowCommand } from './keystrokes'
 
 /**
  * Command Palette — system commands exposed as palette entries. Ships
- * window-management commands (Maximize, Minimize, Restore) plus a
- * built-in "Open Settings" entry under the Settings group.
+ * window-management commands (Maximize, Minimize, Restore), a built-in
+ * "Open Settings" entry under the Settings group, and one
+ * "Open <Module> Settings" deep-link per registered module under the
+ * "Module Settings" group.
  *
  * Execution flow is different from other search modules: for the
  * keystroke-driven window commands we actively restore focus to the
@@ -25,7 +27,24 @@ import { simulateWindowCommand, type WindowCommand } from './keystrokes'
 
 type CommandKind =
   | { kind: 'window'; command: WindowCommand }
-  | { kind: 'open-settings' }
+  | { kind: 'open-settings'; tab?: SettingsTabId }
+
+/**
+ * Identity of a module the Command Palette will surface as a deep-link
+ * "Open <Module> Settings" entry. Caller passes the list at registration
+ * time (from the other registered manifests); the factory generates one
+ * command per entry and prepends a self entry for the Command Palette
+ * itself.
+ */
+export interface ModuleSettingsTarget {
+  id: ModuleId
+  name: string
+  icon: string
+}
+
+const MODULE_ID = 'command-palette'
+const MODULE_NAME = 'Command Palette'
+const MODULE_ICON = 'command'
 
 interface CommandDef {
   /** Stable id used in the PaletteItem id + action payload. */
@@ -55,7 +74,7 @@ interface CommandDef {
   configDescription: string
 }
 
-const COMMANDS: CommandDef[] = [
+const STATIC_COMMANDS: CommandDef[] = [
   {
     id: 'open-settings',
     title: 'Open Settings',
@@ -108,41 +127,6 @@ const COMMANDS: CommandDef[] = [
   }
 ]
 
-/**
- * Default aliases shipped with the module. Keyed by the same stable id
- * the search builder stamps onto each PaletteItem (`cmd:<id>`) so the
- * registry can drop them straight into the per-module aliases map.
- */
-const DEFAULT_ALIASES: Record<string, string> = (() => {
-  const out: Record<string, string> = {}
-  for (const c of COMMANDS) {
-    if (c.defaultAlias) out[`cmd:${c.id}`] = c.defaultAlias
-  }
-  return out
-})()
-
-const MANIFEST: ModuleManifest = {
-  id: 'command-palette',
-  name: 'Command Palette',
-  icon: 'command',
-  kind: 'search',
-  description:
-    'System commands you can run from the palette. Ships an "Open Settings" entry plus window-management commands (Maximize, Minimize, Restore); each command is toggleable below except the built-in Settings entry.',
-  defaultEnabled: true,
-  supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
-  configFields: COMMANDS.map((c) => ({
-    key: c.configKey,
-    type: 'checkbox' as const,
-    label: c.title,
-    description: c.configDescription,
-    defaultValue: c.defaultEnabled,
-    group: c.group,
-    ...(c.readOnly ? { readOnly: true } : {})
-  })),
-  defaultAliases: DEFAULT_ALIASES
-}
-
 interface WindowCommandAction {
   kind: 'window'
   command: WindowCommand
@@ -150,6 +134,7 @@ interface WindowCommandAction {
 
 interface OpenSettingsAction {
   kind: 'open-settings'
+  tab?: SettingsTabId
 }
 
 type ActionPayload = WindowCommandAction | OpenSettingsAction
@@ -160,10 +145,69 @@ function isActionPayload(a: unknown): a is ActionPayload {
   if (k === 'window') {
     return typeof (a as { command?: unknown }).command === 'string'
   }
-  return k === 'open-settings'
+  if (k === 'open-settings') {
+    const tab = (a as { tab?: unknown }).tab
+    return tab === undefined || typeof tab === 'string'
+  }
+  return false
 }
 
-export function createCommandPaletteModule(): PaletteModule {
+export function createCommandPaletteModule(
+  otherModules: readonly ModuleSettingsTarget[] = []
+): PaletteModule {
+  // Build the per-module settings deep-link commands. Self is prepended
+  // so "Open Command Palette Settings" sits alongside the other modules;
+  // filtering any duplicate keeps the caller from accidentally injecting
+  // it twice when iterating over the full registry.
+  const settingsTargets: ModuleSettingsTarget[] = [
+    { id: MODULE_ID, name: MODULE_NAME, icon: MODULE_ICON },
+    ...otherModules.filter((m) => m.id !== MODULE_ID)
+  ]
+
+  const dynamicCommands: CommandDef[] = settingsTargets.map((m) => ({
+    id: `open-settings-${m.id}`,
+    title: `Open ${m.name} Settings`,
+    icon: m.icon,
+    subtitle: `Jump straight to the ${m.name} settings tab.`,
+    group: 'Module Settings',
+    configKey: `enableOpenSettings_${m.id}`,
+    defaultEnabled: true,
+    action: { kind: 'open-settings', tab: `module:${m.id}` as SettingsTabId },
+    configDescription: `Open the settings window deep-linked to the ${m.name} tab.`
+  }))
+
+  const COMMANDS: CommandDef[] = [...STATIC_COMMANDS, ...dynamicCommands]
+
+  // Default aliases shipped with the module. Keyed by the same stable id
+  // the search builder stamps onto each PaletteItem (`cmd:<id>`) so the
+  // registry can drop them straight into the per-module aliases map.
+  const DEFAULT_ALIASES: Record<string, string> = {}
+  for (const c of COMMANDS) {
+    if (c.defaultAlias) DEFAULT_ALIASES[`cmd:${c.id}`] = c.defaultAlias
+  }
+
+  const MANIFEST: ModuleManifest = {
+    id: MODULE_ID,
+    name: MODULE_NAME,
+    icon: MODULE_ICON,
+    kind: 'search',
+    description:
+      'System commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. Each command is toggleable below except the built-in Settings entry.',
+    defaultEnabled: true,
+    supportsDirectLaunch: true,
+    defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
+    configFields: COMMANDS.map((c) => ({
+      key: c.configKey,
+      type: 'checkbox' as const,
+      label: c.title,
+      description: c.configDescription,
+      defaultValue: c.defaultEnabled,
+      group: c.group,
+      ...(c.readOnly ? { readOnly: true } : {})
+    })),
+    defaultAliases: DEFAULT_ALIASES
+  }
+
   return {
     manifest: MANIFEST,
 
@@ -217,7 +261,10 @@ export function createCommandPaletteModule(): PaletteModule {
             c.action.kind === 'open-settings' ? 'open-settings' : 'window-command',
           action:
             c.action.kind === 'open-settings'
-              ? ({ kind: 'open-settings' } satisfies OpenSettingsAction)
+              ? ({
+                  kind: 'open-settings',
+                  ...(c.action.tab ? { tab: c.action.tab } : {})
+                } satisfies OpenSettingsAction)
               : ({
                   kind: 'window',
                   command: c.action.command
@@ -247,7 +294,10 @@ export function createCommandPaletteModule(): PaletteModule {
                 : 'window-command',
             action:
               c.action.kind === 'open-settings'
-                ? ({ kind: 'open-settings' } satisfies OpenSettingsAction)
+                ? ({
+                    kind: 'open-settings',
+                    ...(c.action.tab ? { tab: c.action.tab } : {})
+                  } satisfies OpenSettingsAction)
                 : ({
                     kind: 'window',
                     command: c.action.command
@@ -268,9 +318,11 @@ export function createCommandPaletteModule(): PaletteModule {
 
       if (item.action.kind === 'open-settings') {
         // Open Settings: hide the palette without restoring focus to the
-        // previous window — settings is what should land in front.
+        // previous window — settings is what should land in front. The
+        // optional `tab` deep-links into a specific module's panel for the
+        // dynamic "Open <Module> Settings" entries.
         paletteWindow.hide()
-        settingsWindow.open()
+        settingsWindow.open(item.action.tab)
         return { dismissPalette: false }
       }
 

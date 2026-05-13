@@ -19,12 +19,38 @@ import { createFlashcardsModule } from './flashcards'
  * at the bottom.
  */
 export async function registerModules(): Promise<void> {
-  moduleRegistry.register(createAppSearchModule())
-  moduleRegistry.register(createWindowSwitcherModule())
-  moduleRegistry.register(createCommandPaletteModule())
-  moduleRegistry.register(createFlashcardsModule())
-  moduleRegistry.register(createKeyboardRemapModule())
-  moduleRegistry.register(createHotstringsModule())
-  moduleRegistry.register(createGroqSttModule())
+  // Instantiate the non-command-palette modules first so we can harvest
+  // their manifest identity (id, name, icon) for the Command Palette's
+  // per-module "Open <Module> Settings" deep-link commands. The palette
+  // adds itself to that list inside its factory.
+  const appSearch = createAppSearchModule()
+  const windowSwitcher = createWindowSwitcherModule()
+  const flashcards = createFlashcardsModule()
+  const keyboardRemap = createKeyboardRemapModule()
+  const hotstrings = createHotstringsModule()
+  const groqStt = createGroqSttModule()
+
+  const otherModules = [
+    appSearch,
+    windowSwitcher,
+    flashcards,
+    keyboardRemap,
+    hotstrings,
+    groqStt
+  ].map((m) => ({
+    id: m.manifest.id,
+    name: m.manifest.name,
+    icon: m.manifest.icon
+  }))
+
+  const commandPalette = createCommandPaletteModule(otherModules)
+
+  moduleRegistry.register(appSearch)
+  moduleRegistry.register(windowSwitcher)
+  moduleRegistry.register(commandPalette)
+  moduleRegistry.register(flashcards)
+  moduleRegistry.register(keyboardRemap)
+  moduleRegistry.register(hotstrings)
+  moduleRegistry.register(groqStt)
   // Future: files, calculator, clipboard, web search, …
 }
