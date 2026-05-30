@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pencil, RefreshCw } from 'lucide-react'
+import { Pencil, RefreshCw } from '@/lib/lucide-icons'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { Hotkey } from '../ui/Kbd'

@@ -1,7 +1,11 @@
-import { Info, SlidersHorizontal } from 'lucide-react'
-import * as Icons from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
+import {
+  Info,
+  lucideIconFromHint,
+  Package,
+  SlidersHorizontal
+} from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
 import type { ModuleMeta, SettingsTabId } from '@shared/types'
 
@@ -31,13 +35,7 @@ interface Props {
 }
 
 function iconFromHint(hint: string | undefined): LucideIcon {
-  if (!hint) return Icons.Package
-  const name = hint
-    .split('-')
-    .map((s) => (s[0] ?? '').toUpperCase() + s.slice(1))
-    .join('')
-  const lookup = Icons as unknown as Record<string, LucideIcon>
-  return lookup[name] ?? Icons.Package
+  return lucideIconFromHint(hint, Package)
 }
 
 export function Sidebar({ current, onChange }: Props) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Mic, Loader2, Clipboard } from 'lucide-react'
+import { Clipboard, Loader2, Mic } from '@/lib/lucide-icons'
 
 type IndicatorState = 'hidden' | 'recording' | 'transcribing' | 'manual-paste'
 

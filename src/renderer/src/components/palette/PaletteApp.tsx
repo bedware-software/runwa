@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowUpDown, CornerDownLeft } from 'lucide-react'
+import { ArrowUpDown, CornerDownLeft } from '@/lib/lucide-icons'
 import { usePaletteStore } from '@/store/palette-store'
 import { useSettingsStore } from '@/store/settings-store'
 import { SearchInput } from './SearchInput'

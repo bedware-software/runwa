@@ -1,5 +1,11 @@
 import { useMemo } from 'react'
-import { CheckCircle2, XCircle, Circle, AlertTriangle, Hash } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Circle,
+  Hash,
+  XCircle
+} from '@/lib/lucide-icons'
 import type { FlashcardCard } from '@shared/types'
 import { cn } from '@/lib/utils'
 import type { QuizSession } from '@/store/palette-store'

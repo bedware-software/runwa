@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, Clock, GraduationCap } from 'lucide-react'
+import { CheckCircle2, Clock, GraduationCap, XCircle } from '@/lib/lucide-icons'
 import type { FlashcardsDeckMastery } from '@shared/types'
 import type { QuizSession } from '@/store/palette-store'
 

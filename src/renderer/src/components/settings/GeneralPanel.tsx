@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Trash2 } from 'lucide-react'
+import { AlertTriangle, Trash2 } from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'

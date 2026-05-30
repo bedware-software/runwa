@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { X, Keyboard, RotateCcw } from 'lucide-react'
+import { Keyboard, RotateCcw, X } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import { keyEventToAccelerator } from '@/lib/hotkey'
 import { Hotkey } from '../ui/Kbd'

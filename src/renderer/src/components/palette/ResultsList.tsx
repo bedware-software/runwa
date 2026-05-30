@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '@/lib/lucide-icons'
 import type { PaletteItem } from '@shared/types'
 import { usePaletteStore } from '@/store/palette-store'
 import { ResultRow } from './ResultRow'

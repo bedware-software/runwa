@@ -1,8 +1,8 @@
 import type { Ref } from 'react'
-import * as Icons from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '@/lib/lucide-icons'
 import type { PaletteItem } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { lucideIconFromHint, Square } from '@/lib/lucide-icons'
 import { Tooltip } from '../ui/Tooltip'
 
 interface Props {
@@ -22,17 +22,11 @@ interface Props {
 }
 
 /**
- * Map a kebab-case iconHint (e.g. "app-window") to a lucide-react icon
- * component. Falls back to Square if the name doesn't match.
+ * Map a supported kebab-case iconHint (e.g. "app-window") to a lucide-react
+ * icon component. Falls back to Square if the name doesn't match.
  */
 function iconFromHint(hint: string | undefined): LucideIcon {
-  if (!hint) return Icons.Square
-  const name = hint
-    .split('-')
-    .map((s) => (s[0] ?? '').toUpperCase() + s.slice(1))
-    .join('')
-  const lookup = Icons as unknown as Record<string, LucideIcon>
-  return lookup[name] ?? Icons.Square
+  return lucideIconFromHint(hint, Square)
 }
 
 function isImageUrl(hint: string | undefined): hint is string {

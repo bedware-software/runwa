@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Clipboard, Pencil, RotateCcw } from 'lucide-react'
+import { Check, Clipboard, Pencil, RotateCcw } from '@/lib/lucide-icons'
 import type { FlashcardsLlmPromptView } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '../ConfirmDialog'

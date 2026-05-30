@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen, RotateCcw, Tag } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { FolderOpen, RotateCcw, Tag } from '@/lib/lucide-icons'
+import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, RefreshCw } from 'lucide-react'
+import { Download, RefreshCw } from '@/lib/lucide-icons'
 import type { AppInfo, UpdateStatus } from '@shared/types'
 import { cn } from '@/lib/utils'
 
