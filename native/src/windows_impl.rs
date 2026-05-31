@@ -153,6 +153,31 @@ fn is_application_frame_host_name(name: &str) -> bool {
   name.eq_ignore_ascii_case("ApplicationFrameHost.exe")
 }
 
+/// Known Windows shell-surface executables. These run as suspended UWP
+/// surfaces — Start, Search, Notification / Quick Settings, the touch
+/// keyboard / emoji panel (TextInputHost), the Lock Screen — that report as
+/// top-level titled windows but are never real windows the user would switch
+/// to. Locale-invariant `SystemApps` exe names, stable across Windows 10/11.
+///
+/// We key off process identity rather than the DWM cloak bit because a surface
+/// parked off-screen is cloaked with `DWM_CLOAKED_SHELL` — the *same* bit
+/// Windows sets on a genuine window living on another virtual desktop — so the
+/// cloak state alone can't tell a phantom Start menu from a real app the user
+/// pushed to desktop 2.
+fn is_system_shell_surface(process_name: &str) -> bool {
+  const SHELL_SURFACES: &[&str] = &[
+    "StartMenuExperienceHost.exe",
+    "SearchHost.exe",
+    "SearchApp.exe",
+    "ShellExperienceHost.exe",
+    "TextInputHost.exe",
+    "LockApp.exe",
+  ];
+  SHELL_SURFACES
+    .iter()
+    .any(|s| process_name.eq_ignore_ascii_case(s))
+}
+
 unsafe fn is_application_frame_host(hwnd: HWND) -> bool {
   let mut pid: u32 = 0;
   GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -255,16 +280,25 @@ pub fn list_windows(
       .map_err(|e| napi::Error::from_reason(format!("EnumWindows failed: {e}")))?;
   }
 
-  // Drop DWM-cloaked windows. Shell surfaces like Start, Search, Notification
-  // Center, TextInputHost, LockApp, etc. are real HWNDs that pass the
-  // `IsWindowVisible` + tool-window checks but are cloaked by DWM because the
-  // underlying UWP app is suspended — they're never actually drawn.
+  // Hide system shell surfaces and DWM-cloaked windows. Two passes:
   //
-  // When listing across all desktops (`current_desktop_only = false`) we keep
-  // `DWM_CLOAKED_SHELL`-only windows, since that bit marks windows parked on
-  // another virtual desktop and the user explicitly asked to see them.
+  //  1. Known shell surfaces (Start, Search, Notification Center, TextInputHost,
+  //     LockApp, ...) are real HWNDs that pass the `IsWindowVisible` +
+  //     tool-window checks but are never windows the user switches to. They're
+  //     dropped by process identity in *both* desktop modes — in the
+  //     all-desktops listing they carry `DWM_CLOAKED_SHELL`, the same bit a
+  //     genuine window parked on another virtual desktop carries, so the cloak
+  //     check below can't distinguish them.
+  //
+  //  2. Remaining cloaked windows. In current-desktop mode any cloak bit means
+  //     the window isn't on this desktop. Across all desktops we keep
+  //     `DWM_CLOAKED_SHELL`-only windows (real apps on another desktop the user
+  //     asked to see) and drop only those an app cloaked itself.
   if hide_system_windows {
     collector.retain(|w| {
+      if is_system_shell_surface(&w.process_name) {
+        return false;
+      }
       let Ok(hwnd_val) = w.id.parse::<isize>() else {
         return true;
       };
@@ -274,11 +308,8 @@ pub fn list_windows(
         return true;
       }
       if current_desktop_only {
-        // Any cloak bit means the window isn't showing on this desktop.
         return false;
       }
-      // Cross-desktop listing: only drop if *some* bit other than
-      // DWM_CLOAKED_SHELL is set (i.e. the owning app cloaked it).
       (cloaked & !DWM_CLOAKED_SHELL) == 0
     });
   }
