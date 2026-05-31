@@ -816,11 +816,25 @@ unsafe fn hicon_to_bgra(hicon: HICON) -> napi::Result<Option<WindowIcon>> {
     return Ok(None);
   };
 
-  // Sanity bound — avoid allocating megabytes for a corrupt icon handle.
-  if width == 0 || height == 0 || width > 512 || height > 512 {
+  // Reject only obviously-bogus dimensions here; oversized-but-valid icons
+  // are downscaled below rather than dropped.
+  if width == 0 || height == 0 {
     cleanup_icon_bitmaps(color_bmp, mask_bmp);
     return Ok(None);
   }
+
+  // Some apps expose a huge source icon. Electron forwards whatever image
+  // you hand `BrowserWindow({ icon })` / `win.setIcon()` straight into the
+  // HICON at its source resolution — Newbro's window icon comes back as
+  // 926×922. The old code rejected anything over 512 and fell through to
+  // the generic exe/Lucide fallback, even though this *is* the icon Windows
+  // scales down for the taskbar. `DrawIconEx` scales the source into the
+  // destination rect, so clamp to a sane tile (preserving aspect ratio) and
+  // render it. This also bounds the allocation, which is what the old >512
+  // guard was actually protecting against (a corrupt handle reporting
+  // bogus dims now renders at most a 256×256 buffer instead of being
+  // dropped).
+  let (width, height) = clamp_icon_dims(width, height, 256);
 
   let screen_dc = GetDC(None);
   let mem_dc = CreateCompatibleDC(screen_dc);
@@ -905,6 +919,23 @@ unsafe fn cleanup_icon_bitmaps(color: HBITMAP, mask: HBITMAP) {
   if !mask.is_invalid() {
     let _ = DeleteObject(HGDIOBJ(mask.0));
   }
+}
+
+/// Scale `(width, height)` down so the longer side is at most `max_dim`,
+/// preserving aspect ratio. Returns the input unchanged when it already
+/// fits. Used to tame oversized window icons (some Electron apps set
+/// ~900px window icons) before we allocate the render buffer — the result
+/// is downscaled again into a 32px UI tile, so 256 is ample headroom even
+/// for 2× displays.
+fn clamp_icon_dims(width: u32, height: u32, max_dim: u32) -> (u32, u32) {
+  let longest = width.max(height);
+  if longest <= max_dim {
+    return (width, height);
+  }
+  let scale = max_dim as f64 / longest as f64;
+  let w = ((width as f64 * scale).round() as u32).max(1);
+  let h = ((height as f64 * scale).round() as u32).max(1);
+  (w, h)
 }
 
 /// Check whether the given HWND lives on the currently-active virtual desktop.
