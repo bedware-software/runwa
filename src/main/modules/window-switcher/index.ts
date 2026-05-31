@@ -156,13 +156,22 @@ export function createWindowSwitcherModule(): PaletteModule {
         return all.map((w, i) => toItem(w, i / 10000))
       }
 
+      // Bitap admits up to `threshold * queryLength` edits, so a fixed
+      // ratio is far too loose on short queries: at length 3, threshold
+      // 0.4 lets a whole character through — "ide" matches "ude"/"ode"/"de",
+      // surfacing Claude / Codex / ~\Desktop\runwa for an IDE search. Scale
+      // the error budget so 1–4 char queries demand an exact substring and
+      // only longer queries (where the ratio is actually forgiving) get
+      // real typo tolerance.
+      const threshold = trimmed.length <= 4 ? 0 : 0.3
+
       const fuse = new Fuse(all, {
         keys: [
           { name: 'title', weight: 0.7 },
           { name: 'processName', weight: 0.3 }
         ],
         includeScore: true,
-        threshold: 0.4,
+        threshold,
         ignoreLocation: true
       })
 
