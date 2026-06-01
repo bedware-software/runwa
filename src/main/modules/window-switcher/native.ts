@@ -45,6 +45,7 @@ interface NativeAddon {
   forceForegroundWindow(id: string): boolean
   isWindowOnCurrentDesktop(id: string): boolean
   getCurrentDesktopNumber(): number
+  setDesktopChangeCallback(cb: (zeroBasedDesktop: number) => void): void
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
   getWindowIcon(id: string): NativeWindowIcon | null
@@ -133,6 +134,18 @@ export function isWindowOnCurrentDesktop(id: string): boolean {
  */
 export function getCurrentDesktopNumber(): number {
   return loadAddon().getCurrentDesktopNumber()
+}
+
+/**
+ * Subscribe to virtual-desktop changes. The native keyboard-remap hook
+ * pushes the new 0-based ordinal the instant a `switch_to_workspace` /
+ * `move_to_workspace` rule action fires — no polling. The callback runs on
+ * the main thread (the native side marshals it through a threadsafe
+ * function). Register once; a second call replaces the previous subscriber.
+ * No-op on platforms without virtual desktops.
+ */
+export function onDesktopChanged(cb: (zeroBasedDesktop: number) => void): void {
+  loadAddon().setDesktopChangeCallback(cb)
 }
 
 export function focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult {

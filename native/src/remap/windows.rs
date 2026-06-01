@@ -469,7 +469,10 @@ fn vd_switch(n: u32) {
     };
     if let Err(e) = winvd::switch_desktop(idx) {
         eprintln!("[keyboard-remap] switch_to_workspace {n}: {e:?}");
+        return;
     }
+    // Push the new ordinal to the tray — no polling needed.
+    super::desktop::record(idx);
 }
 
 fn vd_move_active_and_follow(n: u32) {
@@ -486,7 +489,10 @@ fn vd_move_active_and_follow(n: u32) {
     }
     if let Err(e) = winvd::switch_desktop(idx) {
         eprintln!("[keyboard-remap] move_to_workspace {n} (switch): {e:?}");
+        return;
     }
+    // Followed the window to the target desktop — push it to the tray.
+    super::desktop::record(idx);
 }
 
 /// Switch the foreground window's input language by ISO 639-1 code (`en`,

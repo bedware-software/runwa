@@ -4,7 +4,7 @@ import path from 'path'
 import { settingsWindow } from './settings-window'
 import { resetCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { checkForUpdatesNow } from './auto-update'
-import { getCurrentDesktopNumber } from './modules/window-switcher/native'
+import { getCurrentDesktopNumber, onDesktopChanged } from './modules/window-switcher/native'
 import { settingsStore } from './settings-store'
 import {
   SHOW_DESKTOP_NUMBER_IN_TRAY_DEFAULT,
@@ -16,18 +16,18 @@ import {
  * desktop number (1..10, `+` for 11+). A single `black-on-white` icon set
  * is used regardless of the OS light/dark preference.
  *
- * Desktop detection: polled every 500ms via the native addon. On Windows
- * the `winvd` crate returns the real ordinal; on macOS / Linux the native
- * addon returns 0 (Spaces have no public ordinal API), so the icon stays
- * on "1" regardless of the current Space.
+ * Desktop detection: event-driven, no polling. The keyboard-remap module's
+ * `switch_to_workspace` / `move_to_workspace` rule actions push the new
+ * ordinal to the main process the instant they fire (see `onDesktopChanged`).
+ * The initial number is read once at startup: Windows reports the real
+ * `winvd` ordinal; macOS / Linux start at "1" (Spaces have no public ordinal
+ * API), then macOS tracks subsequent runwa-initiated switches.
  */
 
-const DESKTOP_POLL_INTERVAL_MS = 500
 const MAX_NUMBERED_DESKTOP = 10 // we ship 1.ico…10.ico, then +.ico
 
 class TrayManager {
   private tray: Tray | null = null
-  private pollTimer: NodeJS.Timeout | null = null
   private settingsListener: (() => void) | null = null
   private lastDesktop = -1
   private lastShowNumber: boolean | null = null
@@ -41,15 +41,15 @@ class TrayManager {
     this.tray.setToolTip(this.tooltipFor(initialDesktop, initialShowNumber))
     this.refreshMenu()
 
-    // Prime state so the first poll tick recognises changes correctly.
+    // Prime state so the first pushed update recognises changes correctly.
     this.lastDesktop = initialDesktop
     this.lastShowNumber = initialShowNumber
 
-    // Poll for desktop changes. Cheap — one native call per tick. On
-    // non-Windows platforms this always reads 0, so the branch never
-    // fires, but we keep the timer running so there's a single code path
-    // across platforms.
-    this.pollTimer = setInterval(() => this.tick(), DESKTOP_POLL_INTERVAL_MS)
+    // React to virtual-desktop switches as they happen. The native
+    // keyboard-remap hook pushes the new ordinal whenever a
+    // switch_to_workspace / move_to_workspace rule action fires — no
+    // polling. On platforms without virtual desktops this never fires.
+    onDesktopChanged((desktop) => this.handleDesktopChange(desktop))
 
     // React to the keyboard-remap module's "show desktop number" toggle
     // being flipped in settings, so the tray switches between the
@@ -66,10 +66,9 @@ class TrayManager {
   }
 
   dispose(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer)
-      this.pollTimer = null
-    }
+    // The native desktop-change subscription is process-lifetime; a stray
+    // callback after teardown is harmless because handleDesktopChange and
+    // applyIcon both guard on `this.tray`.
     if (this.settingsListener) {
       this.settingsListener()
       this.settingsListener = null
@@ -124,18 +123,21 @@ class TrayManager {
     this.tray.setContextMenu(Menu.buildFromTemplate(items))
   }
 
-  private tick(): void {
-    const desktop = this.readDesktopNumber()
-    if (desktop !== this.lastDesktop) {
-      this.lastDesktop = desktop
-      this.applyIcon()
-    }
+  /**
+   * Handle a virtual-desktop switch pushed from the native hook. Repaints
+   * only when the ordinal actually changed (the move_to_workspace and
+   * switch_to_workspace paths can both land on the same desktop).
+   */
+  private handleDesktopChange(zeroBasedDesktop: number): void {
+    if (zeroBasedDesktop === this.lastDesktop) return
+    this.lastDesktop = zeroBasedDesktop
+    this.applyIcon()
   }
 
   /**
    * Render whatever icon the current (desktop, show-number) tuple
-   * resolves to, plus the matching tooltip. Cheap — called on each poll
-   * tick that detects a change and on the module's settings toggle.
+   * resolves to, plus the matching tooltip. Cheap — called on each pushed
+   * desktop change and on the module's settings toggle.
    */
   private applyIcon(): void {
     if (!this.tray) return

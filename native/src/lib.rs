@@ -133,14 +133,12 @@ pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
   }
 }
 
-/// Zero-based index of the currently active virtual desktop. Windows
-/// reads this from the real `winvd` ordinal. macOS has no public API for
-/// Space ordinals, so we track our own by snooping
-/// `switch_to_workspace` / `move_to_workspace` rule actions the user
-/// fires through the keyboard remap — the number is passed in the rule,
-/// so every runwa-initiated switch updates the tracker. Switches made
-/// via the system's own Ctrl+N shortcut (outside runwa) aren't observed
-/// and won't be reflected. Linux / other: always 0.
+/// Zero-based index of the currently active virtual desktop. Intended for a
+/// one-shot read at startup to seed the initial tray icon — live updates are
+/// pushed via `set_desktop_change_callback`, not polled. Windows reads the
+/// real `winvd` ordinal here. macOS has no public Space-ordinal API, so it
+/// returns the last number a `switch_to_workspace` / `move_to_workspace` rule
+/// action recorded (0 until the first such switch). Linux / other: always 0.
 #[napi]
 pub fn get_current_desktop_number() -> napi::Result<u32> {
   #[cfg(target_os = "windows")]
@@ -149,11 +147,34 @@ pub fn get_current_desktop_number() -> napi::Result<u32> {
   }
   #[cfg(target_os = "macos")]
   {
-    return Ok(remap::macos_desktop_tracker::get());
+    return Ok(remap::desktop::get());
   }
   #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
     Ok(0)
+  }
+}
+
+/// Register a JS callback invoked with the new 0-based desktop ordinal every
+/// time a `switch_to_workspace` / `move_to_workspace` rule action fires. This
+/// replaces tray-side polling: the keyboard-remap hook knows the destination
+/// desktop the instant the operation runs and pushes it straight to JS via a
+/// threadsafe function. Registered once at startup; calling again replaces the
+/// previous subscriber. No-op on platforms without virtual desktops (Linux).
+#[napi]
+pub fn set_desktop_change_callback(callback: napi::JsFunction) -> napi::Result<()> {
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  {
+    use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction};
+    let tsfn: ThreadsafeFunction<u32, ErrorStrategy::Fatal> = callback
+      .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<u32>| Ok(vec![ctx.value]))?;
+    remap::desktop::set_callback(tsfn);
+    Ok(())
+  }
+  #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+  {
+    let _ = callback;
+    Ok(())
   }
 }
 

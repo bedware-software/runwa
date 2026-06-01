@@ -23,8 +23,10 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub mod macos_move_window;
 
-#[cfg(target_os = "macos")]
-pub mod macos_desktop_tracker;
+// Active-desktop signal + JS push callback. Used by the inject paths on both
+// platforms that have virtual desktops; not compiled on Linux (no switching).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod desktop;
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
