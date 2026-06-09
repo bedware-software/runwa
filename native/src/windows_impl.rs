@@ -384,27 +384,64 @@ pub fn force_foreground_window(id: &str) -> napi::Result<bool> {
     .parse()
     .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
   let hwnd = HWND(hwnd_val as *mut _);
+  unsafe { Ok(force_foreground_hwnd(hwnd)) }
+}
 
+/// Force `hwnd` to the foreground using the AttachThreadInput bypass — the
+/// shared body behind `force_foreground_window`. See that function's doc
+/// comment for why the attach trick is needed. Returns whatever
+/// `SetForegroundWindow` reports.
+pub(crate) unsafe fn force_foreground_hwnd(hwnd: HWND) -> bool {
+  let fg = GetForegroundWindow();
+  if fg.is_invalid() || fg.0 == hwnd.0 {
+    return SetForegroundWindow(hwnd).as_bool();
+  }
+
+  let fg_thread = GetWindowThreadProcessId(fg, None);
+  let our_thread = GetCurrentThreadId();
+
+  if fg_thread == 0 || fg_thread == our_thread {
+    return SetForegroundWindow(hwnd).as_bool();
+  }
+
+  let attached = AttachThreadInput(our_thread, fg_thread, true).as_bool();
+  let _ = BringWindowToTop(hwnd);
+  let ok = SetForegroundWindow(hwnd).as_bool();
+  if attached {
+    let _ = AttachThreadInput(our_thread, fg_thread, false);
+  }
+  ok
+}
+
+/// Hand focus to the topmost real window on the now-current virtual desktop,
+/// invoked right after a programmatic `switch_to_workspace` desktop switch.
+///
+/// Windows' own Win+Ctrl+Arrow switch restores focus to the destination
+/// desktop's last-active window; the `winvd::switch_desktop` call the
+/// keyboard-remap hook makes does not — it leaves the foreground on the
+/// (now-hidden) window from the desktop we left, so the user's next keystroke
+/// lands nowhere or on the wrong window. We replicate the expected behaviour
+/// by walking the Z-order (topmost first) and focusing the first switchable
+/// window that lives on the current desktop. Minimized / off-screen /
+/// other-desktop windows are filtered out by `classify_switchable`, so an
+/// empty destination desktop simply leaves focus untouched.
+///
+/// Uses the AttachThreadInput foreground-lock bypass because immediately after
+/// the switch our process does not own the foreground, so a plain
+/// `SetForegroundWindow` would be refused. Best-effort: no result is returned
+/// because the caller (the LL keyboard hook) has nothing to do on failure.
+pub fn focus_topmost_after_desktop_switch() {
+  let vdm = create_virtual_desktop_manager();
   unsafe {
-    let fg = GetForegroundWindow();
-    if fg.is_invalid() || fg.0 == hwnd.0 {
-      return Ok(SetForegroundWindow(hwnd).as_bool());
+    let mut hwnd = GetTopWindow(None).unwrap_or_default();
+    while !hwnd.is_invalid() {
+      let next = GetWindow(hwnd, GW_HWNDNEXT).unwrap_or_default();
+      if classify_switchable(hwnd, HWND::default(), vdm.as_ref()).ok {
+        force_foreground_hwnd(hwnd);
+        return;
+      }
+      hwnd = next;
     }
-
-    let fg_thread = GetWindowThreadProcessId(fg, None);
-    let our_thread = GetCurrentThreadId();
-
-    if fg_thread == 0 || fg_thread == our_thread {
-      return Ok(SetForegroundWindow(hwnd).as_bool());
-    }
-
-    let attached = AttachThreadInput(our_thread, fg_thread, true).as_bool();
-    let _ = BringWindowToTop(hwnd);
-    let ok = SetForegroundWindow(hwnd).as_bool();
-    if attached {
-      let _ = AttachThreadInput(our_thread, fg_thread, false);
-    }
-    Ok(ok)
   }
 }
 

@@ -21,7 +21,7 @@ use std::thread;
 
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
     VIRTUAL_KEY, VK_CAPITAL, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
@@ -462,6 +462,59 @@ fn flush_inputs(inputs: &mut SmallVec<[INPUT; 8]>) {
     inputs.clear();
 }
 
+/// Post-switch focus hand-off, queued to a dedicated worker thread.
+///
+/// MUST NOT run inline in the LL hook callback: the COM-backed Z-order scan
+/// plus the AttachThreadInput/SetForegroundWindow dance routinely exceeds
+/// `LowLevelHooksTimeout` (~300 ms default), and Windows responds by
+/// *silently removing the hook* — the first switch works, then every later
+/// hotkey goes unheard. The hook only enqueues; this thread does the work.
+enum FocusJob {
+    /// Focus the topmost switchable window on the (new) current desktop.
+    TopmostOnCurrentDesktop,
+    /// Re-assert focus on a specific window (the move_to_workspace follow).
+    /// Raw HWND value — HWND itself isn't Send.
+    Window(isize),
+}
+
+static FOCUS_TX: once_cell::sync::Lazy<Option<std::sync::mpsc::Sender<FocusJob>>> =
+    once_cell::sync::Lazy::new(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<FocusJob>();
+        thread::Builder::new()
+            .name("runwa-vd-focus".into())
+            .spawn(move || {
+                while let Ok(first) = rx.recv() {
+                    // Give the desktop switch a beat to commit before we
+                    // inspect cloak/desktop state.
+                    thread::sleep(std::time::Duration::from_millis(50));
+                    // Coalesce bursts (held-down switch chord): only the
+                    // focus for the final destination desktop matters.
+                    let mut job = first;
+                    while let Ok(next) = rx.try_recv() {
+                        job = next;
+                    }
+                    match job {
+                        FocusJob::TopmostOnCurrentDesktop => {
+                            crate::windows_impl::focus_topmost_after_desktop_switch();
+                        }
+                        FocusJob::Window(raw) => unsafe {
+                            crate::windows_impl::force_foreground_hwnd(HWND(raw as *mut _));
+                        },
+                    }
+                }
+            })
+            .ok()
+            .map(|_join| tx)
+    });
+
+/// Enqueue a focus job for the worker thread. Drops the job silently if the
+/// worker failed to spawn (OOM-class failure) — focus hand-off is best-effort.
+fn queue_focus_job(job: FocusJob) {
+    if let Some(tx) = FOCUS_TX.as_ref() {
+        let _ = tx.send(job);
+    }
+}
+
 fn vd_switch(n: u32) {
     // winvd is 0-indexed; the user writes 1-indexed in YAML.
     let Some(idx) = n.checked_sub(1) else {
@@ -473,6 +526,10 @@ fn vd_switch(n: u32) {
     }
     // Push the new ordinal to the tray — no polling needed.
     super::desktop::record(idx);
+    // winvd::switch_desktop doesn't restore focus the way Win+Ctrl+Arrow does,
+    // so hand the foreground to whatever window now sits on top of the desktop
+    // we just landed on — otherwise focus stays stranded on the desktop we left.
+    queue_focus_job(FocusJob::TopmostOnCurrentDesktop);
 }
 
 fn vd_move_active_and_follow(n: u32) {
@@ -493,6 +550,10 @@ fn vd_move_active_and_follow(n: u32) {
     }
     // Followed the window to the target desktop — push it to the tray.
     super::desktop::record(idx);
+    // Re-assert focus on the window that followed us across; like a plain
+    // switch, the move+switch alone can leave the foreground stranded on the
+    // desktop we left rather than on the window the user just carried over.
+    queue_focus_job(FocusJob::Window(hwnd.0 as isize));
 }
 
 /// Switch the foreground window's input language by ISO 639-1 code (`en`,
