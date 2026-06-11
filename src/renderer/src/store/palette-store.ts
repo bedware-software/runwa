@@ -61,7 +61,10 @@ interface PaletteState {
   selectNext: () => void
   selectPrev: () => void
   setSelectedIndex: (index: number) => void
-  executeSelected: (overrides?: { cram?: boolean }) => Promise<void>
+  executeSelected: (overrides?: {
+    cram?: boolean
+    newInstance?: boolean
+  }) => Promise<void>
   /**
    * Alt+Tab-style hotkey re-press (`palette:activate-second` from main):
    * execute the second result row — for window-switcher that's the
@@ -173,13 +176,19 @@ export const usePaletteStore = create<PaletteState>()(
       const { items, selectedIndex } = get()
       const item = items[selectedIndex]
       if (!item) return
-      // Ctrl+Enter on a flashcards deck row sets cram=true. We mutate
-      // a shallow clone of `item.action` so the in-store version (and
-      // anyone re-clicking the row) stays in default review mode.
+      // Ctrl+Enter on a flashcards deck row sets cram=true; Alt+Enter on
+      // an app-search row sets newInstance=true (skip focusing the running
+      // instance, always spawn a fresh one). We mutate a shallow clone of
+      // `item.action` so the in-store version (and anyone re-clicking the
+      // row) stays in default mode.
       let payload = item
       if (overrides?.cram && item.actionKind === 'start-quiz') {
         const action = (item.action ?? {}) as Record<string, unknown>
         payload = { ...item, action: { ...action, cram: true } }
+      }
+      if (overrides?.newInstance && item.actionKind === 'launch-app') {
+        const action = (item.action ?? {}) as Record<string, unknown>
+        payload = { ...item, action: { ...action, newInstance: true } }
       }
       try {
         await window.electronAPI.modulesExecute(payload)

@@ -19,6 +19,13 @@ export interface AppEntry {
   filePath?: string
   uwpAppId?: string
   iconPath?: string
+  /**
+   * UWP only: the package's install directory from `Get-AppxPackage`.
+   * Used by focus-running to match an entry to its open windows — the
+   * window list reports the hosted app's real exe, which lives under
+   * this directory.
+   */
+  installLocation?: string
   source: 'start-menu' | 'uwp' | 'desktop' | 'applications' | 'custom'
 }
 
@@ -159,10 +166,15 @@ async function enumerateWindowsUwp(): Promise<AppEntry[]> {
   } catch {
     return []
   }
-  const rows: Array<{ Name?: string; AppID?: string; Logo?: string | null }> =
-    Array.isArray(parsed)
-      ? (parsed as Array<{ Name?: string; AppID?: string; Logo?: string | null }>)
-      : [parsed as { Name?: string; AppID?: string; Logo?: string | null }]
+  interface UwpRow {
+    Name?: string
+    AppID?: string
+    Logo?: string | null
+    InstallLocation?: string | null
+  }
+  const rows: UwpRow[] = Array.isArray(parsed)
+    ? (parsed as UwpRow[])
+    : [parsed as UwpRow]
   const out: AppEntry[] = []
   for (const row of rows) {
     if (!row?.Name || !row?.AppID) continue
@@ -176,6 +188,7 @@ async function enumerateWindowsUwp(): Promise<AppEntry[]> {
       name: row.Name,
       uwpAppId: row.AppID,
       iconPath: row.Logo ?? undefined,
+      installLocation: row.InstallLocation ?? undefined,
       source: 'uwp'
     })
   }
@@ -257,6 +270,7 @@ $results = foreach ($app in $apps) {
         Name = $app.Name
         AppID = $app.AppID
         Logo = $logo
+        InstallLocation = $installLocation
     }
 }
 $results | ConvertTo-Json -Compress -Depth 3

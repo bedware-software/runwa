@@ -368,11 +368,16 @@ export function PaletteApp() {
     if (e.key === 'Enter') {
       e.preventDefault()
       // Ctrl+Enter on a flashcards deck row cram-launches (skip
-      // SRS due-filter and quiz every well-formed card). For any
-      // other module Ctrl+Enter behaves like Enter.
-      const cram =
-        e.ctrlKey && items[selectedIndex]?.actionKind === 'start-quiz'
-      void executeSelected(cram ? { cram: true } : undefined)
+      // SRS due-filter and quiz every well-formed card). Alt+Enter on
+      // an app-search row forces a fresh instance instead of focusing
+      // the already-running one. For any other module a modified Enter
+      // behaves like plain Enter.
+      const selected = items[selectedIndex]
+      const cram = e.ctrlKey && selected?.actionKind === 'start-quiz'
+      const newInstance = e.altKey && selected?.actionKind === 'launch-app'
+      void executeSelected(
+        cram ? { cram: true } : newInstance ? { newInstance: true } : undefined
+      )
       return
     }
 

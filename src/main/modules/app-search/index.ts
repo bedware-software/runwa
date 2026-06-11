@@ -3,6 +3,7 @@ import type { ModuleManifest, PaletteItem } from '@shared/types'
 import type { PaletteModule } from '../types'
 import { enumerateApps, invalidateAppCache, type AppEntry } from './enumerator'
 import { launchApp } from './launcher'
+import { tryFocusRunningInstance } from './focus-running'
 import { getIconDataUrlSync, warmIconCache } from '../../icon-cache'
 
 const MANIFEST: ModuleManifest = {
@@ -83,6 +84,13 @@ const MANIFEST: ModuleManifest = {
 
 interface LaunchAction {
   entryId: string
+  /**
+   * Set by the renderer when the user pressed Alt+Enter: skip the
+   * focus-running-instance pass and always spawn a fresh instance.
+   * Absent on the items search() produces — it's spliced into a clone
+   * of the action at execute time.
+   */
+  newInstance?: boolean
 }
 
 function isLaunchAction(a: unknown): a is LaunchAction {
@@ -260,6 +268,14 @@ export function createAppSearchModule(): PaletteModule {
         // the next search picks up a fresh snapshot.
         invalidateAppCache()
         return { dismissPalette: false }
+      }
+      // macOS-like default (Windows only inside the helper): plain Enter on
+      // an already-running app focuses its window — switching virtual
+      // desktop when it lives on another one — instead of spawning a second
+      // instance. Alt+Enter sets `newInstance` and goes straight to a fresh
+      // launch, which was the old unconditional behavior.
+      if (item.action.newInstance !== true && tryFocusRunningInstance(entry)) {
+        return { dismissPalette: true }
       }
       const ok = await launchApp(entry)
       if (!ok) invalidateAppCache()
