@@ -12,6 +12,7 @@ import { AliasInputModal } from './AliasInputModal'
 import { FooterHint } from './FooterHint'
 import { Kbd, Hotkey } from '../ui/Kbd'
 import { QuizView } from './QuizView'
+import { IS_MAC } from '@/lib/platform'
 
 /**
  * Module ids whose entries the user can attach a Ctrl+K alias to. Both
@@ -35,6 +36,8 @@ export function PaletteApp() {
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
   const refresh = usePaletteStore((s) => s.refresh)
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
+  const activateSecond = usePaletteStore((s) => s.activateSecond)
+  const closeSelected = usePaletteStore((s) => s.closeSelected)
 
   const quiz = usePaletteStore((s) => s.quiz)
   const startQuiz = usePaletteStore((s) => s.startQuiz)
@@ -213,6 +216,18 @@ export function PaletteApp() {
     return unsub
   }, [onPaletteShow])
 
+  // palette:activate-second — re-press of the window-switcher hotkey while
+  // the palette is already up. Executes the second row (the previously
+  // focused window) instead of dismissing, so a double-press behaves like
+  // Alt+Tab on Windows — including for two windows of the same app, which
+  // macOS's Cmd+Tab can't reach.
+  useEffect(() => {
+    const unsub = window.electronAPI.onPaletteActivateSecond(() => {
+      activateSecond()
+    })
+    return unsub
+  }, [activateSecond])
+
   // flashcards:start-quiz event from main — flips the palette into
   // quiz mode in the same window. We rely on the rootRef focus effect
   // below to move keyboard focus off the SearchInput onto the root
@@ -319,6 +334,20 @@ export function PaletteApp() {
       void setModuleConfig('window-switcher', {
         currentDesktopOnly: !wsCurrentDesktopOnly
       }).then(() => refresh({ preserveSelection: true }))
+      return
+    }
+    // Ctrl/Cmd+D inside window-switcher: close the highlighted window
+    // without leaving the palette, so several windows can be culled in one
+    // pass when too many are open. The store removes the row optimistically
+    // — the OS-side close is async and a refresh would re-list the closing
+    // window for a frame.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.key.toLowerCase() === 'd' &&
+      activeModuleId === 'window-switcher'
+    ) {
+      e.preventDefault()
+      void closeSelected()
       return
     }
     if (e.key === 'Escape') {
@@ -561,14 +590,20 @@ export function PaletteApp() {
                 <FooterHint label="Rescan" keys={<Hotkey value="Ctrl+R" />} />
               )}
               {activeModuleId === 'window-switcher' && (
-                <FooterHint
-                  label={
-                    wsCurrentDesktopOnly
-                      ? 'Switch to all desktops'
-                      : 'Switch to this desktop'
-                  }
-                  keys={<Hotkey value="Tab" />}
-                />
+                <>
+                  <FooterHint
+                    label={
+                      wsCurrentDesktopOnly
+                        ? 'Switch to all desktops'
+                        : 'Switch to this desktop'
+                    }
+                    keys={<Hotkey value="Tab" />}
+                  />
+                  <FooterHint
+                    label="Close window"
+                    keys={<Hotkey value={IS_MAC ? 'Cmd+D' : 'Ctrl+D'} />}
+                  />
+                </>
               )}
               {activeModuleId === 'flashcards' &&
                 items[selectedIndex]?.actionKind === 'start-quiz' && (

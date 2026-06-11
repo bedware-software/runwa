@@ -23,9 +23,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
   BringWindowToTop, DrawIconEx, EnumChildWindows, EnumWindows, GetClassLongPtrW, GetClassNameW,
   GetForegroundWindow, GetIconInfo, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
   GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-  SendMessageTimeoutW, SetForegroundWindow, ShowWindow, DI_NORMAL, GCL_HICON, GCL_HICONSM,
-  GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, ICONINFO, ICON_BIG, ICON_SMALL, ICON_SMALL2,
-  SMTO_ABORTIFHUNG, SW_RESTORE, WM_GETICON, WS_EX_TOOLWINDOW,
+  PostMessageW, SendMessageTimeoutW, SetForegroundWindow, ShowWindow, DI_NORMAL, GCL_HICON,
+  GCL_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, ICONINFO, ICON_BIG, ICON_SMALL,
+  ICON_SMALL2, SMTO_ABORTIFHUNG, SW_RESTORE, WM_CLOSE, WM_GETICON, WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
@@ -357,6 +357,20 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
     // the caller treats false as "window gone" / "refresh listing".
     Ok(SetForegroundWindow(hwnd).as_bool())
   }
+}
+
+/// Ask a window to close — posts `WM_CLOSE`, the same message the title-bar
+/// X button generates, so the app keeps full control (it may show a "save
+/// changes?" prompt or refuse outright). PostMessage rather than SendMessage:
+/// a target that answers WM_CLOSE with a modal prompt would otherwise block
+/// our thread on its message pump. `true` means the message was queued, not
+/// that the window is gone.
+pub fn close_window(id: &str) -> napi::Result<bool> {
+  let hwnd_val: isize = id
+    .parse()
+    .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+  let hwnd = HWND(hwnd_val as *mut _);
+  unsafe { Ok(PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok()) }
 }
 
 pub fn get_foreground_window() -> napi::Result<String> {

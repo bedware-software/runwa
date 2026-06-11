@@ -66,13 +66,13 @@ pub fn start(rules_json: &str) -> Result<HandleId, String> {
     #[cfg(target_os = "windows")]
     {
         let handle = windows::install(rules).map_err(|e| format!("install error: {e}"))?;
-        return Ok(store(Box::new(handle)));
+        Ok(store(Box::new(handle)))
     }
 
     #[cfg(target_os = "macos")]
     {
         let handle = macos::install(rules).map_err(|e| format!("install error: {e}"))?;
-        return Ok(store(Box::new(handle)));
+        Ok(store(Box::new(handle)))
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -107,13 +107,13 @@ pub fn set_input_language(code: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         macos::change_language(parsed);
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
     {
         windows::change_language(parsed);
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]

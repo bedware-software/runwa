@@ -104,6 +104,17 @@ export type ModuleConfigField =
  */
 export type ModuleKind = 'search' | 'service'
 
+/**
+ * What a second press of the direct-launch hotkey does while the palette is
+ * already open on that module.
+ *  - 'dismiss' (default): close the palette — plain press-to-toggle.
+ *  - 'activate-second': execute the second result row instead. The
+ *    window-switcher list is z-ordered, so row two is the previously
+ *    focused window — a double-press becomes an Alt+Tab-style quick
+ *    switch between the two most recent windows.
+ */
+export type DirectLaunchSecondPress = 'dismiss' | 'activate-second'
+
 export interface ModuleManifest {
   id: ModuleId
   name: string
@@ -120,6 +131,12 @@ export interface ModuleManifest {
    * target. Only meaningful when `supportsDirectLaunch` is true.
    */
   defaultDirectLaunchHotkey?: string
+  /**
+   * Re-press behavior for the direct-launch hotkey while the palette is
+   * already open on this module. Absent = 'dismiss'. Only meaningful when
+   * `supportsDirectLaunch` is true.
+   */
+  directLaunchSecondPress?: DirectLaunchSecondPress
   /** Declarative config schema — the settings UI renders fields from this. */
   configFields?: ModuleConfigField[]
   /**
@@ -528,6 +545,14 @@ export interface ElectronAPI {
   paletteHide: () => Promise<void>
   openSettings: () => Promise<void>
 
+  /**
+   * Window-switcher: ask the OS to close the window behind this palette
+   * row (Ctrl/Cmd+D). Resolves true when the close request was delivered
+   * — the target app may still prompt to save or refuse, exactly like a
+   * manual click on its close button.
+   */
+  windowSwitcherCloseWindow: (item: PaletteItem) => Promise<boolean>
+
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>
 
@@ -585,6 +610,15 @@ export interface ElectronAPI {
 
   // Events (main → renderer). Return an unsubscribe function.
   onPaletteShow: (cb: (payload: PaletteShowPayload) => void) => () => void
+
+  /**
+   * Fired instead of a dismissal when the user re-presses a module's
+   * direct-launch hotkey and the module opted into
+   * `directLaunchSecondPress: 'activate-second'`. The renderer executes
+   * the second result row — for window-switcher that's the previously
+   * focused window, making a double-press behave like Alt+Tab.
+   */
+  onPaletteActivateSecond: (cb: () => void) => () => void
 
   /**
    * Fired by the flashcards module's `execute()` when a deck row is

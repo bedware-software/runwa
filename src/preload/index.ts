@@ -64,6 +64,10 @@ const api: ElectronAPI = {
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),
   openSettings: (): Promise<void> => ipcRenderer.invoke('palette:openSettings'),
 
+  // Window-switcher: close the OS window behind a palette row (Ctrl/Cmd+D).
+  windowSwitcherCloseWindow: (item: PaletteItem): Promise<boolean> =>
+    ipcRenderer.invoke('window-switcher:close-window', item),
+
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>
     ipcRenderer.invoke('app:reveal-in-folder', absolutePath),
@@ -138,6 +142,16 @@ const api: ElectronAPI = {
     ipcRenderer.on('palette:show', listener)
     return () => {
       ipcRenderer.removeListener('palette:show', listener)
+    }
+  },
+
+  onPaletteActivateSecond: (cb: () => void) => {
+    const listener = (): void => {
+      cb()
+    }
+    ipcRenderer.on('palette:activate-second', listener)
+    return () => {
+      ipcRenderer.removeListener('palette:activate-second', listener)
     }
   },
 

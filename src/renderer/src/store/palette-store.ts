@@ -62,6 +62,23 @@ interface PaletteState {
   selectPrev: () => void
   setSelectedIndex: (index: number) => void
   executeSelected: (overrides?: { cram?: boolean }) => Promise<void>
+  /**
+   * Alt+Tab-style hotkey re-press (`palette:activate-second` from main):
+   * execute the second result row — for window-switcher that's the
+   * previously focused window. Falls back to the only row when just one
+   * matches, and to plain dismissal when the list is empty. If the search
+   * is still in flight (fast double-tap of the hotkey), the request is
+   * queued and fires the moment results land.
+   */
+  activateSecond: () => void
+  /**
+   * Close the OS window behind the selected window-switcher row
+   * (Ctrl/Cmd+D). On success the row is removed optimistically instead of
+   * refreshing — the OS-side close is async (macOS AX press, Windows
+   * WM_CLOSE), so an immediate re-enumeration would resurrect the closing
+   * window for a frame or two.
+   */
+  closeSelected: () => Promise<void>
   reset: () => void
   onPaletteShow: (initialModuleId?: ModuleId) => void
   /**
@@ -96,6 +113,12 @@ interface PaletteState {
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let pendingReadySignal = false
+/** Set when `activateSecond` fires while the search is still loading (the
+ * user double-tapped the hotkey faster than the initial enumeration).
+ * `runSearch` re-runs the activation once results land. Cleared whenever
+ * the user shows intent to stay in the palette (typing) and on every
+ * show/reset so it can't leak into the next session. */
+let pendingActivateSecond = false
 
 export const usePaletteStore = create<PaletteState>()(
   immer((set, get) => ({
@@ -107,6 +130,9 @@ export const usePaletteStore = create<PaletteState>()(
     quiz: null,
 
     setQuery: (query: string) => {
+      // Typing means the user is staying in the palette — drop any queued
+      // double-tap activation so it can't fire on the new query's results.
+      pendingActivateSecond = false
       set((state) => {
         state.query = query
         state.selectedIndex = 0
@@ -162,6 +188,48 @@ export const usePaletteStore = create<PaletteState>()(
       }
     },
 
+    activateSecond: () => {
+      const s = get()
+      if (s.isLoading) {
+        pendingActivateSecond = true
+        return
+      }
+      // Row 2 is the previous window (the list is z-ordered with the
+      // current window first). With a single row, re-focusing it is the
+      // only sensible target; with none, behave like a plain dismissal.
+      const target = Math.min(1, s.items.length - 1)
+      if (target < 0) {
+        void window.electronAPI.paletteHide()
+        return
+      }
+      set((st) => {
+        st.selectedIndex = target
+      })
+      void get().executeSelected()
+    },
+
+    closeSelected: async () => {
+      const { items, selectedIndex } = get()
+      const item = items[selectedIndex]
+      if (!item || item.moduleId !== 'window-switcher') return
+      let delivered = false
+      try {
+        delivered = await window.electronAPI.windowSwitcherCloseWindow(item)
+      } catch (err) {
+        console.warn('[window-switcher] close failed', err)
+        return
+      }
+      if (!delivered) return
+      // Look the row up by id — the list may have shifted during the await.
+      set((s) => {
+        const idx = s.items.findIndex((i) => i.id === item.id)
+        if (idx !== -1) s.items.splice(idx, 1)
+        if (s.selectedIndex >= s.items.length) {
+          s.selectedIndex = Math.max(0, s.items.length - 1)
+        }
+      })
+    },
+
     refresh: (opts) => {
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer)
@@ -190,6 +258,7 @@ export const usePaletteStore = create<PaletteState>()(
     },
 
     reset: () => {
+      pendingActivateSecond = false
       set((s) => {
         s.query = ''
         s.items = []
@@ -206,6 +275,7 @@ export const usePaletteStore = create<PaletteState>()(
         clearTimeout(debounceTimer)
         debounceTimer = null
       }
+      pendingActivateSecond = false
 
       set((s) => {
         s.items = []
@@ -403,6 +473,15 @@ async function runSearch(
       window.electronAPI.paletteReady()
     }
 
+    // A hotkey double-tap raced the initial enumeration — re-run the
+    // Alt+Tab-style activation now that the rows exist. isLoading is
+    // false at this point, so the re-entry executes instead of re-queuing.
+    if (pendingActivateSecond) {
+      pendingActivateSecond = false
+      get().activateSecond()
+      return
+    }
+
     // Modules can tag an item `autoExecute: true` to signal "just run
     // this now" — used by app-search's launch-on-alias mode. Fire the
     // normal execute IPC; main dismisses the palette on success. Only
@@ -414,6 +493,7 @@ async function runSearch(
     }
   } catch (err) {
     console.warn('[palette] search failed', err)
+    pendingActivateSecond = false
     set((s) => {
       s.isLoading = false
     })

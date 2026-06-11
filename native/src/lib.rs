@@ -54,11 +54,11 @@ pub fn list_windows(
 ) -> napi::Result<Vec<NativeWindow>> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::list_windows(current_desktop_only, hide_system_windows);
+    windows_impl::list_windows(current_desktop_only, hide_system_windows)
   }
   #[cfg(target_os = "macos")]
   {
-    return macos::list_windows(current_desktop_only, hide_system_windows);
+    macos::list_windows(current_desktop_only, hide_system_windows)
   }
   #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
@@ -72,11 +72,34 @@ pub fn list_windows(
 pub fn focus_window(id: String) -> napi::Result<bool> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::focus_window(&id);
+    windows_impl::focus_window(&id)
   }
   #[cfg(target_os = "macos")]
   {
-    return macos::focus_window(&id);
+    macos::focus_window(&id)
+  }
+  #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+  {
+    let _ = id;
+    Ok(false)
+  }
+}
+
+/// Ask a window to close — equivalent to clicking its close button.
+/// Windows posts `WM_CLOSE`; macOS presses the AX close button (requires
+/// Accessibility permission). The owning app keeps full control: it may
+/// show a "save changes?" prompt or refuse, exactly like a manual click.
+/// `true` means the close request was delivered, not that the window is
+/// gone.
+#[napi]
+pub fn close_window(id: String) -> napi::Result<bool> {
+  #[cfg(target_os = "windows")]
+  {
+    windows_impl::close_window(&id)
+  }
+  #[cfg(target_os = "macos")]
+  {
+    macos::close_window(&id)
   }
   #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
@@ -89,11 +112,11 @@ pub fn focus_window(id: String) -> napi::Result<bool> {
 pub fn get_foreground_window() -> napi::Result<String> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::get_foreground_window();
+    windows_impl::get_foreground_window()
   }
   #[cfg(target_os = "macos")]
   {
-    return macos::get_foreground_window();
+    macos::get_foreground_window()
   }
   #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
@@ -105,7 +128,7 @@ pub fn get_foreground_window() -> napi::Result<String> {
 pub fn force_foreground_window(id: String) -> napi::Result<bool> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::force_foreground_window(&id);
+    windows_impl::force_foreground_window(&id)
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -121,7 +144,7 @@ pub fn force_foreground_window(id: String) -> napi::Result<bool> {
 pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::describe_window(&id);
+    windows_impl::describe_window(&id)
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -143,11 +166,11 @@ pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
 pub fn get_current_desktop_number() -> napi::Result<u32> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::get_current_desktop_number();
+    windows_impl::get_current_desktop_number()
   }
   #[cfg(target_os = "macos")]
   {
-    return Ok(remap::desktop::get());
+    Ok(remap::desktop::get())
   }
   #[cfg(not(any(target_os = "windows", target_os = "macos")))]
   {
@@ -182,7 +205,7 @@ pub fn set_desktop_change_callback(callback: napi::JsFunction) -> napi::Result<(
 pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::is_window_on_current_desktop(&id);
+    windows_impl::is_window_on_current_desktop(&id)
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -198,7 +221,7 @@ pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
 pub fn focus_topmost_on_current_desktop(exclude_id: String) -> napi::Result<FocusTopmostResult> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::focus_topmost_on_current_desktop(&exclude_id);
+    windows_impl::focus_topmost_on_current_desktop(&exclude_id)
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -215,7 +238,7 @@ pub fn focus_topmost_on_current_desktop(exclude_id: String) -> napi::Result<Focu
 pub fn get_window_icon(id: String) -> napi::Result<Option<WindowIcon>> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::get_window_icon(&id);
+    windows_impl::get_window_icon(&id)
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -238,7 +261,7 @@ pub fn get_file_icon(
 ) -> napi::Result<Option<WindowIcon>> {
   #[cfg(target_os = "windows")]
   {
-    return windows_impl::get_file_icon(&path, icon_index.unwrap_or(0));
+    windows_impl::get_file_icon(&path, icon_index.unwrap_or(0))
   }
   #[cfg(not(target_os = "windows"))]
   {
@@ -254,7 +277,7 @@ pub fn get_file_icon(
 pub fn is_accessibility_trusted() -> bool {
   #[cfg(target_os = "macos")]
   {
-    return macos::is_accessibility_trusted();
+    macos::is_accessibility_trusted()
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -270,7 +293,7 @@ pub fn is_accessibility_trusted() -> bool {
 pub fn request_accessibility_permission() -> bool {
   #[cfg(target_os = "macos")]
   {
-    return macos::request_accessibility_permission();
+    macos::request_accessibility_permission()
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -286,7 +309,7 @@ pub fn request_accessibility_permission() -> bool {
 pub fn is_screen_recording_granted() -> bool {
   #[cfg(target_os = "macos")]
   {
-    return macos::is_screen_recording_granted();
+    macos::is_screen_recording_granted()
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -304,7 +327,7 @@ pub fn is_screen_recording_granted() -> bool {
 pub fn request_screen_recording_permission() -> bool {
   #[cfg(target_os = "macos")]
   {
-    return macos::request_screen_recording_permission();
+    macos::request_screen_recording_permission()
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -317,14 +340,14 @@ pub fn request_screen_recording_permission() -> bool {
 /// Returns an opaque handle id; pass it to `stop_keyboard_remap` to tear down.
 #[napi]
 pub fn start_keyboard_remap(rules_json: String) -> napi::Result<u32> {
-  remap::start(&rules_json).map_err(|e| napi::Error::from_reason(e))
+  remap::start(&rules_json).map_err(napi::Error::from_reason)
 }
 
 /// Tear down a keyboard remap hook previously installed via
 /// `start_keyboard_remap`. Unknown handle ids return an error.
 #[napi]
 pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
-  remap::stop(handle).map_err(|e| napi::Error::from_reason(e))
+  remap::stop(handle).map_err(napi::Error::from_reason)
 }
 
 /// Switch the system input language to the one matching `code` (ISO 639-1,
@@ -335,5 +358,5 @@ pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
 /// activate, never add. Returns an error only if `code` fails to parse.
 #[napi]
 pub fn set_input_language(code: String) -> napi::Result<()> {
-  remap::set_input_language(&code).map_err(|e| napi::Error::from_reason(e))
+  remap::set_input_language(&code).map_err(napi::Error::from_reason)
 }

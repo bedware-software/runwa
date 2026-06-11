@@ -41,6 +41,7 @@ export interface NativeWindowIcon {
 interface NativeAddon {
   listWindows(currentDesktopOnly: boolean, hideSystemWindows: boolean): NativeWindow[]
   focusWindow(id: string): boolean
+  closeWindow(id: string): boolean
   getForegroundWindow(): string
   forceForegroundWindow(id: string): boolean
   isWindowOnCurrentDesktop(id: string): boolean
@@ -113,6 +114,16 @@ export function listWindowsCached(
 
 export function focusWindow(id: string): boolean {
   return loadAddon().focusWindow(id)
+}
+
+/**
+ * Ask the window to close — equivalent to clicking its close button.
+ * Windows posts WM_CLOSE; macOS presses the AX close button (needs
+ * Accessibility). Returns true when the request was delivered — the app
+ * may still show a "save changes?" prompt or refuse outright.
+ */
+export function closeWindow(id: string): boolean {
+  return loadAddon().closeWindow(id)
 }
 
 export function getForegroundWindow(): string {

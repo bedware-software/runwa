@@ -87,7 +87,11 @@ class HotkeyManager {
 
       const onPress = hasCustomHandler
         ? () => module!.handleDirectLaunch!('press')
-        : () => paletteWindow.toggle(moduleId as ModuleId)
+        : () =>
+            paletteWindow.toggle(
+              moduleId as ModuleId,
+              module?.manifest.directLaunchSecondPress
+            )
 
       // Modifier-only chords (`Ctrl+Super`, `Alt+Shift`, …) are no
       // longer accepted — they used to route through uiohook for

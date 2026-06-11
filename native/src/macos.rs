@@ -528,7 +528,7 @@ fn list_windows_all_spaces(hide_system_windows: bool) -> napi::Result<Vec<Native
         // Blocklist: known macOS system services that own user-sized
         // windows but aren't user-addressable targets. Size/alpha checks
         // don't catch them because they render real chrome.
-        if SYSTEM_SERVICE_OWNERS.iter().any(|&s| s == owner.as_str()) {
+        if SYSTEM_SERVICE_OWNERS.contains(&owner.as_str()) {
           continue;
         }
 
@@ -747,9 +747,10 @@ pub fn get_foreground_window() -> napi::Result<String> {
 }
 
 /// Locate the AX window whose CGWindowID matches `target_wid` in `pid`'s
-/// AXWindows list, and raise it. Assumes the app is already foregrounded
-/// (see `osascript_activate_pid`) so AX queries don't return
-/// `kAXErrorCannotComplete`.
+/// AXWindows list, and run `action` on it. Returns the action's result, or
+/// `false` when the app element / window list / matching window can't be
+/// resolved (no AX permission, app backgrounded on another Space — AX
+/// answers `kAXErrorCannotComplete` for those — or the window is gone).
 ///
 /// CGWindowID matching (via the private `_AXUIElementGetWindow`) is the
 /// only reliable way to cross-reference CG and AX for Chromium-family
@@ -757,14 +758,17 @@ pub fn get_foreground_window() -> napi::Result<String> {
 /// Chromium renames windows asynchronously on tab switches. CGWindowID,
 /// by contrast, is WindowServer's stable identity that both APIs agree
 /// on.
-fn raise_ax_window_by_cg_id(pid: u32, target_wid: u32) -> bool {
+fn with_ax_window_by_cg_id(
+  pid: u32,
+  target_wid: u32,
+  action: impl Fn(AXUIElementRef) -> bool,
+) -> bool {
   let app = unsafe { AXUIElementCreateApplication(pid as c_int) };
   if app.is_null() {
     return false;
   }
 
   let attr_windows = CFString::from_static_string("AXWindows");
-  let action_raise = CFString::from_static_string("AXRaise");
 
   let win_array_raw = match unsafe { ax_copy_attribute(app, &attr_windows) } {
     Some(v) => v,
@@ -776,7 +780,7 @@ fn raise_ax_window_by_cg_id(pid: u32, target_wid: u32) -> bool {
 
   let arr = win_array_raw as core_foundation_sys::array::CFArrayRef;
   let count = unsafe { CFArrayGetCount(arr) };
-  let mut raised = false;
+  let mut result = false;
 
   for i in 0..count {
     let win = unsafe { CFArrayGetValueAtIndex(arr, i) } as AXUIElementRef;
@@ -789,20 +793,84 @@ fn raise_ax_window_by_cg_id(pid: u32, target_wid: u32) -> bool {
       continue;
     }
     if wid == target_wid {
-      let raise_err = unsafe {
-        AXUIElementPerformAction(
-          win,
-          action_raise.as_concrete_TypeRef() as CFStringRef,
-        )
-      };
-      raised = raise_err == K_AX_ERROR_SUCCESS;
+      result = action(win);
       break;
     }
   }
 
   unsafe { CFRelease(win_array_raw) };
   unsafe { CFRelease(app as CFTypeRef) };
-  raised
+  result
+}
+
+/// Raise the AX window matching `target_wid` within `pid`. Assumes the app
+/// is already foregrounded (see `osascript_activate_pid`) so AX queries
+/// don't return `kAXErrorCannotComplete`.
+fn raise_ax_window_by_cg_id(pid: u32, target_wid: u32) -> bool {
+  let action_raise = CFString::from_static_string("AXRaise");
+  with_ax_window_by_cg_id(pid, target_wid, |win| {
+    let raise_err = unsafe {
+      AXUIElementPerformAction(
+        win,
+        action_raise.as_concrete_TypeRef() as CFStringRef,
+      )
+    };
+    raise_err == K_AX_ERROR_SUCCESS
+  })
+}
+
+// ─── Close ──────────────────────────────────────────────────────────────────
+
+/// Press the close button ("red traffic light") of an AX window element —
+/// the AX equivalent of clicking it. The app decides what happens next
+/// (close immediately, show a save prompt, refuse), exactly like a real
+/// click, so this can never discard unsaved work behind the user's back.
+fn press_ax_close_button(win: AXUIElementRef) -> bool {
+  let attr_close = CFString::from_static_string("AXCloseButton");
+  let action_press = CFString::from_static_string("AXPress");
+  let Some(btn_raw) = (unsafe { ax_copy_attribute(win, &attr_close) }) else {
+    return false;
+  };
+  let err = unsafe {
+    AXUIElementPerformAction(
+      btn_raw as AXUIElementRef,
+      action_press.as_concrete_TypeRef() as CFStringRef,
+    )
+  };
+  unsafe { CFRelease(btn_raw) };
+  err == K_AX_ERROR_SUCCESS
+}
+
+/// Ask a window to close, like clicking its close button. Unlike
+/// `focus_window` this never activates the app or switches Spaces — the AX
+/// press is delivered to the (possibly backgrounded) app directly. Returns
+/// `false` when the window can't be reached: no Accessibility permission,
+/// the window is already gone, or the owning app is parked on another Space
+/// with nothing on-screen (AX answers `kAXErrorCannotComplete` for those —
+/// closing cross-Space windows is best-effort).
+pub fn close_window(id: &str) -> napi::Result<bool> {
+  // AX-prefixed ids — same future-proofing dispatch branch as focus_window.
+  if let Some(key) = id.strip_prefix("ax:") {
+    let cache = AX_CACHE.lock().expect("AX_CACHE poisoned");
+    let Some(entry) = cache.get(&format!("ax:{key}")) else {
+      return Ok(false);
+    };
+    return Ok(press_ax_close_button(entry.window.0));
+  }
+
+  let mut parts = id.splitn(2, ':');
+  let pid: u32 = parts
+    .next()
+    .and_then(|s| s.parse().ok())
+    .ok_or_else(|| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+  let Some(wid) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+    return Ok(false);
+  };
+
+  if !is_accessibility_trusted() {
+    return Ok(false);
+  }
+  Ok(with_ax_window_by_cg_id(pid, wid, press_ax_close_button))
 }
 
 /// True if `pid` owns at least one window that CGWindowList reports as

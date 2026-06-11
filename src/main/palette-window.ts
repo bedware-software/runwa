@@ -1,6 +1,10 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'path'
-import type { ModuleId, PaletteShowPayload } from '@shared/types'
+import type {
+  DirectLaunchSecondPress,
+  ModuleId,
+  PaletteShowPayload
+} from '@shared/types'
 import { settingsStore } from './settings-store'
 import {
   describeWindow,
@@ -471,18 +475,32 @@ class PaletteWindow {
   }
 
   /**
-   * Hotkey-driven entry point: open the palette for `moduleId`, OR close it
-   * if it's already open showing that same module. Pressing a *different*
-   * module's hotkey while the palette is up still switches into that module
-   * rather than closing — only the same-hotkey-twice case is a dismissal.
+   * Hotkey-driven entry point: open the palette for `moduleId`, OR handle a
+   * re-press if it's already open showing that same module. Pressing a
+   * *different* module's hotkey while the palette is up still switches into
+   * that module — only the same-hotkey-twice case is special:
+   *
+   *  - 'dismiss' (default): close the palette, press-to-toggle.
+   *  - 'activate-second': ask the renderer to execute the second result row
+   *    instead. Window-switcher opts in: its list is z-ordered, so row two
+   *    is the previously focused window and a double-press becomes an
+   *    Alt+Tab-style quick switch. The renderer queues the request if the
+   *    initial search hasn't landed yet (fast double-tap).
    */
-  toggle(moduleId: ModuleId): void {
+  toggle(
+    moduleId: ModuleId,
+    secondPress: DirectLaunchSecondPress = 'dismiss'
+  ): void {
     if (
       this.window &&
       !this.window.isDestroyed() &&
       this.window.isVisible() &&
       this.currentModuleId === moduleId
     ) {
+      if (secondPress === 'activate-second') {
+        this.window.webContents.send('palette:activate-second')
+        return
+      }
       this.hide(true)
       return
     }

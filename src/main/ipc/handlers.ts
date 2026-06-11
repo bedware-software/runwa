@@ -27,6 +27,8 @@ import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
+  closeWindow,
+  invalidateCache,
   isAccessibilityTrusted,
   isScreenRecordingGranted,
   requestAccessibilityPermission,
@@ -93,6 +95,32 @@ export function registerIpcHandlers(): void {
     'settings:setModuleAlias',
     async (_e, moduleId: ModuleId, itemId: string, alias: string | null) =>
       settingsStore.patchModuleAlias(moduleId, itemId, alias)
+  )
+
+  // Window-switcher: close the OS window behind a palette row (Ctrl/Cmd+D).
+  // Validated here rather than in the renderer because `item.action` is an
+  // opaque payload on that side of the IPC firewall — main is the layer
+  // that knows its shape. Returns whether the close request was delivered
+  // so the renderer can drop the row optimistically.
+  ipcMain.handle(
+    'window-switcher:close-window',
+    async (_e, item: PaletteItem): Promise<boolean> => {
+      if (item?.moduleId !== 'window-switcher' || item.actionKind !== 'focus-window') {
+        return false
+      }
+      const nativeId = (item.action as { nativeId?: unknown } | null)?.nativeId
+      if (typeof nativeId !== 'string') return false
+      try {
+        const ok = closeWindow(nativeId)
+        // The 100ms listing cache still contains the closing window — drop
+        // it so the next search re-enumerates instead of resurrecting it.
+        invalidateCache()
+        return ok
+      } catch (err) {
+        console.warn('[window-switcher] close failed', err)
+        return false
+      }
+    }
   )
 
   // Palette / settings window control

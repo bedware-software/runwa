@@ -22,6 +22,11 @@ const MANIFEST: ModuleManifest = {
   defaultEnabled: true,
   supportsDirectLaunch: true,
   defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+W',
+  // Re-pressing the hotkey while the switcher is open jumps to the second
+  // row — the previously focused window (the list is z-ordered) — instead
+  // of dismissing. Double-press = Alt+Tab-style bounce between the two most
+  // recent windows, which Cmd+Tab can't do for two windows of the same app.
+  directLaunchSecondPress: 'activate-second',
   configFields: [
     // The `currentDesktopOnly` flag still lives in the module's
     // config bag — it's just no longer surfaced in the settings UI.
