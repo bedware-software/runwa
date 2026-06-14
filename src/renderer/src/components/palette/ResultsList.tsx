@@ -14,18 +14,13 @@ interface Props {
    * service-module items — typically make this a no-op).
    */
   onOpenContextMenu?: (index: number) => void
-  /** When true, render 1..N keycap chips alongside the first 4 rows
-   * (palette intercepts the matching digit). Off = no chips, no chord.
-   * Wired to the `quickLaunchDigits` general setting. */
-  showQuickLaunchDigits?: boolean
 }
 
 export function ResultsList({
   items,
   selectedIndex,
   isLoading,
-  onOpenContextMenu,
-  showQuickLaunchDigits = true
+  onOpenContextMenu
 }: Props) {
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
@@ -58,14 +53,11 @@ export function ResultsList({
     )
   }
 
-  // Show 1..N digit hints only when the list is short enough that the
-  // user can plausibly hit the right number — the palette intercepts
-  // the matching keypress and runs the row. Above that we'd just be
-  // adding visual noise nobody can use anyway. The general toggle
-  // collapses both sides at once so an unchecked setting hides chips
-  // and frees the digit keys for typing into the search input.
-  const showNumbers =
-    showQuickLaunchDigits && items.length > 0 && items.length <= 4
+  // The first nine rows always get a 1..9 keycap — the palette
+  // intercepts the matching digit (plain or Alt+digit, per the
+  // `quickLaunchDigitsRequireAlt` setting) and runs that row. Rows past
+  // the ninth have no shortcut, so they get no chip.
+  const QUICK_LAUNCH_MAX = 9
 
   // Trim the refs array to the current item count so stale refs from a
   // longer previous result set don't survive a re-render.
@@ -93,7 +85,7 @@ export function ResultsList({
               }}
               item={item}
               isSelected={index === selectedIndex}
-              numberHint={showNumbers ? index + 1 : undefined}
+              numberHint={index < QUICK_LAUNCH_MAX ? index + 1 : undefined}
               onClick={() => {
                 setSelectedIndex(index)
                 void executeSelected()

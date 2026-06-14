@@ -9,9 +9,9 @@ interface Props {
   item: PaletteItem
   isSelected: boolean
   /** When set, render a small `1`–`9` glyph stuck to the left window edge —
-   * the number the user can press to launch this row directly. ResultsList
-   * only sets it when the result count is small enough that the digit
-   * shortcut is wired up at the palette level. */
+   * the number the user presses (plain or with Alt, per the
+   * `quickLaunchDigitsRequireAlt` setting) to run this row directly.
+   * ResultsList sets it for the first nine rows only. */
   numberHint?: number
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void

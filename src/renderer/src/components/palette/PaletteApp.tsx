@@ -51,10 +51,11 @@ export function PaletteApp() {
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const modules = useSettingsStore((s) => s.modules)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
-  // The keycaps + matching digit chord live or die together — drive both
-  // off the same setting so an unchecked toggle silently disables both.
-  const quickLaunchDigits = useSettingsStore(
-    (s) => s.settings?.quickLaunchDigits ?? true
+  // Quick-launch-by-number is always on; this flag only flips the chord.
+  // false = plain digit runs the row, Alt+digit types the digit into the
+  // search box. true = the reverse.
+  const quickLaunchDigitsRequireAlt = useSettingsStore(
+    (s) => s.settings?.quickLaunchDigitsRequireAlt ?? false
   )
   const isHydrated = useSettingsStore((s) => s.isHydrated)
 
@@ -381,29 +382,55 @@ export function PaletteApp() {
       return
     }
 
-    // Quick-launch digits: when the result list is narrow enough that
-    // ResultsList renders 1..N badges (≤4 items), pressing the matching
-    // digit selects + runs that row. Mirrors the badge cap so the chord
-    // and the visual hint stay in lock-step. We bail on modifiers so
-    // future Ctrl/Alt/Cmd+digit chords stay free for other features.
-    // The whole feature is gated by the General-panel toggle so users
-    // who'd rather just type "12" / "34" into the search box can opt out.
-    if (
-      quickLaunchDigits &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      !e.altKey &&
-      items.length > 0 &&
-      items.length <= 4 &&
-      /^[1-4]$/.test(e.key)
-    ) {
+    // Quick-launch digits: the first nine results carry 1..9 keycaps
+    // (see ResultsList) and can be run by number. One chord runs the
+    // matching row, the other inserts the digit into the search box;
+    // `quickLaunchDigitsRequireAlt` decides which is which. Ctrl/Meta
+    // are always ignored so those chord spaces stay free.
+    if (!e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
       const idx = Number(e.key) - 1
-      if (idx < items.length) {
-        e.preventDefault()
-        setSelectedIndex(idx)
-        void executeSelected()
+      const isRunChord = quickLaunchDigitsRequireAlt ? e.altKey : !e.altKey
+
+      if (isRunChord) {
+        if (idx < items.length) {
+          e.preventDefault()
+          setSelectedIndex(idx)
+          void executeSelected()
+          return
+        }
+        // No row for this number. In Alt-runs mode swallow the chord —
+        // Alt+digit emits no character anyway. In plain-runs mode let
+        // the digit fall through and type, so short result lists don't
+        // block queries like "7zip".
+        if (e.altKey) e.preventDefault()
         return
       }
+
+      // The other chord types the digit into the search box. It's only
+      // Alt+digit (plain-runs mode) that needs help — Alt chords emit no
+      // character, so splice it in at the caret by hand. A plain digit
+      // here (Alt-runs mode) is already typed by the input, so leave it.
+      if (e.altKey) {
+        e.preventDefault()
+        insertTextIntoQuery(e.key)
+      }
+    }
+  }
+
+  // Splice text into the search query at the caret and move the caret
+  // just past it. Used for the Alt+digit "type the number" chord, which
+  // the input never receives as a character on its own.
+  const insertTextIntoQuery = (text: string): void => {
+    const input = inputRef.current
+    const start = input?.selectionStart ?? query.length
+    const end = input?.selectionEnd ?? query.length
+    setQuery(query.slice(0, start) + text + query.slice(end))
+    if (input) {
+      const caret = start + text.length
+      // setQuery re-renders the controlled input; restore the caret on
+      // the next frame so it lands after the inserted digit rather than
+      // jumping to the end of the field.
+      requestAnimationFrame(() => input.setSelectionRange(caret, caret))
     }
   }
 
@@ -543,7 +570,6 @@ export function PaletteApp() {
             selectedIndex={selectedIndex}
             isLoading={isLoading}
             onOpenContextMenu={openContextMenuForRow}
-            showQuickLaunchDigits={quickLaunchDigits}
           />
         </>
       )}

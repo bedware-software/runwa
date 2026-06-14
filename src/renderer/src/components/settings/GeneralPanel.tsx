@@ -14,10 +14,14 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 export function GeneralPanel() {
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const setTheme = useSettingsStore((s) => s.setTheme)
-  const quickLaunchDigits = useSettingsStore(
-    (s) => s.settings?.quickLaunchDigits ?? DEFAULT_SETTINGS.quickLaunchDigits
+  const quickLaunchDigitsRequireAlt = useSettingsStore(
+    (s) =>
+      s.settings?.quickLaunchDigitsRequireAlt ??
+      DEFAULT_SETTINGS.quickLaunchDigitsRequireAlt
   )
-  const setQuickLaunchDigits = useSettingsStore((s) => s.setQuickLaunchDigits)
+  const setQuickLaunchDigitsRequireAlt = useSettingsStore(
+    (s) => s.setQuickLaunchDigitsRequireAlt
+  )
   const paletteSwitchToEnglish = useSettingsStore(
     (s) =>
       s.settings?.paletteSwitchToEnglish ?? DEFAULT_SETTINGS.paletteSwitchToEnglish
@@ -67,10 +71,10 @@ export function GeneralPanel() {
         </p>
         <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
           <ToggleRow
-            title="Quick-launch digits"
-            description="When the result list narrows to 4 or fewer rows, render 1–4 keycaps along the left edge and let the matching digit run that row directly."
-            checked={quickLaunchDigits}
-            onChange={(v) => void setQuickLaunchDigits(v)}
+            title="Use Alt + number to run a result"
+            description="The first nine results are always labelled 1–9. By default a plain digit runs that result and Alt+digit types the digit into the search box. Turn this on to swap them: Alt+digit runs the result and plain digits type as normal."
+            checked={quickLaunchDigitsRequireAlt}
+            onChange={(v) => void setQuickLaunchDigitsRequireAlt(v)}
           />
           <ToggleRow
             title="Switch to English on any search dialog open"

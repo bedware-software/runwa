@@ -262,12 +262,15 @@ export interface PalettePosition {
 export interface Settings {
   theme: Theme
   /**
-   * Render `1`–`4` keycap chips on the left edge of the palette result
-   * list when ≤ 4 rows match, and intercept the matching digit key to
-   * launch that row directly. Off = no chips, no chord — type / arrow
-   * / Enter only.
+   * The first nine palette results are always labelled with `1`–`9`
+   * keycaps and can be run directly by number. This flag only picks the
+   * chord:
+   *   false (default) — press the plain digit to run that result;
+   *                     Alt+digit types the digit into the search box.
+   *   true            — press Alt+digit to run the result; plain digits
+   *                     type into the search box as normal.
    */
-  quickLaunchDigits: boolean
+  quickLaunchDigitsRequireAlt: boolean
   /**
    * When the palette opens (any search dialog), force the system input
    * language to English so the user can type their query without first
@@ -302,7 +305,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
-  quickLaunchDigits: true,
+  quickLaunchDigitsRequireAlt: false,
   paletteSwitchToEnglish: true,
   startAtLogin: false,
   runAsAdmin: false,
