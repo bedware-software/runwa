@@ -126,6 +126,21 @@ impl Action {
     ) -> Self {
         Action::EmitThenForwardWithModifier(events.into_iter().collect(), modifier)
     }
+
+    /// Like `emit`, but collapses an empty sequence to `Suppress`. Emitting
+    /// zero events injects nothing yet still reports "handled", so the
+    /// dedicated variant reads more honestly. Used when tearing down a
+    /// `Comboing` chord whose release sequence may be empty — a workspace
+    /// switch enters the held path purely to fire once, with nothing to undo
+    /// on key-up.
+    pub fn emit_or_suppress(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
+        let events: SmallVec<[SyntheticEvent; 8]> = events.into_iter().collect();
+        if events.is_empty() {
+            Action::Suppress
+        } else {
+            Action::Emit(events)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,13 +257,13 @@ impl StateMachine {
             if ev.kind == EventKind::KeyUp && ev.key == combo_key_log {
                 let release = self.combo_release.take().unwrap_or_default();
                 self.state = State::Modifying { trigger, held: None };
-                return Action::emit(release);
+                return Action::emit_or_suppress(release);
             }
             // Trigger KeyUp while combo still held — full teardown.
             if ev.kind == EventKind::KeyUp && ev.key == trigger {
                 let release = self.combo_release.take().unwrap_or_default();
                 self.state = State::Idle;
-                return Action::emit(release);
+                return Action::emit_or_suppress(release);
             }
             // Anything else — release the chord cleanly and graduate
             // back to Modifying. The triggering event is dropped on
@@ -261,7 +276,7 @@ impl StateMachine {
             // release the current combo key first.
             let release = self.combo_release.take().unwrap_or_default();
             self.state = State::Modifying { trigger, held: None };
-            return Action::emit(release);
+            return Action::emit_or_suppress(release);
         }
 
         let trigger_match = if binding.is_some() { Some(ev.key) } else { None };
@@ -554,13 +569,24 @@ impl StateMachine {
                             }
                         });
                     if let Some(pair) = pair {
-                        let has_modifiers = pair
-                            .on_press
-                            .iter()
-                            .any(|e| matches!(e, SyntheticEvent::ModifierDown(_)));
-                        if has_modifiers {
-                            // Push-to-talk: emit press, hold modifiers,
-                            // wait for combo-key release.
+                        // Enter the held (`Comboing`) path when the press
+                        // either holds modifiers (push-to-talk chord) or is a
+                        // workspace switch. The latter must fire exactly once
+                        // — not re-fire on every autorepeat the way nav-style
+                        // bindings do — because the platform layer's
+                        // alternate-desktop toggle would otherwise ping-pong
+                        // between desktops while the key stays down.
+                        let enter_held = pair.on_press.iter().any(|e| {
+                            matches!(
+                                e,
+                                SyntheticEvent::ModifierDown(_)
+                                    | SyntheticEvent::SwitchToWorkspace(_)
+                            )
+                        });
+                        if enter_held {
+                            // Emit press, stash the release sequence (empty
+                            // for a workspace switch — nothing to undo), and
+                            // wait for the combo key (or trigger) to come up.
                             self.combo_release = Some(pair.on_release.clone());
                             self.state = State::Comboing {
                                 trigger,
@@ -1223,13 +1249,15 @@ space:
 "#;
         let mut m = sm(yaml);
 
-        // Bare Space+1: unqualified rule fires.
+        // Bare Space+1: unqualified rule fires once on press. The switch runs
+        // through the held path (so it doesn't re-fire on autorepeat), which
+        // swallows the combo-key release — there's nothing to emit on key-up.
         m.on_event(down(LogicalKey::Space));
         assert_eq!(
             m.on_event(down(alpha('1'))),
             emit(vec![SyntheticEvent::SwitchToWorkspace(1)])
         );
-        assert_eq!(m.on_event(up(alpha('1'))), Action::Forward);
+        assert_eq!(m.on_event(up(alpha('1'))), Action::Suppress);
         assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
 
         // Space+Shift+1: qualified rule fires — the state machine sees the
@@ -1245,6 +1273,33 @@ space:
         );
         assert_eq!(m.on_event(up(alpha('1'))), Action::Forward);
         assert_eq!(m.on_event(up(LogicalKey::Shift)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn switch_to_workspace_fires_once_and_suppresses_autorepeat() {
+        // A workspace switch runs through the held path: it fires exactly
+        // once on press and swallows the OS autorepeat of the held digit, so
+        // we don't re-switch desktops on every repeat (which would ping-pong
+        // the platform layer's alternate-desktop toggle). The release has
+        // nothing to undo, so the key-up is simply suppressed.
+        let yaml = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [1]
+      switch_to_workspace: 1
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        assert_eq!(
+            m.on_event(down(alpha('1'))),
+            emit(vec![SyntheticEvent::SwitchToWorkspace(1)])
+        );
+        // Held digit autorepeats — suppressed, no second switch.
+        assert_eq!(m.on_event(down_autorepeat(alpha('1'))), Action::Suppress);
+        // Releasing the trigger while the digit is still down tears the
+        // chord down; nothing to emit.
         assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
     }
 

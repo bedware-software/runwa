@@ -515,27 +515,84 @@ fn queue_focus_job(job: FocusJob) {
     }
 }
 
-fn vd_switch(n: u32) {
-    // winvd is 0-indexed; the user writes 1-indexed in YAML.
-    let Some(idx) = n.checked_sub(1) else {
-        return;
-    };
-    if let Err(e) = winvd::switch_desktop(idx) {
-        eprintln!("[keyboard-remap] switch_to_workspace {n}: {e:?}");
+// ---------------------------------------------------------------------------
+// Virtual-desktop switching with an "alternate desktop" toggle.
+//
+// We remember the desktop we were on before the most recent switch — the
+// "alternate", nvim's `#` buffer. Asking to switch to the desktop you're
+// already on jumps to that alternate instead, so tapping the same hotkey
+// flips back and forth between your last two desktops. The decision happens
+// on the chord's KeyDown — no delay.
+//
+// The state machine routes workspace switches through its held path so they
+// fire exactly once per press rather than re-firing on every OS autorepeat.
+// That matters here: re-running the toggle on autorepeat would ping-pong
+// between the two desktops while the key stays down.
+
+#[derive(Default)]
+struct VdState {
+    /// The desktop we were on immediately before the most recent switch — the
+    /// one a same-desktop tap toggles back to. `None` until runwa makes its
+    /// first switch.
+    alternate: Option<u32>,
+}
+
+static VD_STATE: once_cell::sync::Lazy<Mutex<VdState>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(VdState::default()));
+
+/// 0-based index of the active virtual desktop, or `None` if winvd can't tell
+/// us (older Windows builds, COM hiccups).
+fn current_desktop_idx() -> Option<u32> {
+    winvd::get_current_desktop().ok()?.get_index().ok()
+}
+
+/// Perform an actual desktop switch and record where we came from as the new
+/// alternate. `from` is the desktop we're leaving (used only to update the
+/// alternate); pass `None` to leave the alternate untouched.
+fn perform_switch(target: u32, from: Option<u32>) {
+    if let Err(e) = winvd::switch_desktop(target) {
+        eprintln!("[keyboard-remap] switch_to_workspace {}: {e:?}", target + 1);
         return;
     }
+    // Remember the desktop we left so the next same-desktop tap toggles back.
+    if let Some(prev) = from {
+        if prev != target {
+            VD_STATE.lock().alternate = Some(prev);
+        }
+    }
     // Push the new ordinal to the tray — no polling needed.
-    super::desktop::record(idx);
+    super::desktop::record(target);
     // winvd::switch_desktop doesn't restore focus the way Win+Ctrl+Arrow does,
     // so hand the foreground to whatever window now sits on top of the desktop
     // we just landed on — otherwise focus stays stranded on the desktop we left.
     queue_focus_job(FocusJob::TopmostOnCurrentDesktop);
 }
 
+/// `switch_to_workspace: n` (1-indexed). Switches to desktop `n`, or — when
+/// you're already on `n` — toggles to the alternate (previous) desktop.
+fn vd_switch(n: u32) {
+    // winvd is 0-indexed; the user writes 1-indexed in YAML.
+    let Some(target) = n.checked_sub(1) else {
+        return;
+    };
+    let current = current_desktop_idx();
+    if current == Some(target) {
+        // Already here — jump to the alternate, nvim `#`-style. If we've never
+        // switched yet there's nothing to toggle to, so stay put.
+        let alternate = VD_STATE.lock().alternate;
+        if let Some(alt) = alternate {
+            perform_switch(alt, current);
+        }
+        return;
+    }
+    perform_switch(target, current);
+}
+
 fn vd_move_active_and_follow(n: u32) {
     let Some(idx) = n.checked_sub(1) else {
         return;
     };
+    let from = current_desktop_idx();
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.0.is_null() {
         return;
@@ -547,6 +604,13 @@ fn vd_move_active_and_follow(n: u32) {
     if let Err(e) = winvd::switch_desktop(idx) {
         eprintln!("[keyboard-remap] move_to_workspace {n} (switch): {e:?}");
         return;
+    }
+    // Followed the window across — keep the alternate coherent so a later
+    // same-desktop tap toggles back to where we came from.
+    if let Some(prev) = from {
+        if prev != idx {
+            VD_STATE.lock().alternate = Some(prev);
+        }
     }
     // Followed the window to the target desktop — push it to the tray.
     super::desktop::record(idx);
