@@ -30,8 +30,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, PostMessageW,
     PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
-    KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN,
-    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
 };
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
@@ -112,6 +113,20 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
                 }
             };
 
+            // Low-level mouse hook on the SAME thread — the GetMessageW pump
+            // below serves it too. It only feeds button-downs to the state
+            // machine so a click can cancel a pending transparent-modifier tap
+            // (Shift+Click shouldn't also fire Shift's on_tap). Best-effort: if
+            // it fails to install, keyboard remapping still works, so we log
+            // and carry on rather than aborting the whole hook.
+            let mouse_hook = match SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) {
+                Ok(h) => Some(h),
+                Err(err) => {
+                    eprintln!("[keyboard-remap] mouse hook install failed: {err}");
+                    None
+                }
+            };
+
             {
                 let mut slot = HOOK_SLOT.lock();
                 *slot = Some(ActiveHook {
@@ -139,6 +154,9 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
 
             // Teardown.
             let _ = UnhookWindowsHookEx(hhook);
+            if let Some(mh) = mouse_hook {
+                let _ = UnhookWindowsHookEx(mh);
+            }
             let mut slot = HOOK_SLOT.lock();
             *slot = None;
         })
@@ -239,6 +257,48 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
             CallNextHookEx(None, code, wparam, lparam)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// LL mouse hook procedure.
+//
+// Installed on the same thread as the keyboard hook. Its only job is to let a
+// mouse click cancel a pending transparent-modifier tap: when Shift (or
+// CapsLock-as-Ctrl) is held as an `EagerModifier`, the modifier is already
+// physically down, so the click carries it — but the state machine, being
+// keyboard-only, would otherwise see a clean tap on release and fire the
+// trigger's on_tap (opening the search window). Feeding the button-down in
+// promotes the state to `Modifying`, cancelling that tap. We never suppress
+// the click itself.
+
+unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code < 0 {
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+
+    let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+
+    // Ignore anything we (or another tool) injected — we don't inject mouse
+    // events, but a synthetic click shouldn't cancel a tap either.
+    if (info.flags & LLMHF_INJECTED) != 0 {
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+
+    let is_button_down = matches!(
+        wparam.0 as u32,
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+    );
+    if is_button_down {
+        // Short critical section — flip the state machine's tap flag. The
+        // returned Action is internal-only (no injection); we always let the
+        // click through.
+        let mut slot = HOOK_SLOT.lock();
+        if let Some(active) = slot.as_mut() {
+            let _ = active.sm.on_pointer_down();
+        }
+    }
+
+    CallNextHookEx(None, code, wparam, lparam)
 }
 
 // ---------------------------------------------------------------------------

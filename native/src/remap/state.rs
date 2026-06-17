@@ -175,6 +175,18 @@ enum State {
     /// turns `Space+D → Ctrl+Alt+Cmd+D` from a microsecond tap into
     /// a real hold-to-talk binding.
     Comboing { trigger: LogicalKey, combo_key: NamedKey },
+    /// A transparent-modifier trigger (Shift, CapsLock-as-Ctrl, …) is
+    /// physically held: we injected its `ModifierDown` the instant the
+    /// trigger went down, so the modifier is genuinely active for mouse
+    /// clicks and any subsequent key — `Shift+Click` and `Ctrl+Click`
+    /// work from the moment of press, not only after a keyboard
+    /// interruption. A tap is still possible: if the trigger comes back
+    /// up with nothing in between, we release the modifier and fire the
+    /// trigger's `on_tap`. The first interruption (a non-trigger key, or
+    /// a mouse button via [`StateMachine::on_pointer_down`]) promotes us
+    /// to `Modifying { held: Some(m) }`, which cancels the tap and owns
+    /// the modifier-up on trigger release.
+    EagerModifier { trigger: LogicalKey, modifier: Modifier },
 }
 
 pub struct StateMachine {
@@ -224,7 +236,8 @@ impl StateMachine {
         let is_current_trigger = match self.state {
             State::Pending { trigger, .. }
             | State::Modifying { trigger, .. }
-            | State::Comboing { trigger, .. } => trigger == ev.key,
+            | State::Comboing { trigger, .. }
+            | State::EagerModifier { trigger, .. } => trigger == ev.key,
             State::Idle => false,
         };
         if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
@@ -277,6 +290,63 @@ impl StateMachine {
             let release = self.combo_release.take().unwrap_or_default();
             self.state = State::Modifying { trigger, held: None };
             return Action::emit_or_suppress(release);
+        }
+
+        // EagerModifier — a transparent-modifier trigger is physically held
+        // (we injected its ModifierDown on press). Handled here, before the
+        // tuple match, so the state stays a tap candidate until the first
+        // real interruption. Modifier-key events (a *different* modifier, or
+        // this trigger when it IS a modifier) for the non-trigger case are
+        // already handled by the `is_modifier` short-circuit above.
+        if let State::EagerModifier { trigger, modifier } = self.state {
+            // Trigger autorepeat — modifier already held, swallow the repeat.
+            if ev.kind == EventKind::KeyDown && ev.key == trigger {
+                return Action::Suppress;
+            }
+            // Trigger release with nothing in between — a clean tap. Release
+            // the modifier we eagerly pressed, then fire on_tap (if any).
+            if ev.kind == EventKind::KeyUp && ev.key == trigger {
+                self.state = State::Idle;
+                let on_tap = self.rules.triggers.get(&trigger).and_then(|b| b.on_tap.clone());
+                let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+                events.push(SyntheticEvent::ModifierUp(modifier));
+                if let Some(tap) = on_tap {
+                    events.extend(tap.iter().copied());
+                }
+                return Action::EmitTap(events);
+            }
+            // Some other key goes down → the press is no longer a tap.
+            if ev.kind == EventKind::KeyDown {
+                // Another configured trigger preempts — but only when its hold
+                // layer actually wants the held modifier (or is itself a
+                // transparent layer). This mirrors the Pending→Pending preempt
+                // guard: Shift→Space→1 hands over to Space's layer (its rules
+                // use Shift), while Shift→Tab does NOT (so Shift+Tab stays the
+                // OS reverse-focus chord). The eagerly-injected ModifierDown
+                // stays physically held and is balanced by the user's real
+                // modifier KeyUp later (forwarded by the is_modifier
+                // short-circuit), so the held modifier shows up in the
+                // GetAsyncKeyState mask for the new layer.
+                if let Some(b) = binding.as_ref() {
+                    if !ev.key.is_modifier()
+                        && (b.uses_modifier(modifier)
+                            || matches!(b.on_hold, ResolvedHold::TransparentModifier(_)))
+                    {
+                        self.state = State::Pending {
+                            trigger: ev.key,
+                            suppress_tap: true,
+                        };
+                        return Action::Suppress;
+                    }
+                }
+                // Plain key interruption: promote to Modifying and forward the
+                // key with the modifier (already down — no re-injection).
+                self.state = State::Modifying { trigger, held: Some(modifier) };
+                return Action::ForwardWithModifier(modifier);
+            }
+            // KeyUp of an unrelated key while still a tap candidate (e.g. a
+            // modifier we forwarded through the short-circuit) — ignore.
+            return Action::Forward;
         }
 
         let trigger_match = if binding.is_some() { Some(ev.key) } else { None };
@@ -346,6 +416,18 @@ impl StateMachine {
                     } else {
                         Action::Forward
                     }
+                } else if let ResolvedHold::TransparentModifier(m) = &b.on_hold {
+                    // Transparent-modifier trigger pressed clean (no external
+                    // modifier): press the real modifier NOW so it's genuinely
+                    // held for mouse clicks and any subsequent key — not only
+                    // after a keyboard interruption. A clean release still
+                    // fires on_tap (see the EagerModifier block above).
+                    let m = *m;
+                    self.state = State::EagerModifier {
+                        trigger: t,
+                        modifier: m,
+                    };
+                    Action::emit([SyntheticEvent::ModifierDown(m)])
                 } else {
                     self.state = State::Pending {
                         trigger: t,
@@ -494,6 +576,26 @@ impl StateMachine {
             // orphan key-ups in Modifying{held: None}, etc.
             _ => Action::Forward,
         }
+    }
+
+    /// A pointer (mouse) button went down. The keyboard hook can't observe
+    /// mouse input, so the platform layer feeds clicks here. While a
+    /// transparent-modifier trigger is an un-interrupted tap candidate
+    /// (`EagerModifier`), a click counts as an interruption: it cancels the
+    /// pending `on_tap` and promotes us to `Modifying`, so e.g. Shift-tap
+    /// won't open the search window when the user actually meant Shift+Click.
+    /// The modifier is already physically held (injected on press), so the
+    /// click carries it natively — nothing to inject here. A no-op in every
+    /// other state.
+    pub fn on_pointer_down(&mut self) -> Action {
+        if let State::EagerModifier { trigger, modifier } = self.state {
+            self.state = State::Modifying {
+                trigger,
+                held: Some(modifier),
+            };
+            return Action::Suppress;
+        }
+        Action::Forward
     }
 
     fn handle_interruption(
@@ -743,10 +845,17 @@ space:
     #[test]
     fn capslock_tap_emits_escape() {
         let mut m = sm(CAPS_CTRL_ESC);
-        assert_eq!(m.on_event(down(LogicalKey::CapsLock)), Action::Suppress);
+        // Eager: pressing CapsLock injects the real Ctrl immediately so it's
+        // held for clicks/keys. A clean tap releases Ctrl and then fires the
+        // on_tap (Escape).
+        assert_eq!(
+            m.on_event(down(LogicalKey::CapsLock)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Ctrl)])
+        );
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
             emit_tap(vec![
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
                 SyntheticEvent::KeyDown(NamedKey::Escape),
                 SyntheticEvent::KeyUp(NamedKey::Escape),
             ])
@@ -756,22 +865,19 @@ space:
     #[test]
     fn capslock_hold_becomes_transparent_ctrl() {
         let mut m = sm(CAPS_CTRL_ESC);
-        m.on_event(down(LogicalKey::CapsLock));
-        // The transparent-modifier path injects ModifierDown only and
-        // forwards the user's real KeyDown with the modifier flag stamped.
-        // See the TransparentModifier arm in `handle_interruption` for the
-        // Space+Tab case that motivated this.
+        // Eager: Ctrl is injected on press, so the first interrupting key just
+        // forwards with the (already-held) Ctrl flag — no second ModifierDown.
+        assert_eq!(
+            m.on_event(down(LogicalKey::CapsLock)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Ctrl)])
+        );
         assert_eq!(
             m.on_event(down(alpha('C'))),
-            Action::EmitThenForwardWithModifier(
-                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
-                Modifier::Ctrl,
-            )
+            Action::ForwardWithModifier(Modifier::Ctrl)
         );
-        // A subsequent key while CapsLock is still held must carry the Ctrl
-        // flag forward — the OS saw our synthetic ModifierDown once, but on
-        // macOS the real V keydown needs explicit flag stamping or it
-        // arrives with flags=0 and gets interpreted as plain V.
+        // A subsequent key while CapsLock is still held must also carry the
+        // Ctrl flag forward — on macOS the real V keydown needs explicit flag
+        // stamping or it arrives with flags=0 and is interpreted as plain V.
         assert_eq!(
             m.on_event(down(alpha('V'))),
             Action::ForwardWithModifier(Modifier::Ctrl)
@@ -1194,11 +1300,16 @@ shift:
 "#;
         let mut m = sm(yaml);
 
-        // Tap path.
-        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        // Tap path. Eager: Shift goes down on press; a clean release lets
+        // Shift up and then fires on_tap (Cmd+Space).
+        assert_eq!(
+            m.on_event(down(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
+        );
         assert_eq!(
             m.on_event(up(LogicalKey::Shift)),
             emit_tap(vec![
+                SyntheticEvent::ModifierUp(Modifier::Shift),
                 SyntheticEvent::ModifierDown(Modifier::Cmd),
                 SyntheticEvent::KeyDown(NamedKey::Space),
                 SyntheticEvent::KeyUp(NamedKey::Space),
@@ -1206,15 +1317,12 @@ shift:
             ])
         );
 
-        // Hold path — Shift+L. Inject ModifierDown only, forward the
-        // user's real L↓ with Shift stamped.
+        // Hold path — Shift+L. Shift was injected on press, so the
+        // interrupting L just forwards with Shift stamped (no re-injection).
         m.on_event(down(LogicalKey::Shift));
         assert_eq!(
             m.on_event(down(alpha('L'))),
-            Action::EmitThenForwardWithModifier(
-                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
-                Modifier::Shift,
-            )
+            Action::ForwardWithModifier(Modifier::Shift)
         );
         // Second L while still held: forwarded with Shift stamped.
         assert_eq!(
@@ -1343,12 +1451,15 @@ space:
 "#;
         let mut m = sm(yaml);
 
-        // Shift first — enters Pending(Shift).
-        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        // Shift first — goes eager: the real Shift is injected now.
+        assert_eq!(
+            m.on_event(down(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
+        );
 
-        // Space second — pre-empts Shift, enters Pending(Space). Shift's
-        // tap is abandoned; the physical Shift is still held in hardware
-        // and will show up on the subsequent 1 keydown's mods mask.
+        // Space second — pre-empts Shift, enters Pending(Space). Shift's tap
+        // is abandoned; the eagerly-injected Shift stays held (balanced by the
+        // real Shift-up later) and shows up on the subsequent 1 keydown's mask.
         assert_eq!(m.on_event(down(LogicalKey::Space)), Action::Suppress);
 
         // 1 with Shift held — Space's qualified rule fires.
@@ -1425,25 +1536,23 @@ tab:
 "#;
         let mut m = sm(yaml);
 
-        // Shift first — own keydown has Shift's self-flag set on real
-        // platforms, but state machine doesn't care; enter Pending(Shift).
-        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        // Shift first — goes eager (the self-flag isn't an external modifier).
+        assert_eq!(
+            m.on_event(down(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
+        );
 
-        // Tab arrives with Shift held in the modifier mask. Tab's
-        // on_hold rules use only `j` and `k` (no shift-qualified rules),
-        // so the preempt guard rejects switching into Pending(Tab).
-        // Falls through to the interruption arm: Shift's transparent
-        // layer fires — inject ModifierDown(Shift) and forward the
-        // user's real Tab↓ with the Shift flag stamped, so any system
-        // service that filters synthetic events still sees a real Tab.
+        // Tab arrives with Shift held in the modifier mask. Tab's on_hold
+        // rules use only `j` and `k` (no shift-qualified rules), so the
+        // preempt guard rejects handing the layer to Tab. It's a plain
+        // interruption: Shift is already physically down (injected on press),
+        // so we just forward the real Tab↓ with the Shift flag stamped —
+        // Shift+Tab reaches the OS as the reverse-focus chord.
         let mut shift = ModifierMask::EMPTY;
         shift.insert(Modifier::Shift);
         assert_eq!(
             m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
-            Action::EmitThenForwardWithModifier(
-                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
-                Modifier::Shift,
-            )
+            Action::ForwardWithModifier(Modifier::Shift)
         );
     }
 
@@ -1465,12 +1574,16 @@ space:
       move_to_workspace: 1
 "#;
         let mut m = sm(yaml);
-        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        // Eager: Shift injected on press.
+        assert_eq!(
+            m.on_event(down(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
+        );
 
         let mut shift = ModifierMask::EMPTY;
         shift.insert(Modifier::Shift);
-        // Space has a `keys: [shift, 1]` override — preempt arm fires,
-        // state becomes Pending(Space).
+        // Space has a `keys: [shift, 1]` override — its hold layer uses Shift,
+        // so the EagerModifier preempt hands the layer to Space (Pending).
         assert_eq!(
             m.on_event(down_with_mods(LogicalKey::Space, shift)),
             Action::Suppress
@@ -1500,10 +1613,11 @@ shift:
     }
 
     #[test]
-    fn modifier_trigger_alone_with_self_flag_still_pendings() {
+    fn modifier_trigger_alone_with_self_flag_goes_eager() {
         // Real platform delivers Shift's own keydown with the Shift flag
-        // already set. The self-flag must not look like an external
-        // modifier — Shift-tap-for-Esc has to keep working.
+        // already set. The self-flag must not look like an external modifier —
+        // a lone Shift press goes eager (Shift down now), and Shift-tap-for-Esc
+        // still works on release (Shift up, then Escape).
         let yaml = r#"
 shift:
   on_tap: [escape]
@@ -1513,11 +1627,12 @@ shift:
         shift_self.insert(Modifier::Shift);
         assert_eq!(
             m.on_event(down_with_mods(LogicalKey::Shift, shift_self)),
-            Action::Suppress
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
         );
         assert_eq!(
             m.on_event(up(LogicalKey::Shift)),
             emit_tap(vec![
+                SyntheticEvent::ModifierUp(Modifier::Shift),
                 SyntheticEvent::KeyDown(NamedKey::Escape),
                 SyntheticEvent::KeyUp(NamedKey::Escape),
             ])
@@ -1558,22 +1673,19 @@ space:
 
     #[test]
     fn capslock_plus_other_key_emits_ctrl_then_forwards() {
-        // Ctrl+F13 (or any other unmapped non-Named key): we can't synth
-        // the keystroke, so press Ctrl and let the OS see the original.
-        // Same `EmitThenForwardWithModifier` path the Named-key case uses,
-        // since the platform layer also stamps the modifier flag on the
-        // forwarded event for keys we couldn't synthesize either way.
+        // Ctrl+F13 (or any other unmapped non-Named key). Eager: Ctrl was
+        // injected on CapsLock-down, so the unmapped key just forwards with
+        // the Ctrl flag stamped (the platform layer stamps it for keys we
+        // can't synthesize). No second ModifierDown.
         let mut m = sm(CAPS_CTRL_ESC);
-        m.on_event(down(LogicalKey::CapsLock));
-        match m.on_event(down(LogicalKey::Other)) {
-            Action::EmitThenForwardWithModifier(evs, Modifier::Ctrl) => {
-                assert_eq!(
-                    evs.as_slice(),
-                    &[SyntheticEvent::ModifierDown(Modifier::Ctrl)]
-                );
-            }
-            other => panic!("expected EmitThenForwardWithModifier(.., Ctrl), got {other:?}"),
-        }
+        assert_eq!(
+            m.on_event(down(LogicalKey::CapsLock)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Ctrl)])
+        );
+        assert_eq!(
+            m.on_event(down(LogicalKey::Other)),
+            Action::ForwardWithModifier(Modifier::Ctrl)
+        );
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
@@ -1581,31 +1693,43 @@ space:
     }
 
     // Reported user bug: with `shift: { on_tap: [cmd, space] }`, holding
-    // Shift and clicking the mouse and then releasing Shift was firing
-    // Cmd+Space — Spotlight/the palette popped up after every Shift+click.
-    // The macOS platform layer surfaces mouse-downs as `LogicalKey::Other`
-    // KeyDown events, which interrupts Pending(Shift): Shift's transparent
-    // layer fires (so the click is forwarded with the Shift flag stamped)
-    // and Shift-up emits ModifierUp instead of the on_tap.
+    // Shift, clicking the mouse, then releasing Shift was firing Cmd+Space —
+    // the search/palette popped up after every Shift+click. Now Shift goes
+    // down eagerly (so the click carries it natively) and the platform layer
+    // feeds the click in via `on_pointer_down`, which cancels the pending tap
+    // so Shift-up just releases the modifier.
     #[test]
-    fn shift_pending_then_mouse_click_does_not_fire_on_tap() {
+    fn shift_eager_then_mouse_click_does_not_fire_on_tap() {
         let yaml = r#"
 shift:
   on_tap: [cmd, space]
 "#;
         let mut m = sm(yaml);
-        assert_eq!(m.on_event(down(LogicalKey::Shift)), Action::Suppress);
+        // Press Shift — real Shift injected now (carries onto the click).
         assert_eq!(
-            m.on_event(down(LogicalKey::Other)),
-            Action::EmitThenForwardWithModifier(
-                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Shift)],
-                Modifier::Shift,
-            )
+            m.on_event(down(LogicalKey::Shift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
         );
+        // Mouse button down cancels the tap; nothing to inject — Shift is
+        // already held, so the click is Shift+click.
+        assert_eq!(m.on_pointer_down(), Action::Suppress);
+        // Releasing Shift only releases the modifier — no Cmd+Space.
         assert_eq!(
             m.on_event(up(LogicalKey::Shift)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Shift)])
         );
+    }
+
+    // A mouse click with no transparent modifier held is a pure no-op for the
+    // state machine — the click passes through untouched.
+    #[test]
+    fn pointer_down_is_noop_when_idle() {
+        let yaml = r#"
+shift:
+  on_tap: [cmd, space]
+"#;
+        let mut m = sm(yaml);
+        assert_eq!(m.on_pointer_down(), Action::Forward);
     }
 
     // -----------------------------------------------------------------
@@ -1811,12 +1935,14 @@ capslock:
   on_hold: [ctrl]
 "#;
         let mut m = sm(yaml);
-        // Shift physical KeyDown — own self-flag is set on the event.
+        // Shift physical KeyDown — own self-flag is set on the event. Goes
+        // eager: the real Shift is injected now and stays held across the
+        // preempt (balanced by the real Shift-up later).
         let mut shift_self = ModifierMask::EMPTY;
         shift_self.insert(Modifier::Shift);
         assert_eq!(
             m.on_event(down_with_mods(LogicalKey::Shift, shift_self)),
-            Action::Suppress
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Shift)])
         );
         // CapsLock physical KeyDown while Shift is held — preempt to
         // CapsLock's layer instead of treating CapsLock as a shifted
