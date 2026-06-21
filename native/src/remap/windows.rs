@@ -29,10 +29,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, PostMessageW,
-    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
-    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
-    WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
+    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
+    LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT,
+    WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
 };
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
@@ -321,27 +321,22 @@ fn vk_to_logical(vk: u32) -> LogicalKey {
     if vk == VK_SPACE.0 as u32 {
         return LogicalKey::Space;
     }
-    // Shift / Ctrl / Alt / Win — including L/R variants and the unsided
-    // VKs some apps send. Each maps to a specific `LogicalKey` variant
-    // so users can configure any of them as a top-level trigger; when
-    // unconfigured, the state machine forwards them transparently so the
-    // physical modifier still applies to the next key.
-    const SHIFT_VKS: &[VIRTUAL_KEY] = &[VK_SHIFT, VK_LSHIFT, VK_RSHIFT];
-    const CTRL_VKS: &[VIRTUAL_KEY] = &[VK_CONTROL, VK_LCONTROL, VK_RCONTROL];
-    const ALT_VKS: &[VIRTUAL_KEY] = &[VK_MENU, VK_LMENU, VK_RMENU];
-    const WIN_VKS: &[VIRTUAL_KEY] = &[VK_LWIN, VK_RWIN];
-    if SHIFT_VKS.iter().any(|m| m.0 as u32 == vk) {
-        return LogicalKey::Shift;
-    }
-    if CTRL_VKS.iter().any(|m| m.0 as u32 == vk) {
-        return LogicalKey::Ctrl;
-    }
-    if ALT_VKS.iter().any(|m| m.0 as u32 == vk) {
-        return LogicalKey::Alt;
-    }
-    if WIN_VKS.iter().any(|m| m.0 as u32 == vk) {
-        // Treated as `Cmd` in the state machine — cross-platform alias.
-        return LogicalKey::Cmd;
+    // Shift / Ctrl / Alt / Win — keep L/R variants when Windows gives them
+    // to us. Unsided VKs are rare in the low-level hook but still map to the
+    // generic key so existing configs remain meaningful.
+    match VIRTUAL_KEY(vk as u16) {
+        k if k == VK_SHIFT => return LogicalKey::Shift,
+        k if k == VK_LSHIFT => return LogicalKey::LeftShift,
+        k if k == VK_RSHIFT => return LogicalKey::RightShift,
+        k if k == VK_CONTROL => return LogicalKey::Ctrl,
+        k if k == VK_LCONTROL => return LogicalKey::LeftCtrl,
+        k if k == VK_RCONTROL => return LogicalKey::RightCtrl,
+        k if k == VK_MENU => return LogicalKey::Alt,
+        k if k == VK_LMENU => return LogicalKey::LeftAlt,
+        k if k == VK_RMENU => return LogicalKey::RightAlt,
+        k if k == VK_LWIN => return LogicalKey::LeftCmd,
+        k if k == VK_RWIN => return LogicalKey::RightCmd,
+        _ => {}
     }
     if (VK_A..=VK_Z).contains(&vk) {
         return LogicalKey::Named(NamedKey::Alpha((b'A' + (vk - VK_A) as u8) as u8));
@@ -392,10 +387,10 @@ fn vk_to_logical(vk: u32) -> LogicalKey {
 
 fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VK_BACK, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F5, VK_F6,
-        VK_F7, VK_F8, VK_F9, VK_HOME, VK_LEFT, VK_NEXT, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4,
-        VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
-        VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
+        VK_BACK, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F5, VK_F6, VK_F7,
+        VK_F8, VK_F9, VK_HOME, VK_LEFT, VK_NEXT, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5,
+        VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR,
+        VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
     };
     match key {
         NamedKey::Escape => VK_ESCAPE,
@@ -441,9 +436,17 @@ fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
 fn modifier_to_vk(m: Modifier) -> VIRTUAL_KEY {
     match m {
         Modifier::Ctrl => VK_LCONTROL,
+        Modifier::LeftCtrl => VK_LCONTROL,
+        Modifier::RightCtrl => VK_RCONTROL,
         Modifier::Alt => VK_LMENU,
+        Modifier::LeftAlt => VK_LMENU,
+        Modifier::RightAlt => VK_RMENU,
         Modifier::Shift => VK_LSHIFT,
+        Modifier::LeftShift => VK_LSHIFT,
+        Modifier::RightShift => VK_RSHIFT,
         Modifier::Cmd | Modifier::Win => VK_LWIN,
+        Modifier::LeftCmd | Modifier::LeftWin => VK_LWIN,
+        Modifier::RightCmd | Modifier::RightWin => VK_RWIN,
     }
 }
 
@@ -453,17 +456,47 @@ fn modifier_to_vk(m: Modifier) -> VIRTUAL_KEY {
 fn current_modifier_mask() -> ModifierMask {
     let mut m = ModifierMask::EMPTY;
     unsafe {
-        if is_down(VK_SHIFT) || is_down(VK_LSHIFT) || is_down(VK_RSHIFT) {
+        let left_shift = is_down(VK_LSHIFT);
+        let right_shift = is_down(VK_RSHIFT);
+        if left_shift {
+            m.insert(Modifier::LeftShift);
+        }
+        if right_shift {
+            m.insert(Modifier::RightShift);
+        }
+        if !left_shift && !right_shift && is_down(VK_SHIFT) {
             m.insert(Modifier::Shift);
         }
-        if is_down(VK_CONTROL) || is_down(VK_LCONTROL) || is_down(VK_RCONTROL) {
+
+        let left_ctrl = is_down(VK_LCONTROL);
+        let right_ctrl = is_down(VK_RCONTROL);
+        if left_ctrl {
+            m.insert(Modifier::LeftCtrl);
+        }
+        if right_ctrl {
+            m.insert(Modifier::RightCtrl);
+        }
+        if !left_ctrl && !right_ctrl && is_down(VK_CONTROL) {
             m.insert(Modifier::Ctrl);
         }
-        if is_down(VK_MENU) || is_down(VK_LMENU) || is_down(VK_RMENU) {
+
+        let left_alt = is_down(VK_LMENU);
+        let right_alt = is_down(VK_RMENU);
+        if left_alt {
+            m.insert(Modifier::LeftAlt);
+        }
+        if right_alt {
+            m.insert(Modifier::RightAlt);
+        }
+        if !left_alt && !right_alt && is_down(VK_MENU) {
             m.insert(Modifier::Alt);
         }
-        if is_down(VK_LWIN) || is_down(VK_RWIN) {
-            m.insert(Modifier::Cmd);
+
+        if is_down(VK_LWIN) {
+            m.insert(Modifier::LeftCmd);
+        }
+        if is_down(VK_RWIN) {
+            m.insert(Modifier::RightCmd);
         }
     }
     m
@@ -736,9 +769,7 @@ pub(super) fn change_language(code: LanguageCode) {
             WPARAM(0),
             LPARAM(hkl.0 as isize),
         ) {
-            eprintln!(
-                "[keyboard-remap] change_language: PostMessage failed: {e:?}"
-            );
+            eprintln!("[keyboard-remap] change_language: PostMessage failed: {e:?}");
         }
     }
 }

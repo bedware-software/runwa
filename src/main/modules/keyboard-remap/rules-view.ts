@@ -59,6 +59,9 @@ function readTriggerBlock(
 }
 
 function displayTriggerName(raw: string): string {
+  const mod = formatModifierName(raw)
+  if (mod) return mod
+
   const lower = raw.toLowerCase()
   switch (lower) {
     case 'capslock':
@@ -263,23 +266,99 @@ function formatModifier(s: string): string {
 }
 
 function formatModifierName(s: string): string | null {
-  switch (s.toLowerCase()) {
+  switch (s.toLowerCase().replace(/-/g, '_')) {
     case 'ctrl':
     case 'control':
       return 'Ctrl'
+    case 'left_ctrl':
+    case 'left_control':
+    case 'lctrl':
+    case 'lcontrol':
+    case 'ctrl_left':
+    case 'control_left':
+      return 'Left Ctrl'
+    case 'right_ctrl':
+    case 'right_control':
+    case 'rctrl':
+    case 'rcontrol':
+    case 'ctrl_right':
+    case 'control_right':
+      return 'Right Ctrl'
     case 'alt':
     case 'option':
     case 'opt':
       return 'Alt'
+    case 'left_alt':
+    case 'left_option':
+    case 'left_opt':
+    case 'lalt':
+    case 'loption':
+    case 'lopt':
+    case 'alt_left':
+    case 'option_left':
+    case 'opt_left':
+      return 'Left Alt'
+    case 'right_alt':
+    case 'right_option':
+    case 'right_opt':
+    case 'ralt':
+    case 'roption':
+    case 'ropt':
+    case 'alt_right':
+    case 'option_right':
+    case 'opt_right':
+      return 'Right Alt'
     case 'shift':
       return 'Shift'
+    case 'left_shift':
+    case 'lshift':
+    case 'shift_left':
+      return 'Left Shift'
+    case 'right_shift':
+    case 'rshift':
+    case 'shift_right':
+      return 'Right Shift'
     case 'cmd':
     case 'command':
     case 'meta':
       return 'Cmd'
+    case 'left_cmd':
+    case 'left_command':
+    case 'left_meta':
+    case 'lcmd':
+    case 'lcommand':
+    case 'lmeta':
+    case 'cmd_left':
+    case 'command_left':
+    case 'meta_left':
+      return 'Left Cmd'
+    case 'right_cmd':
+    case 'right_command':
+    case 'right_meta':
+    case 'rcmd':
+    case 'rcommand':
+    case 'rmeta':
+    case 'cmd_right':
+    case 'command_right':
+    case 'meta_right':
+      return 'Right Cmd'
     case 'win':
     case 'super':
       return 'Win'
+    case 'left_win':
+    case 'left_super':
+    case 'lwin':
+    case 'lsuper':
+    case 'win_left':
+    case 'super_left':
+      return 'Left Win'
+    case 'right_win':
+    case 'right_super':
+    case 'rwin':
+    case 'rsuper':
+    case 'win_right':
+    case 'super_right':
+      return 'Right Win'
     default:
       return null
   }

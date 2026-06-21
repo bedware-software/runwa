@@ -59,7 +59,12 @@ impl super::HookHandle for MacosHook {
     }
 }
 
-static SM_SLOT: Lazy<Mutex<Option<StateMachine>>> = Lazy::new(|| Mutex::new(None));
+struct ActiveHook {
+    sm: StateMachine,
+    modifiers: ModifierMask,
+}
+
+static SM_SLOT: Lazy<Mutex<Option<ActiveHook>>> = Lazy::new(|| Mutex::new(None));
 
 // ---------------------------------------------------------------------------
 
@@ -89,7 +94,10 @@ pub fn install(rules: ResolvedRules) -> Result<MacosHook, String> {
 
     {
         let mut guard = SM_SLOT.lock();
-        *guard = Some(StateMachine::new(rules));
+        *guard = Some(ActiveHook {
+            sm: StateMachine::new(rules),
+            modifiers: ModifierMask::EMPTY,
+        });
     }
 
     let running = Arc::new(AtomicBool::new(true));
@@ -240,14 +248,32 @@ fn tap_callback(
         return CallbackResult::Keep;
     }
 
-    let (kind, key) = match etype {
+    enum DecodedEvent {
+        Key {
+            kind: EventKind,
+            key: LogicalKey,
+        },
+        Modifier {
+            key: LogicalKey,
+            modifier: Option<Modifier>,
+            flag_bit: CGEventFlags,
+        },
+    }
+
+    let decoded = match etype {
         CGEventType::KeyDown => {
             let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-            (EventKind::KeyDown, keycode_to_logical(kc))
+            DecodedEvent::Key {
+                kind: EventKind::KeyDown,
+                key: keycode_to_logical(kc),
+            }
         }
         CGEventType::KeyUp => {
             let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-            (EventKind::KeyUp, keycode_to_logical(kc))
+            DecodedEvent::Key {
+                kind: EventKind::KeyUp,
+                key: keycode_to_logical(kc),
+            }
         }
         CGEventType::FlagsChanged => {
             // macOS delivers modifier keys (CapsLock, Shift, Ctrl, Alt,
@@ -258,16 +284,14 @@ fn tap_callback(
             // state machine — if the user hasn't configured that key as a
             // trigger, `on_event` returns Forward and we keep the event.
             let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-            let Some((logical, flag_bit)) = modifier_keycode_to_logical(kc) else {
+            let Some((logical, modifier, flag_bit)) = modifier_keycode_to_logical(kc) else {
                 return CallbackResult::Keep;
             };
-            let flags = event.get_flags();
-            let kind = if flags.contains(flag_bit) {
-                EventKind::KeyDown
-            } else {
-                EventKind::KeyUp
-            };
-            (kind, logical)
+            DecodedEvent::Modifier {
+                key: logical,
+                modifier,
+                flag_bit,
+            }
         }
         // Mouse buttons surface as a generic non-trigger key press —
         // `LogicalKey::Other` already has the right semantics ("interruption
@@ -277,9 +301,12 @@ fn tap_callback(
         // the action handler below stamps the modifier flag onto the click
         // CGEvent so it reaches the foreground app as e.g. a Shift+click,
         // not a naked click.
-        CGEventType::LeftMouseDown
-        | CGEventType::RightMouseDown
-        | CGEventType::OtherMouseDown => (EventKind::KeyDown, LogicalKey::Other),
+        CGEventType::LeftMouseDown | CGEventType::RightMouseDown | CGEventType::OtherMouseDown => {
+            DecodedEvent::Key {
+                kind: EventKind::KeyDown,
+                key: LogicalKey::Other,
+            }
+        }
         _ => return CallbackResult::Keep,
     };
 
@@ -290,17 +317,45 @@ fn tap_callback(
     // Shift should still be "on" when our synthesized Home fires.
     let event_flags = event.get_flags();
 
-    // Mirror the flag state into the logical ModifierMask so rule lookup
-    // can distinguish `keys: [shift, 1]` from `keys: [1]`.
-    let raw = RawEvent {
-        kind,
-        key,
-        modifiers: modifier_mask_from_flags(event_flags),
-    };
     let action = {
         let mut guard = SM_SLOT.lock();
         match guard.as_mut() {
-            Some(sm) => sm.on_event(raw),
+            Some(active) => {
+                let (kind, key, modifiers) = match decoded {
+                    DecodedEvent::Key { kind, key } => {
+                        let mut modifiers = active.modifiers;
+                        modifiers.merge_missing_bases(modifier_mask_from_flags(event_flags));
+                        (kind, key, modifiers)
+                    }
+                    DecodedEvent::Modifier {
+                        key,
+                        modifier,
+                        flag_bit,
+                    } => {
+                        let kind = if let Some(m) = modifier {
+                            if active.modifiers.contains_exact(m) {
+                                active.modifiers.remove(m);
+                                EventKind::KeyUp
+                            } else {
+                                active.modifiers.insert(m);
+                                EventKind::KeyDown
+                            }
+                        } else if event_flags.contains(flag_bit) {
+                            EventKind::KeyDown
+                        } else {
+                            EventKind::KeyUp
+                        };
+                        let mut modifiers = active.modifiers;
+                        modifiers.merge_missing_bases(modifier_mask_from_flags(event_flags));
+                        (kind, key, modifiers)
+                    }
+                };
+                active.sm.on_event(RawEvent {
+                    kind,
+                    key,
+                    modifiers,
+                })
+            }
             None => return CallbackResult::Keep,
         }
     };
@@ -371,6 +426,10 @@ const KC_QUOTE: u16 = 0x27;
 const KC_COMMA: u16 = 0x2B;
 const KC_PERIOD: u16 = 0x2F;
 const KC_SLASH: u16 = 0x2C;
+const KC_RIGHT_SHIFT: u16 = 0x3C;
+const KC_RIGHT_CONTROL: u16 = 0x3E;
+const KC_RIGHT_OPTION: u16 = 0x3D;
+const KC_RIGHT_COMMAND: u16 = 0x36;
 
 fn keycode_to_logical(kc: u16) -> LogicalKey {
     // F19 is the HID-level stand-in for CapsLock: we ask macOS's hidutil
@@ -555,9 +614,17 @@ fn alpha_to_keycode(b: u8) -> Option<u16> {
 fn modifier_to_keycode(m: Modifier) -> u16 {
     match m {
         Modifier::Ctrl => KeyCode::CONTROL,
+        Modifier::LeftCtrl => KeyCode::CONTROL,
+        Modifier::RightCtrl => KC_RIGHT_CONTROL,
         Modifier::Alt => KeyCode::OPTION,
+        Modifier::LeftAlt => KeyCode::OPTION,
+        Modifier::RightAlt => KC_RIGHT_OPTION,
         Modifier::Shift => KeyCode::SHIFT,
+        Modifier::LeftShift => KeyCode::SHIFT,
+        Modifier::RightShift => KC_RIGHT_SHIFT,
         Modifier::Cmd | Modifier::Win => KeyCode::COMMAND,
+        Modifier::LeftCmd | Modifier::LeftWin => KeyCode::COMMAND,
+        Modifier::RightCmd | Modifier::RightWin => KC_RIGHT_COMMAND,
     }
 }
 
@@ -566,27 +633,74 @@ fn modifier_to_keycode(m: Modifier) -> u16 {
 /// that distinguishes down from up on that key. Covers every modifier that
 /// could be a top-level trigger in the YAML. Returns None for keycodes that
 /// aren't modifier-like (we leave those events untouched).
-fn modifier_keycode_to_logical(kc: u16) -> Option<(LogicalKey, CGEventFlags)> {
-    let right_shift = 0x3C_u16;
-    let right_control = 0x3E_u16;
-    let right_option = 0x3D_u16;
-    let right_command = 0x36_u16;
+fn modifier_keycode_to_logical(kc: u16) -> Option<(LogicalKey, Option<Modifier>, CGEventFlags)> {
     match kc {
-        kc if kc == KeyCode::CAPS_LOCK => Some((LogicalKey::CapsLock, CGEventFlags::CGEventFlagAlphaShift)),
-        kc if kc == KeyCode::SHIFT || kc == right_shift => Some((LogicalKey::Shift, CGEventFlags::CGEventFlagShift)),
-        kc if kc == KeyCode::CONTROL || kc == right_control => Some((LogicalKey::Ctrl, CGEventFlags::CGEventFlagControl)),
-        kc if kc == KeyCode::OPTION || kc == right_option => Some((LogicalKey::Alt, CGEventFlags::CGEventFlagAlternate)),
-        kc if kc == KeyCode::COMMAND || kc == right_command => Some((LogicalKey::Cmd, CGEventFlags::CGEventFlagCommand)),
+        kc if kc == KeyCode::CAPS_LOCK => Some((
+            LogicalKey::CapsLock,
+            None,
+            CGEventFlags::CGEventFlagAlphaShift,
+        )),
+        kc if kc == KeyCode::SHIFT => Some((
+            LogicalKey::LeftShift,
+            Some(Modifier::LeftShift),
+            CGEventFlags::CGEventFlagShift,
+        )),
+        kc if kc == KC_RIGHT_SHIFT => Some((
+            LogicalKey::RightShift,
+            Some(Modifier::RightShift),
+            CGEventFlags::CGEventFlagShift,
+        )),
+        kc if kc == KeyCode::CONTROL => Some((
+            LogicalKey::LeftCtrl,
+            Some(Modifier::LeftCtrl),
+            CGEventFlags::CGEventFlagControl,
+        )),
+        kc if kc == KC_RIGHT_CONTROL => Some((
+            LogicalKey::RightCtrl,
+            Some(Modifier::RightCtrl),
+            CGEventFlags::CGEventFlagControl,
+        )),
+        kc if kc == KeyCode::OPTION => Some((
+            LogicalKey::LeftAlt,
+            Some(Modifier::LeftAlt),
+            CGEventFlags::CGEventFlagAlternate,
+        )),
+        kc if kc == KC_RIGHT_OPTION => Some((
+            LogicalKey::RightAlt,
+            Some(Modifier::RightAlt),
+            CGEventFlags::CGEventFlagAlternate,
+        )),
+        kc if kc == KeyCode::COMMAND => Some((
+            LogicalKey::LeftCmd,
+            Some(Modifier::LeftCmd),
+            CGEventFlags::CGEventFlagCommand,
+        )),
+        kc if kc == KC_RIGHT_COMMAND => Some((
+            LogicalKey::RightCmd,
+            Some(Modifier::RightCmd),
+            CGEventFlags::CGEventFlagCommand,
+        )),
         _ => None,
     }
 }
 
 fn modifier_to_flag(m: Modifier) -> CGEventFlags {
     match m {
-        Modifier::Ctrl => CGEventFlags::CGEventFlagControl,
-        Modifier::Alt => CGEventFlags::CGEventFlagAlternate,
-        Modifier::Shift => CGEventFlags::CGEventFlagShift,
-        Modifier::Cmd | Modifier::Win => CGEventFlags::CGEventFlagCommand,
+        Modifier::Ctrl | Modifier::LeftCtrl | Modifier::RightCtrl => {
+            CGEventFlags::CGEventFlagControl
+        }
+        Modifier::Alt | Modifier::LeftAlt | Modifier::RightAlt => {
+            CGEventFlags::CGEventFlagAlternate
+        }
+        Modifier::Shift | Modifier::LeftShift | Modifier::RightShift => {
+            CGEventFlags::CGEventFlagShift
+        }
+        Modifier::Cmd
+        | Modifier::LeftCmd
+        | Modifier::RightCmd
+        | Modifier::Win
+        | Modifier::LeftWin
+        | Modifier::RightWin => CGEventFlags::CGEventFlagCommand,
     }
 }
 
@@ -786,10 +900,7 @@ extern "C" {
         properties: CFDictionaryRef,
         includeAllInstalled: Boolean,
     ) -> CFArrayRef;
-    fn TISGetInputSourceProperty(
-        inputSource: CFTypeRef,
-        propertyKey: CFStringRef,
-    ) -> CFTypeRef;
+    fn TISGetInputSourceProperty(inputSource: CFTypeRef, propertyKey: CFStringRef) -> CFTypeRef;
     fn TISSelectInputSource(inputSource: CFTypeRef) -> i32;
 
     static kTISPropertyInputSourceLanguages: CFStringRef;
@@ -838,7 +949,11 @@ type DispatchFunction = extern "C" fn(*mut std::ffi::c_void);
 
 extern "C" {
     static _dispatch_main_q: std::ffi::c_void;
-    fn dispatch_async_f(queue: DispatchQueue, context: *mut std::ffi::c_void, work: DispatchFunction);
+    fn dispatch_async_f(
+        queue: DispatchQueue,
+        context: *mut std::ffi::c_void,
+        work: DispatchFunction,
+    );
 }
 
 fn dispatch_get_main_queue() -> DispatchQueue {
@@ -868,10 +983,8 @@ fn select_input_source(target: &str) {
                 continue;
             }
             // Skip sources the system marks as not user-selectable.
-            let selectable = TISGetInputSourceProperty(
-                source,
-                kTISPropertyInputSourceIsSelectCapable,
-            );
+            let selectable =
+                TISGetInputSourceProperty(source, kTISPropertyInputSourceIsSelectCapable);
             if !selectable.is_null() && !CFBooleanGetValue(selectable as _) {
                 continue;
             }
@@ -891,7 +1004,9 @@ fn select_input_source(target: &str) {
             if primary_ref.is_null() {
                 continue;
             }
-            let Some(primary) = cf_string_to_owned(primary_ref) else { continue };
+            let Some(primary) = cf_string_to_owned(primary_ref) else {
+                continue;
+            };
             let primary_lower = primary.to_ascii_lowercase();
             let matches = primary_lower == target
                 || primary_lower.starts_with(&format!("{target}-"))
@@ -928,11 +1043,7 @@ unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
     // Fast path: many CFStrings have a directly-readable C string buffer.
     let ptr = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
     if !ptr.is_null() {
-        return Some(
-            std::ffi::CStr::from_ptr(ptr)
-                .to_string_lossy()
-                .into_owned(),
-        );
+        return Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned());
     }
     // Slow path: copy out via a UTF-8 buffer big enough for the worst case.
     let len = CFStringGetLength(s);

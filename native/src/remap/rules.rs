@@ -1,8 +1,9 @@
 //! Rule schema v3.
 //!
 //! YAML config is a map keyed by the trigger key name — any recognised
-//! logical key works (`capslock`, `space`, `shift`, `ctrl`, `alt`, `cmd`,
-//! alpha keys, F-keys, punctuation, …). Each entry is a dual-role remap:
+//! logical key works (`capslock`, `space`, `shift`, `right_shift`, `ctrl`,
+//! `left_alt`, `cmd`, alpha keys, F-keys, punctuation, …). Each entry is a
+//! dual-role remap:
 //! what happens on tap (press-release alone) vs on hold (press-and-
 //! interrupt-with-another-key). Presence of a trigger block is what
 //! enables it; omit it and the key behaves normally.
@@ -16,6 +17,9 @@
 //!   on_tap: [cmd, space]       # tap-alone emits Cmd+Space (Spotlight)
 //!                              # on_hold defaults to transparent Shift
 //!                              # because the trigger itself is a modifier
+//!
+//! right_shift:
+//!   on_tap: [escape]           # only the physical right Shift
 //!
 //! space:
 //!   on_tap: [space]
@@ -42,40 +46,113 @@ use super::state::LogicalKey;
 // ---------------------------------------------------------------------------
 // Public data shapes (logical modifiers / pre-baked synthetic events).
 
-/// Platform-agnostic modifier. `Cmd`/`Win` are treated as the same logical
-/// modifier at emit time (Cmd on macOS, Win on Windows).
+/// Platform-agnostic modifier. Unsided variants (`Shift`, `Ctrl`, ...)
+/// preserve the historical behavior: they mean "either physical side" for
+/// matching, and synthesize the left-side key when emitted. Sided variants
+/// give configs precise control over left/right modifier keys.
+///
+/// `Cmd`/`Win` are treated as the same logical modifier at match time (Cmd on
+/// macOS, Win on Windows), but both spellings are kept for readable synthetic
+/// events and backwards-compatible tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Modifier {
+    Ctrl,
+    LeftCtrl,
+    RightCtrl,
+    Alt,
+    LeftAlt,
+    RightAlt,
+    Shift,
+    LeftShift,
+    RightShift,
+    Cmd,
+    LeftCmd,
+    RightCmd,
+    Win,
+    LeftWin,
+    RightWin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModifierBase {
     Ctrl,
     Alt,
     Shift,
     Cmd,
-    Win,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModifierSide {
+    Any,
+    Left,
+    Right,
+}
+
+impl Modifier {
+    pub fn base(self) -> ModifierBase {
+        match self {
+            Modifier::Ctrl | Modifier::LeftCtrl | Modifier::RightCtrl => ModifierBase::Ctrl,
+            Modifier::Alt | Modifier::LeftAlt | Modifier::RightAlt => ModifierBase::Alt,
+            Modifier::Shift | Modifier::LeftShift | Modifier::RightShift => ModifierBase::Shift,
+            Modifier::Cmd
+            | Modifier::LeftCmd
+            | Modifier::RightCmd
+            | Modifier::Win
+            | Modifier::LeftWin
+            | Modifier::RightWin => ModifierBase::Cmd,
+        }
+    }
+
+    pub fn side(self) -> ModifierSide {
+        match self {
+            Modifier::LeftCtrl
+            | Modifier::LeftAlt
+            | Modifier::LeftShift
+            | Modifier::LeftCmd
+            | Modifier::LeftWin => ModifierSide::Left,
+            Modifier::RightCtrl
+            | Modifier::RightAlt
+            | Modifier::RightShift
+            | Modifier::RightCmd
+            | Modifier::RightWin => ModifierSide::Right,
+            Modifier::Ctrl | Modifier::Alt | Modifier::Shift | Modifier::Cmd | Modifier::Win => {
+                ModifierSide::Any
+            }
+        }
+    }
 }
 
 /// Bitmask of physically-held modifiers at the moment of a non-modifier
-/// key press. Used to disambiguate `keys: [1]` from `keys: [shift, 1]` in
-/// explicit-override rules.
+/// key press. Used to disambiguate `keys: [1]`, `keys: [shift, 1]`, and
+/// `keys: [right_shift, 1]` in explicit-override rules.
 ///
 /// `Cmd` and `Win` share a bit since the state machine treats them as the
 /// same logical modifier (Cmd on macOS, Win on Windows).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct ModifierMask(u8);
+pub struct ModifierMask(u16);
 
 impl ModifierMask {
     pub const EMPTY: Self = Self(0);
 
-    const CTRL_BIT: u8 = 1 << 0;
-    const ALT_BIT: u8 = 1 << 1;
-    const SHIFT_BIT: u8 = 1 << 2;
-    const CMD_BIT: u8 = 1 << 3;
+    const CTRL_BIT: u16 = 1 << 0;
+    const LEFT_CTRL_BIT: u16 = 1 << 1;
+    const RIGHT_CTRL_BIT: u16 = 1 << 2;
+    const ALT_BIT: u16 = 1 << 3;
+    const LEFT_ALT_BIT: u16 = 1 << 4;
+    const RIGHT_ALT_BIT: u16 = 1 << 5;
+    const SHIFT_BIT: u16 = 1 << 6;
+    const LEFT_SHIFT_BIT: u16 = 1 << 7;
+    const RIGHT_SHIFT_BIT: u16 = 1 << 8;
+    const CMD_BIT: u16 = 1 << 9;
+    const LEFT_CMD_BIT: u16 = 1 << 10;
+    const RIGHT_CMD_BIT: u16 = 1 << 11;
 
     pub fn insert(&mut self, m: Modifier) {
         self.0 |= Self::bit(m);
     }
 
     pub fn remove(&mut self, m: Modifier) {
-        self.0 &= !Self::bit(m);
+        self.0 &= !Self::remove_bits(m);
     }
 
     pub fn is_empty(self) -> bool {
@@ -83,16 +160,124 @@ impl ModifierMask {
     }
 
     pub fn contains(self, m: Modifier) -> bool {
+        self.0 & Self::match_bits(m) != 0
+    }
+
+    pub fn contains_exact(self, m: Modifier) -> bool {
         self.0 & Self::bit(m) != 0
     }
 
-    fn bit(m: Modifier) -> u8 {
+    /// Merge a coarse flag-derived mask without losing side precision from
+    /// platform tracking. This is mainly for macOS: CGEventFlags says "Shift
+    /// is down" but not which Shift, while FlagsChanged events do carry the
+    /// physical keycode.
+    pub fn merge_missing_bases(&mut self, other: ModifierMask) {
+        for m in [
+            Modifier::Ctrl,
+            Modifier::Alt,
+            Modifier::Shift,
+            Modifier::Cmd,
+        ] {
+            if !self.contains(m) && other.contains(m) {
+                self.insert(m);
+            }
+        }
+    }
+
+    /// Candidate masks for explicit rule lookup. The first candidate is the
+    /// exact physical-side mask. Later candidates generalize each active
+    /// modifier base to its unsided form so `keys: [shift, 1]` still matches a
+    /// left- or right-shift physical press, while `keys: [right_shift, 1]`
+    /// remains side-specific.
+    pub fn lookup_candidates(self) -> SmallVec<[ModifierMask; 16]> {
+        let mut candidates: SmallVec<[ModifierMask; 16]> = SmallVec::new();
+        candidates.push(ModifierMask::EMPTY);
+
+        for base in [
+            ModifierBase::Ctrl,
+            ModifierBase::Alt,
+            ModifierBase::Shift,
+            ModifierBase::Cmd,
+        ] {
+            let choices = self.base_choices(base);
+            if choices.is_empty() {
+                continue;
+            }
+
+            let existing = candidates.clone();
+            candidates.clear();
+            for prefix in existing {
+                for choice in &choices {
+                    candidates.push(ModifierMask(prefix.0 | choice.0));
+                }
+            }
+        }
+
+        candidates
+    }
+
+    fn bit(m: Modifier) -> u16 {
         match m {
             Modifier::Ctrl => Self::CTRL_BIT,
+            Modifier::LeftCtrl => Self::LEFT_CTRL_BIT,
+            Modifier::RightCtrl => Self::RIGHT_CTRL_BIT,
             Modifier::Alt => Self::ALT_BIT,
+            Modifier::LeftAlt => Self::LEFT_ALT_BIT,
+            Modifier::RightAlt => Self::RIGHT_ALT_BIT,
             Modifier::Shift => Self::SHIFT_BIT,
+            Modifier::LeftShift => Self::LEFT_SHIFT_BIT,
+            Modifier::RightShift => Self::RIGHT_SHIFT_BIT,
             Modifier::Cmd | Modifier::Win => Self::CMD_BIT,
+            Modifier::LeftCmd | Modifier::LeftWin => Self::LEFT_CMD_BIT,
+            Modifier::RightCmd | Modifier::RightWin => Self::RIGHT_CMD_BIT,
         }
+    }
+
+    fn match_bits(m: Modifier) -> u16 {
+        match m.side() {
+            ModifierSide::Any => Self::base_bits(m.base()),
+            ModifierSide::Left | ModifierSide::Right => Self::bit(m) | Self::unsided_bit(m.base()),
+        }
+    }
+
+    fn remove_bits(m: Modifier) -> u16 {
+        match m.side() {
+            ModifierSide::Any => Self::base_bits(m.base()),
+            ModifierSide::Left | ModifierSide::Right => Self::bit(m),
+        }
+    }
+
+    fn base_bits(base: ModifierBase) -> u16 {
+        match base {
+            ModifierBase::Ctrl => Self::CTRL_BIT | Self::LEFT_CTRL_BIT | Self::RIGHT_CTRL_BIT,
+            ModifierBase::Alt => Self::ALT_BIT | Self::LEFT_ALT_BIT | Self::RIGHT_ALT_BIT,
+            ModifierBase::Shift => Self::SHIFT_BIT | Self::LEFT_SHIFT_BIT | Self::RIGHT_SHIFT_BIT,
+            ModifierBase::Cmd => Self::CMD_BIT | Self::LEFT_CMD_BIT | Self::RIGHT_CMD_BIT,
+        }
+    }
+
+    fn unsided_bit(base: ModifierBase) -> u16 {
+        match base {
+            ModifierBase::Ctrl => Self::CTRL_BIT,
+            ModifierBase::Alt => Self::ALT_BIT,
+            ModifierBase::Shift => Self::SHIFT_BIT,
+            ModifierBase::Cmd => Self::CMD_BIT,
+        }
+    }
+
+    fn base_choices(self, base: ModifierBase) -> SmallVec<[ModifierMask; 2]> {
+        let bits = self.0 & Self::base_bits(base);
+        let mut choices = SmallVec::new();
+        if bits == 0 {
+            return choices;
+        }
+
+        let exact = ModifierMask(bits & !Self::unsided_bit(base));
+        if !exact.is_empty() {
+            choices.push(exact);
+        }
+        choices.push(ModifierMask(Self::unsided_bit(base)));
+        choices
     }
 }
 
@@ -294,8 +479,7 @@ impl EmitPair {
     /// `on_tap` (a momentary chord on tap-and-release), where push-to-
     /// talk semantics don't apply.
     pub fn into_flat_tap(self) -> Vec<SyntheticEvent> {
-        let mut out =
-            Vec::with_capacity(self.on_press.len() + self.on_release.len());
+        let mut out = Vec::with_capacity(self.on_press.len() + self.on_release.len());
         out.extend(self.on_press);
         out.extend(self.on_release);
         out
@@ -384,8 +568,8 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
                 }
             }
         }
-        let rules: Vec<HoldRule> = serde_yml::from_value(v.clone())
-            .map_err(|e| format!("on_hold rules list: {e}"))?;
+        let rules: Vec<HoldRule> =
+            serde_yml::from_value(v.clone()).map_err(|e| format!("on_hold rules list: {e}"))?;
         return Ok(HoldSpec::Rules(rules));
     }
     Err(format!(
@@ -479,8 +663,8 @@ pub fn parse(yaml: &str) -> Result<ResolvedRules, String> {
         let key = parse_trigger_key(name).ok_or_else(|| {
             format!(
                 "unknown trigger key '{name}' at top level — expected a logical key name like \
-                 capslock, space, shift, ctrl, alt, cmd, a letter, a named key (escape/tab/…), \
-                 or a punctuation alias"
+                 capslock, space, shift/right_shift, ctrl/left_ctrl, alt/right_alt, cmd/left_cmd, \
+                 a letter, a named key (escape/tab/…), or a punctuation alias"
             )
         })?;
         let binding = resolve_binding(key, remap)?;
@@ -499,9 +683,7 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
             TapSpec::Single(s) => {
                 Some(bake_hotkey_tokens(std::slice::from_ref(&s))?.into_flat_tap())
             }
-            TapSpec::Combo(items) => {
-                Some(bake_hotkey_tokens(items.as_slice())?.into_flat_tap())
-            }
+            TapSpec::Combo(items) => Some(bake_hotkey_tokens(items.as_slice())?.into_flat_tap()),
         },
     };
 
@@ -517,89 +699,90 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 }
             },
             HoldSpec::Rules(list) => {
-            let mut overrides: HashMap<(ModifierMask, NamedKey), EmitPair> =
-                HashMap::new();
-            let mut fallback: Option<Modifier> = None;
+                let mut overrides: HashMap<(ModifierMask, NamedKey), EmitPair> = HashMap::new();
+                let mut fallback: Option<Modifier> = None;
 
-            for rule in &list {
-                // OS gate.
-                if let Some(p) = &rule.os {
-                    if !os_matches(p) {
-                        continue;
+                for rule in &list {
+                    // OS gate.
+                    if let Some(p) = &rule.os {
+                        if !os_matches(p) {
+                            continue;
+                        }
                     }
-                }
 
-                if rule.keys.is_empty() {
-                    return Err(format!(
-                        "rule '{}': keys list cannot be empty",
-                        rule.description.as_deref().unwrap_or("<unnamed>"),
-                    ));
-                }
-
-                // Last element of keys is the trigger key; any preceding
-                // elements are required physical modifiers. So
-                // `keys: [w]`         → mods = {}, trigger = W
-                // `keys: [shift, w]`  → mods = {Shift}, trigger = W
-                // `keys: [ctrl, shift, 1]` → mods = {Ctrl,Shift}, trigger = 1
-                let (mods_tokens, trigger_token) = rule.keys.split_at(rule.keys.len() - 1);
-                let trigger_raw = trigger_token[0].as_str();
-
-                // The fallback-combo sentinel. `any` is the canonical form;
-                // `_default` is accepted as a legacy alias so existing
-                // user YAMLs keep parsing. Same semantics either way.
-                if trigger_raw.eq_ignore_ascii_case("any")
-                    || trigger_raw.eq_ignore_ascii_case("_default")
-                {
-                    if !mods_tokens.is_empty() {
+                    if rule.keys.is_empty() {
                         return Err(format!(
-                            "rule '{}': [any] cannot be prefixed with modifiers",
+                            "rule '{}': keys list cannot be empty",
                             rule.description.as_deref().unwrap_or("<unnamed>"),
                         ));
                     }
-                    let to = rule.to_hotkey.as_deref().ok_or_else(|| {
-                        "rule with keys: [any] must use `to_hotkey: [<modifier>]`".to_string()
-                    })?;
-                    if to.len() != 1 {
-                        return Err(format!(
+
+                    // Last element of keys is the trigger key; any preceding
+                    // elements are required physical modifiers. So
+                    // `keys: [w]`         → mods = {}, trigger = W
+                    // `keys: [shift, w]`  → mods = {Shift}, trigger = W
+                    // `keys: [ctrl, shift, 1]` → mods = {Ctrl,Shift}, trigger = 1
+                    let (mods_tokens, trigger_token) = rule.keys.split_at(rule.keys.len() - 1);
+                    let trigger_raw = trigger_token[0].as_str();
+
+                    // The fallback-combo sentinel. `any` is the canonical form;
+                    // `_default` is accepted as a legacy alias so existing
+                    // user YAMLs keep parsing. Same semantics either way.
+                    if trigger_raw.eq_ignore_ascii_case("any")
+                        || trigger_raw.eq_ignore_ascii_case("_default")
+                    {
+                        if !mods_tokens.is_empty() {
+                            return Err(format!(
+                                "rule '{}': [any] cannot be prefixed with modifiers",
+                                rule.description.as_deref().unwrap_or("<unnamed>"),
+                            ));
+                        }
+                        let to = rule.to_hotkey.as_deref().ok_or_else(|| {
+                            "rule with keys: [any] must use `to_hotkey: [<modifier>]`".to_string()
+                        })?;
+                        if to.len() != 1 {
+                            return Err(format!(
                             "rule with keys: [any] must have to_hotkey = a single modifier, got {to:?}"
                         ));
-                    }
-                    match parse_modifier(to[0].as_str()) {
-                        Some(m) => fallback = Some(m),
-                        None => {
-                            return Err(format!(
-                                "rule with keys: [any] has unknown modifier '{}'",
-                                to[0].as_str()
-                            ))
                         }
+                        match parse_modifier(to[0].as_str()) {
+                            Some(m) => fallback = Some(m),
+                            None => {
+                                return Err(format!(
+                                    "rule with keys: [any] has unknown modifier '{}'",
+                                    to[0].as_str()
+                                ))
+                            }
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                let mut mods = ModifierMask::EMPTY;
-                for t in mods_tokens {
-                    match parse_modifier(t.as_str()) {
+                    let mut mods = ModifierMask::EMPTY;
+                    for t in mods_tokens {
+                        match parse_modifier(t.as_str()) {
                         Some(m) => mods.insert(m),
                         None => {
                             return Err(format!(
                                 "rule '{}': unknown modifier '{}' in keys prefix — \
-                                 expected ctrl/alt/shift/cmd/win (or aliases)",
+                                 expected ctrl/alt/shift/cmd/win, optionally prefixed with left_ or right_",
                                 rule.description.as_deref().unwrap_or("<unnamed>"),
                                 t.as_str(),
                             ))
                         }
                     }
+                    }
+
+                    let trigger_key = parse_named_key(trigger_raw)
+                        .ok_or_else(|| format!("unknown trigger key '{trigger_raw}' in rule"))?;
+
+                    let events = bake_rule_action(rule)?;
+                    overrides.insert((mods, trigger_key), events);
                 }
 
-                let trigger_key = parse_named_key(trigger_raw).ok_or_else(|| {
-                    format!("unknown trigger key '{trigger_raw}' in rule")
-                })?;
-
-                let events = bake_rule_action(rule)?;
-                overrides.insert((mods, trigger_key), events);
-            }
-
-                ResolvedHold::Explicit { overrides, fallback }
+                ResolvedHold::Explicit {
+                    overrides,
+                    fallback,
+                }
             }
         },
     };
@@ -695,11 +878,7 @@ fn bake_hotkey_tokens(tokens: &[String]) -> Result<EmitPair, String> {
     for m in mods {
         match parse_modifier(m) {
             Some(md) => modifier_events.push(SyntheticEvent::ModifierDown(md)),
-            None => {
-                return Err(format!(
-                    "unknown modifier '{m}' in hotkey {tokens:?}"
-                ))
-            }
+            None => return Err(format!("unknown modifier '{m}' in hotkey {tokens:?}")),
         }
     }
 
@@ -739,16 +918,43 @@ fn bake_hotkey_tokens(tokens: &[String]) -> Result<EmitPair, String> {
         }
     }
 
-    Ok(EmitPair { on_press, on_release })
+    Ok(EmitPair {
+        on_press,
+        on_release,
+    })
 }
 
 fn parse_modifier(s: &str) -> Option<Modifier> {
-    match s.to_ascii_lowercase().as_str() {
+    let lower = s.to_ascii_lowercase();
+    let normalized = lower.replace('-', "_");
+    match normalized.as_str() {
         "ctrl" | "control" => Some(Modifier::Ctrl),
+        "left_ctrl" | "left_control" | "lctrl" | "lcontrol" | "ctrl_left" | "control_left" => {
+            Some(Modifier::LeftCtrl)
+        }
+        "right_ctrl" | "right_control" | "rctrl" | "rcontrol" | "ctrl_right" | "control_right" => {
+            Some(Modifier::RightCtrl)
+        }
         "alt" | "option" | "opt" => Some(Modifier::Alt),
+        "left_alt" | "left_option" | "left_opt" | "lalt" | "loption" | "lopt" | "alt_left"
+        | "option_left" | "opt_left" => Some(Modifier::LeftAlt),
+        "right_alt" | "right_option" | "right_opt" | "ralt" | "roption" | "ropt" | "alt_right"
+        | "option_right" | "opt_right" => Some(Modifier::RightAlt),
         "shift" => Some(Modifier::Shift),
+        "left_shift" | "lshift" | "shift_left" => Some(Modifier::LeftShift),
+        "right_shift" | "rshift" | "shift_right" => Some(Modifier::RightShift),
         "cmd" | "command" | "meta" => Some(Modifier::Cmd),
+        "left_cmd" | "left_command" | "left_meta" | "lcmd" | "lcommand" | "lmeta" | "cmd_left"
+        | "command_left" | "meta_left" => Some(Modifier::LeftCmd),
+        "right_cmd" | "right_command" | "right_meta" | "rcmd" | "rcommand" | "rmeta"
+        | "cmd_right" | "command_right" | "meta_right" => Some(Modifier::RightCmd),
         "win" | "super" => Some(Modifier::Win),
+        "left_win" | "left_super" | "lwin" | "lsuper" | "win_left" | "super_left" => {
+            Some(Modifier::LeftWin)
+        }
+        "right_win" | "right_super" | "rwin" | "rsuper" | "win_right" | "super_right" => {
+            Some(Modifier::RightWin)
+        }
         _ => None,
     }
 }
@@ -759,19 +965,38 @@ fn parse_modifier(s: &str) -> Option<Modifier> {
 /// plus the non-Named triggers `capslock` and `space`.
 fn parse_trigger_key(name: &str) -> Option<LogicalKey> {
     let lower = name.to_ascii_lowercase();
-    match lower.as_str() {
+    let normalized = lower.replace('-', "_");
+    match normalized.as_str() {
         "capslock" | "caps_lock" | "caps-lock" => Some(LogicalKey::CapsLock),
         "space" => Some(LogicalKey::Space),
         "shift" => Some(LogicalKey::Shift),
+        "left_shift" | "lshift" | "shift_left" => Some(LogicalKey::LeftShift),
+        "right_shift" | "rshift" | "shift_right" => Some(LogicalKey::RightShift),
         "ctrl" | "control" => Some(LogicalKey::Ctrl),
+        "left_ctrl" | "left_control" | "lctrl" | "lcontrol" | "ctrl_left" | "control_left" => {
+            Some(LogicalKey::LeftCtrl)
+        }
+        "right_ctrl" | "right_control" | "rctrl" | "rcontrol" | "ctrl_right" | "control_right" => {
+            Some(LogicalKey::RightCtrl)
+        }
         "alt" | "option" | "opt" => Some(LogicalKey::Alt),
+        "left_alt" | "left_option" | "left_opt" | "lalt" | "loption" | "lopt" | "alt_left"
+        | "option_left" | "opt_left" => Some(LogicalKey::LeftAlt),
+        "right_alt" | "right_option" | "right_opt" | "ralt" | "roption" | "ropt" | "alt_right"
+        | "option_right" | "opt_right" => Some(LogicalKey::RightAlt),
         "cmd" | "command" | "meta" | "win" | "super" => Some(LogicalKey::Cmd),
+        "left_cmd" | "left_command" | "left_meta" | "left_win" | "left_super" | "lcmd"
+        | "lcommand" | "lmeta" | "lwin" | "lsuper" | "cmd_left" | "command_left" | "meta_left"
+        | "win_left" | "super_left" => Some(LogicalKey::LeftCmd),
+        "right_cmd" | "right_command" | "right_meta" | "right_win" | "right_super" | "rcmd"
+        | "rcommand" | "rmeta" | "rwin" | "rsuper" | "cmd_right" | "command_right"
+        | "meta_right" | "win_right" | "super_right" => Some(LogicalKey::RightCmd),
         _ => parse_named_key(&lower).map(LogicalKey::Named),
     }
 }
 
 /// Sensible `on_hold` default when the user didn't write one. For a
-/// modifier trigger (Shift/Ctrl/Alt/Cmd) we default to a transparent
+/// modifier trigger (Shift/Ctrl/Alt/Cmd, sided or unsided) we default to a transparent
 /// layer of that same modifier — otherwise a `shift: { on_tap: [cmd,
 /// space] }` rule would swallow the user's real Shift usage (Shift+L
 /// would arrive as lowercase l because we'd suppress Shift-down waiting
@@ -781,9 +1006,17 @@ fn parse_trigger_key(name: &str) -> Option<LogicalKey> {
 fn default_on_hold(trigger: LogicalKey) -> ResolvedHold {
     match trigger {
         LogicalKey::Shift => ResolvedHold::TransparentModifier(Modifier::Shift),
+        LogicalKey::LeftShift => ResolvedHold::TransparentModifier(Modifier::LeftShift),
+        LogicalKey::RightShift => ResolvedHold::TransparentModifier(Modifier::RightShift),
         LogicalKey::Ctrl => ResolvedHold::TransparentModifier(Modifier::Ctrl),
+        LogicalKey::LeftCtrl => ResolvedHold::TransparentModifier(Modifier::LeftCtrl),
+        LogicalKey::RightCtrl => ResolvedHold::TransparentModifier(Modifier::RightCtrl),
         LogicalKey::Alt => ResolvedHold::TransparentModifier(Modifier::Alt),
+        LogicalKey::LeftAlt => ResolvedHold::TransparentModifier(Modifier::LeftAlt),
+        LogicalKey::RightAlt => ResolvedHold::TransparentModifier(Modifier::RightAlt),
         LogicalKey::Cmd => ResolvedHold::TransparentModifier(Modifier::Cmd),
+        LogicalKey::LeftCmd => ResolvedHold::TransparentModifier(Modifier::LeftCmd),
+        LogicalKey::RightCmd => ResolvedHold::TransparentModifier(Modifier::RightCmd),
         _ => ResolvedHold::Passthrough,
     }
 }
@@ -964,7 +1197,10 @@ space:
         let r = parse(src).unwrap();
         let s = binding(&r, LogicalKey::Space);
         match &s.on_hold {
-            ResolvedHold::Explicit { overrides, fallback } => {
+            ResolvedHold::Explicit {
+                overrides,
+                fallback,
+            } => {
                 assert_eq!(*fallback, Some(Modifier::Cmd));
                 let pair = overrides.get(&ov(alpha('W'))).expect("W override present");
                 assert_eq!(
@@ -1338,6 +1574,87 @@ shift:
     }
 
     #[test]
+    fn sided_modifier_trigger_names_parse() {
+        let src = r#"
+right_shift:
+  on_tap: [escape]
+left_ctrl:
+  on_tap: [tab]
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::RightShift).on_hold {
+            ResolvedHold::TransparentModifier(Modifier::RightShift) => {}
+            other => panic!("expected TransparentModifier(RightShift), got {other:?}"),
+        }
+        match &binding(&r, LogicalKey::LeftCtrl).on_hold {
+            ResolvedHold::TransparentModifier(Modifier::LeftCtrl) => {}
+            other => panic!("expected TransparentModifier(LeftCtrl), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sided_modifier_prefixes_parse_in_rules_and_hotkeys() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [right_shift, 1], to_hotkey: [right_ctrl, right_alt, delete] }
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let mut mask = ModifierMask::EMPTY;
+                mask.insert(Modifier::RightShift);
+                let pair = overrides
+                    .get(&(mask, alpha('1')))
+                    .expect("right-shift override present");
+                assert_eq!(
+                    pair.on_press.as_slice(),
+                    &[
+                        SyntheticEvent::ModifierDown(Modifier::RightCtrl),
+                        SyntheticEvent::ModifierDown(Modifier::RightAlt),
+                        SyntheticEvent::KeyDown(NamedKey::Delete),
+                    ]
+                );
+                assert_eq!(
+                    pair.on_release.as_slice(),
+                    &[
+                        SyntheticEvent::KeyUp(NamedKey::Delete),
+                        SyntheticEvent::ModifierUp(Modifier::RightAlt),
+                        SyntheticEvent::ModifierUp(Modifier::RightCtrl),
+                    ]
+                );
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn modifier_mask_side_matching_and_generic_fallback() {
+        let mut exact = ModifierMask::EMPTY;
+        exact.insert(Modifier::RightShift);
+        assert!(exact.contains_exact(Modifier::RightShift));
+        assert!(!exact.contains_exact(Modifier::LeftShift));
+        assert!(exact.contains(Modifier::Shift));
+
+        let candidates = exact.lookup_candidates();
+        let mut generic = ModifierMask::EMPTY;
+        generic.insert(Modifier::Shift);
+        assert!(candidates.contains(&exact));
+        assert!(candidates.contains(&generic));
+
+        let mut tracked = ModifierMask::EMPTY;
+        tracked.insert(Modifier::LeftCtrl);
+        let mut flags = ModifierMask::EMPTY;
+        flags.insert(Modifier::Ctrl);
+        flags.insert(Modifier::Alt);
+        tracked.merge_missing_bases(flags);
+        assert!(tracked.contains_exact(Modifier::LeftCtrl));
+        assert!(!tracked.contains_exact(Modifier::Ctrl));
+        assert!(tracked.contains_exact(Modifier::Alt));
+    }
+
+    #[test]
     fn unknown_top_level_key_errors() {
         let src = r#"
 bananafish:
@@ -1397,7 +1714,9 @@ space:
         // Shift with only on_tap written — hold defaults to transparent Shift.
         match &binding(&r, LogicalKey::Shift).on_hold {
             ResolvedHold::TransparentModifier(Modifier::Shift) => {}
-            other => panic!("shift default on_hold should be TransparentModifier(Shift), got {other:?}"),
+            other => {
+                panic!("shift default on_hold should be TransparentModifier(Shift), got {other:?}")
+            }
         }
     }
 }

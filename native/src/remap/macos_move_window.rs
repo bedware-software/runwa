@@ -68,10 +68,7 @@ extern "C" {
         attribute: core_foundation_sys::string::CFStringRef,
         value: *mut CFTypeRef,
     ) -> AXError;
-    fn AXUIElementSetMessagingTimeout(
-        element: AXUIElementRef,
-        timeout_in_seconds: f32,
-    ) -> AXError;
+    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> AXError;
     fn AXValueGetValue(value: AXValueRef, the_type: u32, value_ptr: *mut c_void) -> bool;
     fn CGWarpMouseCursorPosition(new_cursor_position: CGPoint) -> i32;
     fn CGAssociateMouseAndMouseCursorPosition(connected: bool) -> i32;
@@ -293,10 +290,7 @@ fn active_window_frame() -> Option<CGRect> {
             return None;
         }
 
-        Some(CGRect {
-            origin,
-            size: dims,
-        })
+        Some(CGRect { origin, size: dims })
     }
 }
 
@@ -349,10 +343,7 @@ fn active_window_button_frame(button_attr: &str) -> Option<CGRect> {
             return None;
         }
 
-        Some(CGRect {
-            origin,
-            size: dims,
-        })
+        Some(CGRect { origin, size: dims })
     }
 }
 

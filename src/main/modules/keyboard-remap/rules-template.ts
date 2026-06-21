@@ -5,9 +5,12 @@
  * Schema:
  *   Top-level keys name a physical trigger. Any recognised logical key
  *   works — the classic lock/space triggers (capslock, space), the OS
- *   modifiers (shift, ctrl, alt, cmd), alpha/number keys, named keys,
- *   punctuation aliases, etc. Presence of a block = the trigger is
- *   active; omit it = the key behaves normally.
+ *   modifiers (shift, ctrl, alt, cmd), side-specific modifiers
+ *   (left_shift, right_shift, left_ctrl, right_ctrl, left_alt, right_alt,
+ *   left_cmd/right_cmd or left_win/right_win), alpha/number keys, named keys,
+ *   punctuation aliases, etc. Presence of a block = the trigger is active;
+ *   omit it = the key behaves normally. Unsided modifier names keep the old
+ *   behavior: either physical side can trigger/match.
  *
  *   on_tap:   [key]                press-and-release with no interruption
  *   on_tap:   [mod, ..., key]      combo on tap
@@ -19,11 +22,14 @@
  *   and Cmd+Space (Spotlight).
  *
  *   on_hold:  [<modifier>]         while held, act as that modifier
- *                                  (transparent layer)
+ *                                  (transparent layer). For modifier
+ *                                  triggers, an unsided transparent hold
+ *                                  preserves the physical side pressed.
  *   on_hold:                       explicit per-combo rule list
  *     - { ... }
  *
- *   If on_hold is omitted for a modifier trigger (shift/ctrl/alt/cmd),
+ *   If on_hold is omitted for a modifier trigger (shift/ctrl/alt/cmd, sided
+ *   or unsided),
  *   it defaults to a transparent layer of itself — so a shift tap rule
  *   doesn't break Shift+L for capital L.
  *
@@ -33,8 +39,9 @@
  *       keys:                  [<mods...>, <trigger_key>]  trigger key + optional
  *                                                          required physical
  *                                                          modifiers. Examples:
- *                                                            [1]           bare
- *                                                            [shift, 1]    Shift held
+ *                                                            [1]              bare
+ *                                                            [shift, 1]       either Shift held
+ *                                                            [right_shift, 1] right Shift only
  *                                                            [ctrl, shift, 1]
  *       <exactly one action>:
  *         to_hotkey:            [mod, ..., key]    emit this key combo
@@ -49,10 +56,11 @@
  *
  *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
- *   Exact modifier match wins over the bare form: if both `[1]` and
- *   `[shift, 1]` exist, Space+1 fires the first and Space+Shift+1 fires
- *   the second. A qualified rule with no match falls back to the bare
- *   rule if one exists (so `keys: [w]` still fires on Shift+W).
+ *   Exact modifier match wins over generic and bare forms: if `[1]`,
+ *   `[shift, 1]`, and `[right_shift, 1]` exist, Space+1 fires the first,
+ *   Space+LeftShift+1 fires `[shift, 1]`, and Space+RightShift+1 fires
+ *   `[right_shift, 1]`. A qualified rule with no match falls back to the
+ *   bare rule if one exists (so `keys: [w]` still fires on Shift+W).
  */
 export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 # Each on_hold rule carries exactly ONE action:
