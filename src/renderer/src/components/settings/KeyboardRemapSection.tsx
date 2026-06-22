@@ -115,8 +115,15 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
     return (
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium text-foreground">Hotkeys</div>
-        <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/40 text-xs text-destructive font-mono">
-          {view.error}
+        <div className="flex flex-col gap-1.5 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/40 text-xs text-destructive">
+          <div className="font-semibold">
+            {view.usingPrevious
+              ? 'Invalid rules. Previous working remap is still active.'
+              : 'Invalid rules. Keyboard remap is not active.'}
+          </div>
+          <div className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+            {view.error}
+          </div>
         </div>
       </div>
     )

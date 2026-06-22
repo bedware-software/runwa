@@ -84,6 +84,12 @@ pub fn start(rules_json: &str) -> Result<HandleId, String> {
     }
 }
 
+pub fn validate(rules_json: &str) -> Result<(), String> {
+    rules::parse(rules_json)
+        .map(|_| ())
+        .map_err(|e| format!("rules parse error: {e}"))
+}
+
 pub fn stop(handle: HandleId) -> Result<(), String> {
     let entry = REGISTRY.lock().remove(&handle);
     match entry {

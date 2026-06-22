@@ -163,6 +163,7 @@ impl ModifierMask {
         self.0 & Self::match_bits(m) != 0
     }
 
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub fn contains_exact(self, m: Modifier) -> bool {
         self.0 & Self::bit(m) != 0
     }
@@ -171,6 +172,7 @@ impl ModifierMask {
     /// platform tracking. This is mainly for macOS: CGEventFlags says "Shift
     /// is down" but not which Shift, while FlagsChanged events do carry the
     /// physical keycode.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub fn merge_missing_bases(&mut self, other: ModifierMask) {
         for m in [
             Modifier::Ctrl,

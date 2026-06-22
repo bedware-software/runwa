@@ -340,6 +340,13 @@ pub fn start_keyboard_remap(rules_json: String) -> napi::Result<u32> {
     remap::start(&rules_json).map_err(napi::Error::from_reason)
 }
 
+/// Validate keyboard remap rules without installing or replacing the active
+/// hook. Uses the same authoritative Rust parser as `start_keyboard_remap`.
+#[napi]
+pub fn validate_keyboard_remap(rules_json: String) -> napi::Result<()> {
+    remap::validate(&rules_json).map_err(napi::Error::from_reason)
+}
+
 /// Tear down a keyboard remap hook previously installed via
 /// `start_keyboard_remap`. Unknown handle ids return an error.
 #[napi]

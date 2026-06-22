@@ -10,6 +10,7 @@ import path from 'path'
 
 interface NativeAddon {
   startKeyboardRemap(rulesJson: string): number
+  validateKeyboardRemap(rulesJson: string): void
   stopKeyboardRemap(handle: number): void
   setInputLanguage(code: string): void
 }
@@ -30,9 +31,12 @@ function loadAddon(): NativeAddon {
     const mod = require(nativePath) as NativeAddon
     if (
       typeof mod.startKeyboardRemap !== 'function' ||
+      typeof mod.validateKeyboardRemap !== 'function' ||
       typeof mod.stopKeyboardRemap !== 'function'
     ) {
-      throw new Error('native addon missing startKeyboardRemap / stopKeyboardRemap')
+      throw new Error(
+        'native addon missing startKeyboardRemap / validateKeyboardRemap / stopKeyboardRemap'
+      )
     }
     addon = mod
     return mod
@@ -47,6 +51,10 @@ function loadAddon(): NativeAddon {
 
 export function startKeyboardRemap(rulesJson: string): number {
   return loadAddon().startKeyboardRemap(rulesJson)
+}
+
+export function validateKeyboardRemap(rulesJson: string): void {
+  loadAddon().validateKeyboardRemap(rulesJson)
 }
 
 export function stopKeyboardRemap(handle: number): void {

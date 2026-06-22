@@ -331,6 +331,8 @@ export interface KeyboardRemapRulesView {
   filePath: string
   /** Populated when the file is missing or YAML-invalid. */
   error?: string
+  /** True when an invalid reload was rejected and the last good hook remains active. */
+  usingPrevious?: boolean
   triggers: KeyboardRemapTriggerView[]
 }
 
