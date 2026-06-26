@@ -17,7 +17,10 @@ import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { flashcardsStore } from './modules/flashcards/store'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
-import { syncStartupIntegrations } from './startup-integration'
+import {
+  reconcileStartupOnLaunch,
+  applyStartupChange
+} from './startup-integration'
 import {
   requestScreenRecordingPermission,
   isScreenRecordingGranted,
@@ -232,16 +235,19 @@ app.whenReady().then(async () => {
   initAutoUpdater()
 
   // 10a. Apply the "Start at login" / "Run as administrator" toggles
-  //      from settings to the OS (registry / login items). Also
-  //      re-apply on every settings change so flipping a toggle in
-  //      the panel takes effect immediately without restart.
+  //      from settings to the OS. On launch we only reconcile the
+  //      HKCU-scoped bits (Run key + RUNASADMIN flag) — silent, no
+  //      prompt. On a settings change we additionally reconcile the
+  //      elevated logon scheduled task used by the both-on combination,
+  //      which may raise a single UAC prompt the moment the user flips a
+  //      toggle. See startup-integration.ts for why this is a matrix.
   const current = settingsStore.get()
-  syncStartupIntegrations({
+  reconcileStartupOnLaunch({
     startAtLogin: current.startAtLogin,
     runAsAdmin: current.runAsAdmin
   })
   settingsStore.on('change', (s) =>
-    syncStartupIntegrations({
+    void applyStartupChange({
       startAtLogin: s.startAtLogin,
       runAsAdmin: s.runAsAdmin
     })

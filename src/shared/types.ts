@@ -289,11 +289,16 @@ export interface Settings {
    */
   startAtLogin: boolean
   /**
-   * Windows-only: mark the installed executable with the `RUNASADMIN`
-   * AppCompat flag in `HKCU\...\AppCompatFlags\Layers`, so every launch
-   * triggers a UAC elevation prompt. Needed when the user wants runwa's
+   * Windows-only: run runwa elevated. Needed when the user wants runwa's
    * global hotkeys / keyboard remap / window-switcher APIs to work in
    * apps that themselves run elevated (UAC-split session rules).
+   *
+   * Manual launches are elevated via the `RUNASADMIN` AppCompat flag in
+   * `HKCU\...\AppCompatFlags\Layers` (one UAC prompt per launch). When
+   * combined with `startAtLogin`, the plain Run-key autostart can't
+   * launch an elevated process — Windows drops it — so startup is handled
+   * by a "highest privileges" logon scheduled task instead, which starts
+   * runwa elevated with no prompt. See `startup-integration.ts`.
    */
   runAsAdmin: boolean
   /** User-resized dimensions of the palette window. Absent = use hard-coded default. */

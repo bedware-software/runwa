@@ -132,12 +132,14 @@ export function GeneralPanel() {
 
 /**
  * OS-integration toggles — "Start at login" and Windows-only "Run as
- * administrator". Both are registered in user-scope OS state (HKCU or
- * macOS LoginItems) by the main-process `startup-integration` module
- * on every settings change.
+ * administrator". The main-process `startup-integration` module maps the
+ * two toggles onto three OS mechanisms (HKCU Run key, RUNASADMIN
+ * AppCompat flag, and — for the both-on case — an elevated logon
+ * scheduled task), because on Windows a plain Run-key autostart can't
+ * launch an elevated process.
  *
  * Disabled in dev (`app.isPackaged === false`) because writing the
- * real registry / LoginItem entries would point at
+ * real registry / LoginItem / task entries would point at
  * `node_modules/electron/dist/electron.exe`, which isn't what the user
  * actually wants auto-started or elevated. The tooltip on each row
  * explains why.
@@ -185,7 +187,7 @@ function StartupSection() {
         {isWindows && (
           <ToggleRow
             title="Run as administrator"
-            description="Relaunch runwa elevated on every start. Needed for global hotkeys / keyboard remap to work inside other elevated apps (Task Manager, elevated terminals). Triggers a UAC prompt each launch."
+            description="Run runwa elevated. Needed for global hotkeys / keyboard remap to work inside other elevated apps (Task Manager, elevated terminals). Manual launches show a UAC prompt; combined with “Start at login” it registers a scheduled task so it starts elevated at login with no prompt (flipping the toggle asks for admin once)."
             checked={runAsAdmin}
             disabled={devMode}
             disabledHint={devMode ? devHint : undefined}
