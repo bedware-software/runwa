@@ -90,6 +90,18 @@ const STATIC_COMMANDS: CommandDef[] = [
       'Always available. Type the alias (default ",") and press Enter — or just type "," to launch on match — to open settings without leaving the keyboard.'
   },
   {
+    id: 'open-about',
+    title: 'About runwa',
+    icon: 'info',
+    subtitle: 'App version, settings folder, and updates.',
+    group: 'Settings',
+    configKey: 'enableOpenAbout',
+    defaultEnabled: true,
+    action: { kind: 'open-settings', tab: 'about' },
+    configDescription:
+      'Open the About tab — shows the app version, the settings-data folder, and the manual update check.'
+  },
+  {
     id: 'maximize-window',
     title: 'Maximize window',
     icon: 'maximize-2',

@@ -43,6 +43,7 @@ const ICONS_BY_HINT = {
   clock: Clock,
   'folder-open': FolderOpen,
   'graduation-cap': GraduationCap,
+  info: Info,
   keyboard: Keyboard,
   library: Library,
   'maximize-2': Maximize2,

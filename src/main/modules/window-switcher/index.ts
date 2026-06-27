@@ -42,6 +42,14 @@ const MANIFEST: ModuleManifest = {
       description:
         'Hide suspended Windows shell surfaces (Start, Search, Notification Center, Lock Screen, TextInputHost, etc.) that report as windows but aren\'t actually visible. Turn off to see every HWND on the desktop.',
       defaultValue: true
+    },
+    {
+      key: 'autoSelectSingleMatch',
+      type: 'checkbox',
+      label: 'Auto-select single match',
+      description:
+        'When your search narrows to exactly one window, focus it immediately instead of waiting for Enter. Only fires while you\'re typing a query — opening the switcher with a single window on the desktop never auto-focuses.',
+      defaultValue: false
     }
   ]
 }
@@ -205,7 +213,18 @@ export function createWindowSwitcherModule(): PaletteModule {
       })
 
       const results = fuse.search(trimmed)
-      return results.map((r) => toItem(r.item, r.score ?? 1))
+      const items = results.map((r) => toItem(r.item, r.score ?? 1))
+
+      // Auto-select single match (opt-in, off by default): once the query
+      // has narrowed the list to exactly one window, tag it `autoExecute`
+      // so the renderer focuses it without an Enter press. Gated on the
+      // non-empty-query branch above — opening the switcher with a single
+      // desktop window must never self-fire.
+      if (context.config.autoSelectSingleMatch === true && items.length === 1) {
+        items[0] = { ...items[0], autoExecute: true }
+      }
+
+      return items
     },
 
     async execute(item) {

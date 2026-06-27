@@ -62,6 +62,11 @@ export function PaletteApp() {
   const inputRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // App version for the footer toolbar — fetched once on mount. Mirrors
+  // the About panel's getAppInfo() read; null until it resolves, which
+  // just hides the readout for the first frame.
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+
   // Ctrl+K context-menu open state + alias-input modal state. Both are
   // pure UI; no other layer observes them.
   const [menuOpen, setMenuOpen] = useState(false)
@@ -201,6 +206,17 @@ export function PaletteApp() {
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  // Resolve the app version once for the footer readout.
+  useEffect(() => {
+    let cancelled = false
+    void window.electronAPI.getAppInfo().then((info) => {
+      if (!cancelled) setAppVersion(info.version)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Theme → data-theme attribute
   useEffect(() => {
@@ -644,6 +660,15 @@ export function PaletteApp() {
             </>
           )}
         </div>
+
+        {appVersion && (
+          <span
+            className="px-2 text-[11px] text-muted-foreground/60 tabular-nums select-none [-webkit-app-region:no-drag]"
+            title={`runwa v${appVersion}`}
+          >
+            v{appVersion}
+          </span>
+        )}
       </div>
 
       <ContextMenu
