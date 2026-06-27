@@ -74,23 +74,33 @@ capslock:
   on_tap: [escape]
   on_hold: [ctrl]
 
-shift:
+left_shift:
   on_tap: [ctrl, alt, cmd, a]
+right_shift:
+  on_tap: [ctrl, alt, cmd, w]
+
+left_alt:
+  on_tap: [f7]
+right_alt:
+  on_tap: [shift, f7]
 
 tab:
   on_tap: [tab]
   on_hold:
     - { keys: [j], to_hotkey: [ctrl, tab] }
     - { keys: [k], to_hotkey: [ctrl, shift, tab] }
+    - { keys: [p], to_hotkey: [ctrl, shift, p] }
 
 space:
   on_tap: [space]
   on_hold:
+    - { keys: [tab], to_hotkey: [ctrl, .] }
+    - { keys: [\\], to_hotkey: [ctrl, b] }
+
+    - { keys: [a], switch_to_workspace: 6 }
     - { keys: [w], to_hotkey: [ctrl, alt, cmd, w] }
-    - { keys: [a], to_hotkey: [ctrl, alt, cmd, a] }
     - { keys: [p], to_hotkey: [ctrl, alt, cmd, p] }
     - { keys: [f], to_hotkey: [ctrl, alt, cmd, f] }
-    - { keys: [d], to_hotkey: [ctrl, alt, cmd, d] }
 
     - { keys: [h], to_hotkey: [left] }
     - { keys: [j], to_hotkey: [down] }
@@ -98,7 +108,7 @@ space:
     - { keys: [l], to_hotkey: [right] }
 
     - { keys: [","], to_hotkey: [home] }
-    - { keys: [.],   to_hotkey: [end] }
+    - { keys: [.], to_hotkey: [end] }
 
     - { keys: [1], switch_to_workspace: 1 }
     - { keys: [2], switch_to_workspace: 2 }
@@ -109,6 +119,7 @@ space:
     - { keys: [7], switch_to_workspace: 7 }
     - { keys: [8], switch_to_workspace: 8 }
     - { keys: [9], switch_to_workspace: 9 }
+    - { keys: [0], switch_to_workspace: 10 }
 
     - { keys: [shift, 1], move_to_workspace: 1 }
     - { keys: [shift, 2], move_to_workspace: 2 }
@@ -119,6 +130,7 @@ space:
     - { keys: [shift, 7], move_to_workspace: 7 }
     - { keys: [shift, 8], move_to_workspace: 8 }
     - { keys: [shift, 9], move_to_workspace: 9 }
+    - { keys: [shift, 0], move_to_workspace: 10 }
 
     - { keys: [e], change_language: en }
     - { keys: [r], change_language: ru }
