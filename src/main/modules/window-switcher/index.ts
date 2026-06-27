@@ -59,6 +59,22 @@ function isFocusAction(a: unknown): a is FocusAction {
   )
 }
 
+/**
+ * Word-initials of a title, lowercased — e.g. "Jenkins Jobs — Work" → "jjw".
+ * Lets short queries match by acronym the way PowerToys Window Walker does:
+ * typing "jj" surfaces "Jenkins Jobs …" even though "jj" is nowhere in the
+ * title as a substring. Any run of non-alphanumeric characters is a word
+ * boundary, so spaces, em-dashes, and punctuation all split words.
+ */
+function computeInitials(title: string): string {
+  return title
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .toLowerCase()
+}
+
 export function createWindowSwitcherModule(): PaletteModule {
   const ownPid = process.pid
 
@@ -124,10 +140,12 @@ export function createWindowSwitcherModule(): PaletteModule {
         .filter((w) => w.pid !== ownPid)
         .map((w) => {
           const trimmed = w.title.trim()
+          const title = trimmed || w.processName
           return {
             ...w,
-            title: trimmed || w.processName,
-            titleFellBack: trimmed.length === 0
+            title,
+            titleFellBack: trimmed.length === 0,
+            initials: computeInitials(title)
           }
         })
         .filter((w) => {
@@ -173,6 +191,12 @@ export function createWindowSwitcherModule(): PaletteModule {
       const fuse = new Fuse(all, {
         keys: [
           { name: 'title', weight: 0.7 },
+          // Acronym key: with threshold 0 a short query must be a contiguous
+          // substring of the title's initials, so "jj" hits "Jenkins Jobs …"
+          // ("jjwn") without loosening the substring rule for real titles.
+          // Fuse only folds matched keys into the score, so an initials-only
+          // hit still ranks at the top.
+          { name: 'initials', weight: 0.4 },
           { name: 'processName', weight: 0.3 }
         ],
         includeScore: true,
