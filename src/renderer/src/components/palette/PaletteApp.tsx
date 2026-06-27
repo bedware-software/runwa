@@ -639,15 +639,11 @@ export function PaletteApp() {
               {activeModuleId === 'window-switcher' && (
                 <>
                   <FooterHint
-                    label={
-                      wsCurrentDesktopOnly
-                        ? 'Switch to all desktops'
-                        : 'Switch to this desktop'
-                    }
+                    label={wsCurrentDesktopOnly ? 'All desktops' : 'This desktop'}
                     keys={<Hotkey value="Tab" />}
                   />
                   <FooterHint
-                    label="Close window"
+                    label="Close"
                     keys={<Hotkey value={IS_MAC ? 'Cmd+D' : 'Ctrl+D'} />}
                   />
                 </>
@@ -661,7 +657,7 @@ export function PaletteApp() {
           )}
         </div>
 
-        {appVersion && (
+        {appVersion && activeModuleId === 'command-palette' && (
           <span
             className="px-2 text-[11px] text-muted-foreground/60 tabular-nums select-none [-webkit-app-region:no-drag]"
             title={`runwa v${appVersion}`}

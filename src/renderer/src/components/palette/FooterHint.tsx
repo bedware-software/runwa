@@ -27,7 +27,11 @@ export function FooterHint({ leading, label, keys, onClick, className }: Props) 
   // hints still light up so the whole toolbar feels like a single
   // interactive surface, matching PowerToys Command Palette's polish.
   const shared = cn(
-    'flex items-center gap-1.5 h-7 px-2 rounded-md transition-colors',
+    // shrink-0 + whitespace-nowrap keep each hint on a single line: when the
+    // toolbar runs out of room the row stays one line tall and the tightest
+    // hints slide off rather than wrapping a label to a second line (which
+    // broke the fixed-height h-10 toolbar in the window-switcher footer).
+    'flex shrink-0 items-center gap-1.5 h-7 px-2 rounded-md transition-colors whitespace-nowrap',
     'hover:bg-accent/50 hover:text-foreground',
     className
   )
