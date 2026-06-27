@@ -90,6 +90,10 @@ tab:
     - { keys: [j], to_hotkey: [ctrl, tab] }
     - { keys: [k], to_hotkey: [ctrl, shift, tab] }
     - { keys: [p], to_hotkey: [ctrl, shift, p] }
+    - { os: windows, keys: [t], to_hotkey: [ctrl, shift, t] }
+    - { os: macos, keys: [t], to_hotkey: [cmd, t] }
+    - { os: windows, keys: [w], to_hotkey: [ctrl, shift, w] }
+    - { os: macos, keys: [w], to_hotkey: [cmd, w] }
 
 space:
   on_tap: [space]
