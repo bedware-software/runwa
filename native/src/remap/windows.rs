@@ -233,9 +233,9 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         Action::Forward => CallNextHookEx(None, code, wparam, lparam),
         // Windows' SendInput already updated the global key state when we
         // synthesized the modifier-down, so subsequent real events naturally
-        // carry the flag — no per-event override needed. `ForwardWithModifier`
+        // carry the flag — no per-event override needed. `ForwardWithModifiers`
         // is a macOS-specific concept that Windows collapses into Forward.
-        Action::ForwardWithModifier(_) => CallNextHookEx(None, code, wparam, lparam),
+        Action::ForwardWithModifiers(_) => CallNextHookEx(None, code, wparam, lparam),
         Action::Suppress => LRESULT(1),
         // On Windows the tap-vs-interruption distinction doesn't matter —
         // SendInput doesn't stamp per-event modifier flags, each KEYBDINPUT
@@ -252,7 +252,7 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         // we injected, so subsequent real events (including the original
         // we're about to forward) naturally carry the flag — there's no
         // per-event override to apply on Windows.
-        Action::EmitThenForwardWithModifier(events, _) => {
+        Action::EmitThenForwardWithModifiers(events, _) => {
             inject(events.as_slice());
             CallNextHookEx(None, code, wparam, lparam)
         }

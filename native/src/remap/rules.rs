@@ -168,6 +168,42 @@ impl ModifierMask {
         self.0 & Self::bit(m) != 0
     }
 
+    /// A one-modifier mask. Convenience for the many call sites holding a
+    /// single logical modifier (transparent-modifier layers, single-modifier
+    /// fallbacks).
+    pub fn just(m: Modifier) -> Self {
+        let mut mask = Self::EMPTY;
+        mask.insert(m);
+        mask
+    }
+
+    /// The exact modifiers set in this mask, in a stable canonical order
+    /// (ctrl → alt → shift → cmd, unsided before sided). Side precision is
+    /// preserved — `LEFT_SHIFT_BIT` decodes back to `Modifier::LeftShift`.
+    /// `Cmd`/`Win` share a bit, so the `Cmd` spelling is returned; both map
+    /// to the same VK / CGEventFlag downstream, so the distinction is
+    /// immaterial for the modifier-down/up events this feeds.
+    pub fn modifiers(self) -> SmallVec<[Modifier; 4]> {
+        const BITS: [(u16, Modifier); 12] = [
+            (ModifierMask::CTRL_BIT, Modifier::Ctrl),
+            (ModifierMask::LEFT_CTRL_BIT, Modifier::LeftCtrl),
+            (ModifierMask::RIGHT_CTRL_BIT, Modifier::RightCtrl),
+            (ModifierMask::ALT_BIT, Modifier::Alt),
+            (ModifierMask::LEFT_ALT_BIT, Modifier::LeftAlt),
+            (ModifierMask::RIGHT_ALT_BIT, Modifier::RightAlt),
+            (ModifierMask::SHIFT_BIT, Modifier::Shift),
+            (ModifierMask::LEFT_SHIFT_BIT, Modifier::LeftShift),
+            (ModifierMask::RIGHT_SHIFT_BIT, Modifier::RightShift),
+            (ModifierMask::CMD_BIT, Modifier::Cmd),
+            (ModifierMask::LEFT_CMD_BIT, Modifier::LeftCmd),
+            (ModifierMask::RIGHT_CMD_BIT, Modifier::RightCmd),
+        ];
+        BITS.iter()
+            .filter(|(bit, _)| self.0 & bit != 0)
+            .map(|(_, m)| *m)
+            .collect()
+    }
+
     /// Merge a coarse flag-derived mask without losing side precision from
     /// platform tracking. This is mainly for macOS: CGEventFlags says "Shift
     /// is down" but not which Shift, while FlagsChanged events do carry the
@@ -280,6 +316,16 @@ impl ModifierMask {
         }
         choices.push(ModifierMask(Self::unsided_bit(base)));
         choices
+    }
+}
+
+impl FromIterator<Modifier> for ModifierMask {
+    fn from_iter<I: IntoIterator<Item = Modifier>>(iter: I) -> Self {
+        let mut mask = Self::EMPTY;
+        for m in iter {
+            mask.insert(m);
+        }
+        mask
     }
 }
 
@@ -440,9 +486,12 @@ pub enum ResolvedHold {
     /// the synthesized output).
     Explicit {
         overrides: HashMap<(ModifierMask, NamedKey), EmitPair>,
-        /// Fallback modifier for unmapped combos. Sourced from a rule
-        /// whose `keys: [_default]` + `to_hotkey: [<modifier>]`.
-        fallback: Option<Modifier>,
+        /// Fallback modifiers for unmapped combos, empty when none. Sourced
+        /// from a rule whose `keys: [any]` (legacy `[_default]`) lists one or
+        /// more modifiers in `to_hotkey`, e.g. `to_hotkey: [ctrl, shift]`.
+        /// While the trigger is held, a key without an explicit override is
+        /// forwarded with all of these modifiers stamped on it.
+        fallback: ModifierMask,
     },
     /// Hold does nothing special — behave as the raw key. Used when the
     /// user wants to remap only `on_tap` without a layer.
@@ -702,7 +751,7 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
             },
             HoldSpec::Rules(list) => {
                 let mut overrides: HashMap<(ModifierMask, NamedKey), EmitPair> = HashMap::new();
-                let mut fallback: Option<Modifier> = None;
+                let mut fallback = ModifierMask::EMPTY;
 
                 for rule in &list {
                     // OS gate.
@@ -740,20 +789,29 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                             ));
                         }
                         let to = rule.to_hotkey.as_deref().ok_or_else(|| {
-                            "rule with keys: [any] must use `to_hotkey: [<modifier>]`".to_string()
+                            "rule with keys: [any] must use `to_hotkey: [<modifier>, ...]`"
+                                .to_string()
                         })?;
-                        if to.len() != 1 {
-                            return Err(format!(
-                            "rule with keys: [any] must have to_hotkey = a single modifier, got {to:?}"
-                        ));
+                        if to.is_empty() {
+                            return Err(
+                                "rule with keys: [any] must list at least one modifier in \
+                                 to_hotkey"
+                                    .to_string(),
+                            );
                         }
-                        match parse_modifier(to[0].as_str()) {
-                            Some(m) => fallback = Some(m),
-                            None => {
-                                return Err(format!(
-                                    "rule with keys: [any] has unknown modifier '{}'",
-                                    to[0].as_str()
-                                ))
+                        // A fallback stamps modifiers onto whatever key the
+                        // user actually presses, so every token must be a
+                        // modifier — there's no trigger key to name here.
+                        for tok in to {
+                            match parse_modifier(tok.as_str()) {
+                                Some(m) => fallback.insert(m),
+                                None => {
+                                    return Err(format!(
+                                        "rule with keys: [any] to_hotkey accepts modifiers only \
+                                         (ctrl/alt/shift/cmd/win), got '{}'",
+                                        tok.as_str()
+                                    ))
+                                }
                             }
                         }
                         continue;
@@ -1203,7 +1261,7 @@ space:
                 overrides,
                 fallback,
             } => {
-                assert_eq!(*fallback, Some(Modifier::Cmd));
+                assert_eq!(*fallback, ModifierMask::just(Modifier::Cmd));
                 let pair = overrides.get(&ov(alpha('W'))).expect("W override present");
                 assert_eq!(
                     pair.on_press.as_slice(),
@@ -1224,6 +1282,40 @@ space:
             }
             other => panic!("expected Explicit, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn any_fallback_accepts_multiple_modifiers() {
+        let src = r#"
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+    - { keys: [any], to_hotkey: [ctrl, shift] }
+"#;
+        let r = parse(src).unwrap();
+        let t = binding(&r, LogicalKey::Named(NamedKey::Tab));
+        match &t.on_hold {
+            ResolvedHold::Explicit { fallback, .. } => {
+                assert_eq!(
+                    *fallback,
+                    ModifierMask::from_iter([Modifier::Ctrl, Modifier::Shift])
+                );
+            }
+            other => panic!("expected Explicit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn any_fallback_rejects_non_modifier_token() {
+        let src = r#"
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [any], to_hotkey: [ctrl, tab] }
+"#;
+        let err = parse(src).expect_err("non-modifier in [any] to_hotkey must fail");
+        assert!(err.contains("modifiers only"), "got: {err}");
     }
 
     #[test]

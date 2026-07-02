@@ -297,7 +297,7 @@ fn tap_callback(
         // `LogicalKey::Other` already has the right semantics ("interruption
         // that doesn't itself emit a synthetic keystroke"). For a modifier
         // trigger like Shift the state machine fires the transparent-modifier
-        // arm, which returns `EmitThenForwardWithModifier(ModifierDown, m)` —
+        // arm, which returns `EmitThenForwardWithModifiers(ModifierDown, mask)` —
         // the action handler below stamps the modifier flag onto the click
         // CGEvent so it reaches the foreground app as e.g. a Shift+click,
         // not a naked click.
@@ -362,14 +362,14 @@ fn tap_callback(
 
     match action {
         Action::Forward => CallbackResult::Keep,
-        Action::ForwardWithModifier(m) => {
-            // Stamp the logically-held modifier (e.g. CapsLock's transparent
-            // Ctrl) on top of the user's real modifier state and forward.
-            // macOS — unlike Windows — doesn't propagate synthetic modifier
-            // keydowns onto subsequent real events, so without this stamp
-            // the second CapsLock+D after the first CapsLock+D would arrive
-            // as a naked D.
-            event.set_flags(event_flags | modifier_to_flag(m));
+        Action::ForwardWithModifiers(mask) => {
+            // Stamp the logically-held modifier(s) (e.g. CapsLock's transparent
+            // Ctrl, or a `[any] → [ctrl, shift]` fallback) on top of the user's
+            // real modifier state and forward. macOS — unlike Windows — doesn't
+            // propagate synthetic modifier keydowns onto subsequent real
+            // events, so without this stamp the second CapsLock+D after the
+            // first CapsLock+D would arrive as a naked D.
+            event.set_flags(event_flags | flags_for_mask(mask));
             CallbackResult::Keep
         }
         Action::Suppress => CallbackResult::Drop,
@@ -386,17 +386,17 @@ fn tap_callback(
             inject(events.as_slice(), event_flags);
             CallbackResult::Drop
         }
-        Action::EmitThenForwardWithModifier(events, m) => {
-            // Inject the synth events (typically ModifierDown), then stamp
-            // the modifier flag onto the user's real event before letting
+        Action::EmitThenForwardWithModifiers(events, mask) => {
+            // Inject the synth events (typically ModifierDowns), then stamp
+            // the modifier flag(s) onto the user's real event before letting
             // it through. The forwarded event is a real keystroke (no
             // INJECT_TAG, real source PID), so the macOS app switcher and
             // similar system services that filter synthetic events still
-            // see it. The stamped flag tells the receiving process the
-            // modifier is held without us needing the OS to track it
+            // see it. The stamped flags tell the receiving process the
+            // modifiers are held without us needing the OS to track them
             // physically (which CGEventPost can't do reliably).
             inject(events.as_slice(), event_flags);
-            event.set_flags(event_flags | modifier_to_flag(m));
+            event.set_flags(event_flags | flags_for_mask(mask));
             CallbackResult::Keep
         }
     }
@@ -702,6 +702,17 @@ fn modifier_to_flag(m: Modifier) -> CGEventFlags {
         | Modifier::LeftWin
         | Modifier::RightWin => CGEventFlags::CGEventFlagCommand,
     }
+}
+
+/// OR together the `CGEventFlags` for every modifier in a mask. Used to
+/// stamp a held modifier layer (one modifier for a transparent layer, or
+/// several for a `[any] → [ctrl, shift]` fallback) onto a forwarded event.
+fn flags_for_mask(mask: ModifierMask) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+    for m in mask.modifiers() {
+        flags |= modifier_to_flag(m);
+    }
+    flags
 }
 
 fn modifier_mask_from_flags(flags: CGEventFlags) -> ModifierMask {

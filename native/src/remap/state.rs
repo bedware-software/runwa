@@ -111,7 +111,7 @@ pub enum Action {
     /// the synthesized Home events.
     Emit(SmallVec<[SyntheticEvent; 8]>),
     /// Inject synthetic events, then forward the original with the given
-    /// modifier flag stamped on top of the original's existing flag state.
+    /// modifiers stamped on top of the original's existing flag state.
     /// Used by the transparent-modifier and fallback-modifier interruption
     /// paths when the layered key IS one we could synthesize — but doing so
     /// makes the macOS app-switcher (and similar system services that
@@ -119,19 +119,22 @@ pub enum Action {
     /// keystroke. Forwarding the user's actual `Tab` event makes Space+Tab
     /// behave like Cmd+Tab: a tap moves the switcher one slot, holding
     /// Tab autorepeats it via the keyboard hardware (still flowing through
-    /// `ForwardWithModifier` for repeat events). On Windows `SendInput`
-    /// already propagates the modifier flag globally so per-event
-    /// stamping is a no-op there — the platform layer just forwards.
-    EmitThenForwardWithModifier(SmallVec<[SyntheticEvent; 8]>, Modifier),
-    /// Forward the event but assert the given modifier on it. Used when a
-    /// transparent modifier is logically held (state is `Modifying{held:
-    /// Some(m)}`) and a subsequent real key event arrives. Platform layers
-    /// stamp the modifier onto the event before letting it through. On
-    /// Windows this is equivalent to `Forward` because `SendInput` already
-    /// updated the global key state; on macOS, CGEvent posting doesn't
-    /// propagate synthetic modifier-down state to real subsequent events,
-    /// so the platform layer has to set the flags explicitly.
-    ForwardWithModifier(Modifier),
+    /// `ForwardWithModifiers` for repeat events). The mask may carry more
+    /// than one modifier for multi-modifier fallbacks (`[any] → [ctrl,
+    /// shift]`). On Windows `SendInput` already propagates the modifier
+    /// flags globally so per-event stamping is a no-op there — the platform
+    /// layer just forwards.
+    EmitThenForwardWithModifiers(SmallVec<[SyntheticEvent; 8]>, ModifierMask),
+    /// Forward the event but assert the given modifiers on it. Used when a
+    /// transparent modifier — or a multi-modifier fallback layer — is
+    /// logically held (state is `Modifying{held}` with a non-empty mask)
+    /// and a subsequent real key event arrives. Platform layers stamp the
+    /// modifiers onto the event before letting it through. On Windows this
+    /// is equivalent to `Forward` because `SendInput` already updated the
+    /// global key state; on macOS, CGEvent posting doesn't propagate
+    /// synthetic modifier-down state to real subsequent events, so the
+    /// platform layer has to set the flags explicitly.
+    ForwardWithModifiers(ModifierMask),
 }
 
 impl Action {
@@ -143,11 +146,11 @@ impl Action {
         Action::EmitTap(events.into_iter().collect())
     }
 
-    pub fn emit_then_forward_with_modifier(
+    pub fn emit_then_forward_with_modifiers(
         events: impl IntoIterator<Item = SyntheticEvent>,
-        modifier: Modifier,
+        modifiers: ModifierMask,
     ) -> Self {
-        Action::EmitThenForwardWithModifier(events.into_iter().collect(), modifier)
+        Action::EmitThenForwardWithModifiers(events.into_iter().collect(), modifiers)
     }
 
     /// Like `emit`, but collapses an empty sequence to `Suppress`. Emitting
@@ -187,12 +190,13 @@ enum State {
         suppress_tap: bool,
     },
     /// Trigger is held and we've processed at least one other key. `held`
-    /// tracks the modifier we've injected a down-for but haven't released
-    /// yet (we emit the matching up on trigger release). `None` means no
-    /// modifier is outstanding.
+    /// tracks the modifiers we've injected downs for but haven't released
+    /// yet (we emit the matching ups on trigger release). An empty mask
+    /// means nothing is outstanding. Usually zero or one modifier; a
+    /// multi-modifier fallback (`[any] → [ctrl, shift]`) fills it with more.
     Modifying {
         trigger: LogicalKey,
-        held: Option<Modifier>,
+        held: ModifierMask,
     },
     /// A modifier-chord on_hold combo just fired and is "physically
     /// held" via our synthesized modifier-down events. We're waiting
@@ -286,8 +290,10 @@ impl StateMachine {
             State::Idle => false,
         };
         if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
-            if let State::Modifying { held: Some(m), .. } = self.state {
-                return Action::ForwardWithModifier(m);
+            if let State::Modifying { held, .. } = self.state {
+                if !held.is_empty() {
+                    return Action::ForwardWithModifiers(held);
+                }
             }
             return Action::Forward;
         }
@@ -316,7 +322,7 @@ impl StateMachine {
                 let release = self.combo_release.take().unwrap_or_default();
                 self.state = State::Modifying {
                     trigger,
-                    held: None,
+                    held: ModifierMask::EMPTY,
                 };
                 return Action::emit_or_suppress(release);
             }
@@ -338,7 +344,7 @@ impl StateMachine {
             let release = self.combo_release.take().unwrap_or_default();
             self.state = State::Modifying {
                 trigger,
-                held: None,
+                held: ModifierMask::EMPTY,
             };
             return Action::emit_or_suppress(release);
         }
@@ -394,9 +400,9 @@ impl StateMachine {
                 // key with the modifier (already down — no re-injection).
                 self.state = State::Modifying {
                     trigger,
-                    held: Some(modifier),
+                    held: ModifierMask::just(modifier),
                 };
-                return Action::ForwardWithModifier(modifier);
+                return Action::ForwardWithModifiers(ModifierMask::just(modifier));
             }
             // KeyUp of an unrelated key while still a tap candidate (e.g. a
             // modifier we forwarded through the short-circuit) — ignore.
@@ -531,13 +537,15 @@ impl StateMachine {
                 }
             }
 
-            // Trigger-up of the CURRENT trigger in Modifying: release held
-            // modifier (if any).
+            // Trigger-up of the CURRENT trigger in Modifying: release the held
+            // modifiers (if any), in reverse of the press order so nesting
+            // stays balanced.
             (State::Modifying { trigger: ts, held }, EventKind::KeyUp, Some(te), _) if ts == te => {
                 self.state = State::Idle;
-                match held {
-                    Some(m) => Action::emit([SyntheticEvent::ModifierUp(m)]),
-                    None => Action::Suppress,
+                if held.is_empty() {
+                    Action::Suppress
+                } else {
+                    Action::emit(held.modifiers().into_iter().rev().map(SyntheticEvent::ModifierUp))
                 }
             }
 
@@ -608,36 +616,35 @@ impl StateMachine {
                 self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
-            // In Modifying{held: None} (an explicit override just fired
-            // for a nav-style binding), a new key-down for any other
+            // In Modifying with no held modifier (an explicit override just
+            // fired for a nav-style binding), a new key-down for any other
             // key should re-fire the override. Chord-style bindings
             // never come back here — they enter Comboing on press
             // and are torn down via the Comboing block above.
             (
-                State::Modifying {
-                    trigger,
-                    held: None,
-                },
+                State::Modifying { trigger, held },
                 EventKind::KeyDown,
                 _,
                 _,
-            ) => {
+            ) if held.is_empty() => {
                 let Some(binding) = self.binding_for(trigger) else {
                     return Action::Forward;
                 };
                 self.handle_interruption(trigger, &binding, ev.key, ev.modifiers)
             }
 
-            // In Modifying with a held modifier: forward the event with the
-            // modifier flag asserted. Windows' SendInput already updated
+            // In Modifying with held modifier(s): forward the event with the
+            // modifier flag(s) asserted. Windows' SendInput already updated
             // the global key state so flags propagate naturally on that
             // platform, but macOS needs explicit per-event flag overrides.
-            // Both platforms accept `ForwardWithModifier`; the macOS path
-            // stamps the flag, the Windows path treats it as a plain
+            // Both platforms accept `ForwardWithModifiers`; the macOS path
+            // stamps the flags, the Windows path treats it as a plain
             // Forward. Skip modifiers themselves — they forward through
             // the earlier short-circuit.
-            (State::Modifying { held: Some(m), .. }, _, _, _) if !ev.key.is_modifier() => {
-                Action::ForwardWithModifier(m)
+            (State::Modifying { held, .. }, _, _, _)
+                if !held.is_empty() && !ev.key.is_modifier() =>
+            {
+                Action::ForwardWithModifiers(held)
             }
 
             // Anything else: forward. Covers Idle + key we don't bind,
@@ -659,7 +666,7 @@ impl StateMachine {
         if let State::EagerModifier { trigger, modifier } = self.state {
             self.state = State::Modifying {
                 trigger,
-                held: Some(modifier),
+                held: ModifierMask::just(modifier),
             };
             return Action::Suppress;
         }
@@ -684,7 +691,7 @@ impl StateMachine {
                 // layer should omit the trigger entirely.
                 self.state = State::Modifying {
                     trigger,
-                    held: None,
+                    held: ModifierMask::EMPTY,
                 };
                 Action::Forward
             }
@@ -693,7 +700,7 @@ impl StateMachine {
                 let m = resolve_modifier_for_trigger(*m, trigger);
                 self.state = State::Modifying {
                     trigger,
-                    held: Some(m),
+                    held: ModifierMask::just(m),
                 };
                 // Inject the modifier-down only and forward the user's
                 // real KeyDown with the modifier flag stamped. Synthesizing
@@ -706,7 +713,10 @@ impl StateMachine {
                 // switcher behaves correctly. Same path covers unrecognized
                 // keys (LogicalKey::Other / non-Named) — there's no
                 // physical keycode we'd synthesize in that case anyway.
-                Action::emit_then_forward_with_modifier([SyntheticEvent::ModifierDown(m)], m)
+                Action::emit_then_forward_with_modifiers(
+                    [SyntheticEvent::ModifierDown(m)],
+                    ModifierMask::just(m),
+                )
             }
 
             ResolvedHold::Explicit {
@@ -776,7 +786,7 @@ impl StateMachine {
                         // OS autorepeats keep re-firing the tap.
                         self.state = State::Modifying {
                             trigger,
-                            held: None,
+                            held: ModifierMask::EMPTY,
                         };
                         let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
                         events.extend(pair.on_press.iter().copied());
@@ -785,30 +795,32 @@ impl StateMachine {
                     }
                 }
 
-                // No override → fallback modifier, if configured.
-                // Inject the modifier-down only and forward the user's
-                // real keystroke with the flag stamped — see the
+                // No override → fallback modifiers, if configured.
+                // Inject the modifier-downs only and forward the user's
+                // real keystroke with the flags stamped — see the
                 // TransparentModifier comment above for the macOS-app-
                 // -switcher rationale (synth events get filtered by the
                 // switcher's input handling, so Space+Tab needs a real
-                // Tab to flow through, not a synthesized one).
-                if let Some(m) = *fallback {
+                // Tab to flow through, not a synthesized one). A fallback
+                // may carry several modifiers (`[any] → [ctrl, shift]`).
+                if !fallback.is_empty() {
                     self.state = State::Modifying {
                         trigger,
-                        held: Some(m),
+                        held: *fallback,
                     };
-                    return Action::emit_then_forward_with_modifier(
-                        [SyntheticEvent::ModifierDown(m)],
-                        m,
-                    );
+                    let downs = fallback
+                        .modifiers()
+                        .into_iter()
+                        .map(SyntheticEvent::ModifierDown);
+                    return Action::emit_then_forward_with_modifiers(downs, *fallback);
                 }
 
                 // No override, no fallback → forward the naked key
-                // unchanged. State stays in `held: None` so the next
+                // unchanged. State stays in `held: <empty>` so the next
                 // press of any other key re-fires the override path.
                 self.state = State::Modifying {
                     trigger,
-                    held: None,
+                    held: ModifierMask::EMPTY,
                 };
                 Action::Forward
             }
@@ -990,14 +1002,14 @@ space:
         );
         assert_eq!(
             m.on_event(down(alpha('C'))),
-            Action::ForwardWithModifier(Modifier::Ctrl)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Ctrl))
         );
         // A subsequent key while CapsLock is still held must also carry the
         // Ctrl flag forward — on macOS the real V keydown needs explicit flag
         // stamping or it arrives with flags=0 and is interpreted as plain V.
         assert_eq!(
             m.on_event(down(alpha('V'))),
-            Action::ForwardWithModifier(Modifier::Ctrl)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Ctrl))
         );
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
@@ -1086,9 +1098,9 @@ space:
         // TransparentModifier — see the comment in `handle_interruption`.
         assert_eq!(
             m.on_event(down(alpha('C'))),
-            Action::EmitThenForwardWithModifier(
+            Action::EmitThenForwardWithModifiers(
                 smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Cmd)],
-                Modifier::Cmd,
+                ModifierMask::just(Modifier::Cmd),
             )
         );
         assert_eq!(
@@ -1248,27 +1260,27 @@ space:
         // stamped.
         assert_eq!(
             m.on_event(down(named(NamedKey::Tab))),
-            Action::EmitThenForwardWithModifier(
+            Action::EmitThenForwardWithModifiers(
                 smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Cmd)],
-                Modifier::Cmd,
+                ModifierMask::just(Modifier::Cmd),
             )
         );
         // Tab released: forward the real Tab↑ with Cmd stamped — switcher
         // sees a real release, no synth state to confuse it.
         assert_eq!(
             m.on_event(up(named(NamedKey::Tab))),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         // Second physical tap inside the same Space-hold: forward path
         // again. Cmd stays continuously held via the trigger, switcher
         // stays open, advances one slot per tap (matches native Cmd+Tab).
         assert_eq!(
             m.on_event(down(named(NamedKey::Tab))),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         assert_eq!(
             m.on_event(up(named(NamedKey::Tab))),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         // User reaches for Shift to do Cmd+Shift+Tab (previous app).
         // Without the modifier-passthrough's `held` stamp, a real
@@ -1279,29 +1291,79 @@ space:
         // the forwarded event keeps Cmd in the OS-visible flag set.
         assert_eq!(
             m.on_event(down(LogicalKey::Shift)),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         // Now Cmd+Shift+Tab: Tab forwarded with Cmd stamped + Shift
         // bit from the still-held physical Shift → app switcher
         // sees Cmd+Shift+Tab, goes BACKWARDS one slot.
         assert_eq!(
             m.on_event(down(named(NamedKey::Tab))),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         assert_eq!(
             m.on_event(up(named(NamedKey::Tab))),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         // Shift released — same stamping rule keeps Cmd alive.
         assert_eq!(
             m.on_event(up(LogicalKey::Shift)),
-            Action::ForwardWithModifier(Modifier::Cmd)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Cmd))
         );
         // Releasing Space emits ModifierUp(Cmd) — closes the switcher,
         // selected app activates.
         assert_eq!(
             m.on_event(up(LogicalKey::Space)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Cmd)])
+        );
+    }
+
+    // Multi-modifier `[any]` fallback: while Tab is held, an unmapped key is
+    // forwarded with BOTH Ctrl and Shift stamped, and Tab-up releases both in
+    // reverse order. This is the user-facing feature: `[any] → [ctrl, shift]`
+    // turns a hold layer into an ad-hoc Ctrl+Shift modifier.
+    #[test]
+    fn tab_any_fallback_stamps_multiple_modifiers() {
+        let yaml = r#"
+tab:
+  on_tap: [tab]
+  on_hold:
+    - { keys: [j], to_hotkey: [ctrl, tab] }
+    - { keys: [any], to_hotkey: [ctrl, shift] }
+"#;
+        let ctrl_shift = ModifierMask::from_iter([Modifier::Ctrl, Modifier::Shift]);
+        let mut m = sm(yaml);
+        // Tab down — enter the hold layer.
+        assert_eq!(m.on_event(down(named(NamedKey::Tab))), Action::Suppress);
+        // First unmapped key (D): inject Ctrl↓ + Shift↓, forward the real D
+        // with both flags stamped.
+        assert_eq!(
+            m.on_event(down(alpha('D'))),
+            Action::EmitThenForwardWithModifiers(
+                smallvec::smallvec![
+                    SyntheticEvent::ModifierDown(Modifier::Ctrl),
+                    SyntheticEvent::ModifierDown(Modifier::Shift),
+                ],
+                ctrl_shift,
+            )
+        );
+        // D released, still inside the layer: forwarded with both stamped.
+        assert_eq!(
+            m.on_event(up(alpha('D'))),
+            Action::ForwardWithModifiers(ctrl_shift)
+        );
+        // A second unmapped key (F): modifiers already held, just forward with
+        // both flags — no re-injection.
+        assert_eq!(
+            m.on_event(down(alpha('F'))),
+            Action::ForwardWithModifiers(ctrl_shift)
+        );
+        // Tab-up releases both modifiers, reverse of the press order.
+        assert_eq!(
+            m.on_event(up(named(NamedKey::Tab))),
+            emit(vec![
+                SyntheticEvent::ModifierUp(Modifier::Shift),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
         );
     }
 
@@ -1439,16 +1501,16 @@ shift:
         m.on_event(down(LogicalKey::Shift));
         assert_eq!(
             m.on_event(down(alpha('L'))),
-            Action::ForwardWithModifier(Modifier::Shift)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Shift))
         );
         // Second L while still held: forwarded with Shift stamped.
         assert_eq!(
             m.on_event(up(alpha('L'))),
-            Action::ForwardWithModifier(Modifier::Shift)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Shift))
         );
         assert_eq!(
             m.on_event(down(alpha('L'))),
-            Action::ForwardWithModifier(Modifier::Shift)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Shift))
         );
         // Shift-up releases the held modifier.
         assert_eq!(
@@ -1763,7 +1825,7 @@ tab:
         shift.insert(Modifier::Shift);
         assert_eq!(
             m.on_event(down_with_mods(named(NamedKey::Tab), shift)),
-            Action::ForwardWithModifier(Modifier::Shift)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Shift))
         );
     }
 
@@ -1895,7 +1957,7 @@ space:
         );
         assert_eq!(
             m.on_event(down(LogicalKey::Other)),
-            Action::ForwardWithModifier(Modifier::Ctrl)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Ctrl))
         );
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
@@ -2108,9 +2170,9 @@ capslock:
         // Ctrl+Shift+R.
         assert_eq!(
             m.on_event(down_with_mods(alpha('R'), shift)),
-            Action::EmitThenForwardWithModifier(
+            Action::EmitThenForwardWithModifiers(
                 smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
-                Modifier::Ctrl,
+                ModifierMask::just(Modifier::Ctrl),
             )
         );
         // CapsLock-up emits ModifierUp(Ctrl), returns to Idle.
@@ -2162,15 +2224,15 @@ capslock:
         // physically-held Shift, the receiving app sees Ctrl+Shift+R.
         assert_eq!(
             m.on_event(down_with_mods(alpha('R'), shift_self)),
-            Action::EmitThenForwardWithModifier(
+            Action::EmitThenForwardWithModifiers(
                 smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
-                Modifier::Ctrl,
+                ModifierMask::just(Modifier::Ctrl),
             )
         );
         // Tear down: R-up → ForwardWithModifier(Ctrl).
         assert_eq!(
             m.on_event(up_with_mods(alpha('R'), shift_self)),
-            Action::ForwardWithModifier(Modifier::Ctrl)
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Ctrl))
         );
         // CapsLock-up emits ModifierUp(Ctrl), back to Idle.
         assert_eq!(
