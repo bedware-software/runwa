@@ -733,6 +733,60 @@ fn modifier_mask_from_flags(flags: CGEventFlags) -> ModifierMask {
 }
 
 // ---------------------------------------------------------------------------
+// Virtual-desktop ("Space") switching with an "alternate desktop" toggle.
+//
+// Mirror of the Windows behaviour in `windows.rs`: asking to switch to the
+// Space you're already on jumps to the *alternate* (the one you were on before
+// the last switch) — nvim's `#` buffer — so double-tapping the same hotkey
+// bounces between your two most recent Spaces.
+//
+// The catch is that macOS exposes no public Space-ordinal API, so "which Space
+// am I on" is the shadow value `desktop::get()` last recorded — coherent only
+// as long as every switch goes through runwa (system Ctrl+N / trackpad gestures
+// aren't observed; see `desktop.rs`). We therefore only *suppress* a plain
+// switch when we have an alternate to bounce to instead; with no alternate yet
+// we always fire Ctrl+N, which also rescues the stale-shadow case (we think
+// we're on N but a gesture moved us off it — Ctrl+N still lands us there).
+
+/// The Space we were on immediately before the most recent switch — the one a
+/// same-Space tap toggles back to. 0-based; `None` until runwa's first switch.
+static MAC_VD_ALTERNATE: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
+
+/// Resolve `switch_to_workspace: requested` (1-based) to the Space we should
+/// actually jump to, updating the shadow ordinal + alternate as a side effect.
+/// Returns the 1-based destination for the `Ctrl+N` synth, or `None` when the
+/// request is out of the 1-9 range macOS can express.
+fn macos_resolve_switch(requested: u32) -> Option<u32> {
+    if !(1..=9).contains(&requested) {
+        return None;
+    }
+    let target = requested - 1; // 0-based
+    let current = super::desktop::get(); // 0-based shadow
+    let mut alt = MAC_VD_ALTERNATE.lock();
+    let dest = if current == target {
+        // Same-Space tap: bounce to the alternate — but only if it's a Space we
+        // can still express as Ctrl+N (0-based < 9). Otherwise fall through to a
+        // plain switch to `target`.
+        match *alt {
+            Some(a) if a < 9 => a,
+            _ => target,
+        }
+    } else {
+        target
+    };
+    // Remember where we came from as the new alternate — but only when we
+    // actually change Spaces (a no-op switch has no "previous" to record).
+    if dest != current {
+        *alt = Some(current);
+    }
+    drop(alt);
+    // Shadow-track the destination and push it to the tray — this rule action
+    // is the only Space signal macOS gives us. Store 0-based.
+    super::desktop::record(dest);
+    Some(dest + 1)
+}
+
+// ---------------------------------------------------------------------------
 // Injection
 
 pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
@@ -782,15 +836,17 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 // `Ctrl+N` shortcut — users enable it once in
                 // System Settings → Keyboard → Shortcuts → Mission Control
                 // → Switch to Desktop N.
-                let n = *n;
-                let key = if (1..=9).contains(&n) {
-                    NamedKey::Alpha(b'0' + n as u8)
-                } else {
+                let requested = *n;
+                // Resolve the alternate-desktop toggle: a same-Space tap
+                // bounces to the previous Space instead of re-switching. Also
+                // records the destination for the tray. See `macos_resolve_switch`.
+                let Some(dest) = macos_resolve_switch(requested) else {
                     eprintln!(
-                        "[keyboard-remap] switch_to_workspace({n}) on macOS supports 1-9 only"
+                        "[keyboard-remap] switch_to_workspace({requested}) on macOS supports 1-9 only"
                     );
                     continue;
                 };
+                let key = NamedKey::Alpha(b'0' + dest as u8);
                 inject(
                     &[
                         SyntheticEvent::ModifierDown(Modifier::Ctrl),
@@ -800,10 +856,6 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                     ],
                     flags,
                 );
-                // Shadow-track the switch and push it to the tray — macOS
-                // has no public Space-ordinal API, so this rule action is the
-                // only signal we get. Convert YAML's 1-based N to 0-based.
-                super::desktop::record(n.saturating_sub(1));
                 continue;
             }
             SyntheticEvent::MoveToWorkspace(n) => {
