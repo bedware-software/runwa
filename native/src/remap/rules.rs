@@ -372,6 +372,9 @@ pub enum NamedKey {
     Comma,
     Period,
     Slash,
+    /// The context-menu / "Apps" key (Windows only; no macOS equivalent, so
+    /// `named_to_keycode` maps it to `None` there).
+    AppsKey,
     /// An uppercase ASCII alpha (A–Z) or digit (0–9). Stored as the ASCII
     /// byte so callers can match/synth uniformly.
     Alpha(u8),
@@ -1123,6 +1126,7 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "comma" => Some(NamedKey::Comma),
         "period" | "dot" => Some(NamedKey::Period),
         "slash" | "forwardslash" => Some(NamedKey::Slash),
+        "apps" | "appskey" | "menu" | "contextmenu" => Some(NamedKey::AppsKey),
         other if other.len() == 1 => parse_single_char(other.as_bytes()[0]),
         _ => None,
     }

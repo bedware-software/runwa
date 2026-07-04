@@ -565,6 +565,7 @@ fn named_to_keycode(key: NamedKey) -> Option<u16> {
         NamedKey::Comma => Some(KC_COMMA),
         NamedKey::Period => Some(KC_PERIOD),
         NamedKey::Slash => Some(KC_SLASH),
+        NamedKey::AppsKey => None,
         NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }

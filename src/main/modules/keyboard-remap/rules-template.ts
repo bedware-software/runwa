@@ -75,13 +75,13 @@ capslock:
   on_hold: [ctrl]
 
 left_shift:
-  on_tap: [ctrl, alt, cmd, a]
+  on_tap: [ctrl, opt, cmd, a]
 right_shift:
-  on_tap: [ctrl, alt, cmd, w]
+  on_tap: [ctrl, opt, cmd, w]
 
-left_alt:
+left_opt:
   on_tap: [f7]
-right_alt:
+right_opt:
   on_tap: [shift, f7]
 
 tab:
@@ -89,22 +89,20 @@ tab:
   on_hold:
     - { keys: [j], to_hotkey: [ctrl, tab] }
     - { keys: [k], to_hotkey: [ctrl, shift, tab] }
-    - { keys: [p], to_hotkey: [ctrl, shift, p] }
-    - { os: windows, keys: [t], to_hotkey: [ctrl, shift, t] }
-    - { os: macos, keys: [t], to_hotkey: [cmd, t] }
-    - { os: windows, keys: [w], to_hotkey: [ctrl, shift, w] }
-    - { os: macos, keys: [w], to_hotkey: [cmd, w] }
+    - { keys: [any], to_hotkey: [ctrl, shift] }
 
 space:
   on_tap: [space]
   on_hold:
     - { keys: [tab], to_hotkey: [ctrl, .] }
-    - { keys: [\\], to_hotkey: [ctrl, b] }
+    - { keys: [\], to_hotkey: [ctrl, b] }
 
     - { keys: [a], switch_to_workspace: 6 }
-    - { keys: [w], to_hotkey: [ctrl, alt, cmd, w] }
-    - { keys: [p], to_hotkey: [ctrl, alt, cmd, p] }
-    - { keys: [f], to_hotkey: [ctrl, alt, cmd, f] }
+    - { keys: [m], to_hotkey: [menu] }
+    - { keys: [w], to_hotkey: [ctrl, opt, cmd, w] }
+    - { keys: [p], to_hotkey: [ctrl, opt, cmd, p] }
+    - { keys: [f], to_hotkey: [ctrl, opt, cmd, f] }
+    - { keys: [d], to_hotkey: [ctrl, opt, cmd, d] }
 
     - { keys: [h], to_hotkey: [left] }
     - { keys: [j], to_hotkey: [down] }
@@ -139,7 +137,7 @@ space:
     - { keys: [e], change_language: en }
     - { keys: [r], change_language: ru }
 
-    - { os: windows, keys: [q], to_hotkey: [alt, f4] }
-    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
+    - { os: windows, keys: [q], to_hotkey: [opt, f4] }
+    - { os: windows, keys: ["`"], to_hotkey: [win, "`"] }
     - { os: macos, keys: [any], to_hotkey: [cmd] }
 `
