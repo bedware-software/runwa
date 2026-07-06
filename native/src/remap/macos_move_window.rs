@@ -41,7 +41,6 @@ use std::ptr;
 use std::thread;
 use std::time::Duration;
 
-use super::rules::{Modifier, NamedKey, SyntheticEvent};
 use super::synth::INJECT_TAG;
 
 // ---------------------------------------------------------------------------
@@ -172,15 +171,11 @@ fn run_move_sequence(n: u32) {
     post_mouse_pressed(&source, CGEventType::LeftMouseDragged, target);
 
     // 6. Switch Space via the system shortcut. The window follows because
-    //    it's our active drag target.
-    let digit = NamedKey::Alpha(b'0' + n as u8);
+    //    it's our active drag target. Chord the digit with the
+    //    user-configured Space-switch modifier(s) (default Ctrl), same as
+    //    the plain-switch path.
     super::macos::inject(
-        &[
-            SyntheticEvent::ModifierDown(Modifier::Ctrl),
-            SyntheticEvent::KeyDown(digit),
-            SyntheticEvent::KeyUp(digit),
-            SyntheticEvent::ModifierUp(Modifier::Ctrl),
-        ],
+        &super::macos::switch_workspace_events(n),
         CGEventFlags::empty(),
     );
 

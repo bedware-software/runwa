@@ -44,7 +44,10 @@
  *                                                            [right_shift, 1] right Shift only
  *                                                            [ctrl, shift, 1]
  *       <exactly one action>:
- *         to_hotkey:            [mod, ..., key]    emit this key combo
+ *         to_hotkey:            [mod, ..., key]    emit this key combo. Keys include the
+ *                                                  named `apps` / `menu` key (Windows
+ *                                                  {AppsKey} / context menu; no-op on macOS —
+ *                                                  use [shift, f10] there instead).
  *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
  *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
  *         change_language:      <code>             switch system input language to a code like
@@ -61,14 +64,33 @@
  *   Space+LeftShift+1 fires `[shift, 1]`, and Space+RightShift+1 fires
  *   `[right_shift, 1]`. A qualified rule with no match falls back to the
  *   bare rule if one exists (so `keys: [w]` still fires on Shift+W).
+ *
+ *   Reserved top-level `settings:` block — global options, not triggers:
+ *     macos_switch_workspace_modifiers: [ctrl]   macOS only. Which modifier(s)
+ *                                   runwa presses alongside the desktop digit
+ *                                   when firing switch_to_workspace /
+ *                                   move_to_workspace. Must match your Mission
+ *                                   Control "Switch to Desktop N" shortcut.
+ *                                   Default [ctrl] (macOS's factory binding);
+ *                                   set e.g. [ctrl, opt, cmd] if you've rebound
+ *                                   it (frees plain Ctrl+number for your apps).
  */
 export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 # Each on_hold rule carries exactly ONE action:
-#   to_hotkey: [mod, ..., key]      emit this key combo
+#   to_hotkey: [mod, ..., key]      emit this key combo (keys include 'apps'/'menu' =
+#                                   Windows context-menu key; on macOS use [shift, f10])
 #   switch_to_workspace: N          jump to virtual desktop N (1-indexed)
 #   move_to_workspace:   N          move active window to VD N and follow (1-indexed)
 #   change_language:     <code>     switch system input language (e.g. en, ru); the language
 #                                   must already be installed as a system input source
+
+# Global options (uncomment to override). macos_switch_workspace_modifiers must
+# match your macOS Mission Control "Switch to Desktop N" shortcut; default [ctrl].
+# settings:
+#   macos_switch_workspace_modifiers: [ctrl, opt, cmd]
+
+settings:
+  macos_switch_workspace_modifiers: [ctrl, opt, cmd]
 
 capslock:
   on_tap: [escape]
@@ -113,6 +135,9 @@ space:
 
     - { keys: [","], to_hotkey: [home] }
     - { keys: [.], to_hotkey: [end] }
+
+    - { os: windows, keys: [m], to_hotkey: [apps] }
+    - { os: macos, keys: [m], to_hotkey: [shift, f10] }
 
     - { keys: [1], switch_to_workspace: 1 }
     - { keys: [2], switch_to_workspace: 2 }
