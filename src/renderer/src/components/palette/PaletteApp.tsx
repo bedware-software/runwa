@@ -15,10 +15,11 @@ import { QuizView } from './QuizView'
 import { IS_MAC } from '@/lib/platform'
 
 /**
- * Module ids whose entries the user can attach a Ctrl+K alias to. Both
- * modules expose stable per-item ids (app paths, command ids) so an alias
- * stored in settings still matches the same row across restarts. Adding a
- * module here is the only step needed to surface the alias menu for it.
+ * Module ids whose built-in entries the user can attach a Ctrl+K alias to.
+ * Both modules expose stable per-item ids (app paths, command ids) so an alias
+ * stored in settings still matches the same row across restarts. User-created
+ * command rows are explicitly excluded below until their shortcut behavior is
+ * designed as a follow-up feature.
  */
 const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette'])
 
@@ -98,7 +99,13 @@ export function PaletteApp() {
 
   const selectedItem = items[selectedIndex]
   const canSetAlias =
-    !!selectedItem && ALIAS_CAPABLE_MODULES.has(selectedItem.moduleId)
+    !!selectedItem &&
+    ALIAS_CAPABLE_MODULES.has(selectedItem.moduleId) &&
+    // User Commands share the command-palette module's search surface, but
+    // aliases/shortcuts are intentionally deferred beyond the first CRUD
+    // iteration. Exclude them so Ctrl+K never offers a control that the
+    // dynamic user-command search does not yet consume.
+    selectedItem.actionKind !== 'user-command'
   const isFlashcardDeckRow =
     !!selectedItem &&
     selectedItem.moduleId === 'flashcards' &&
@@ -149,7 +156,8 @@ export function PaletteApp() {
     const hasAction =
       !!target &&
       (target.revealPath !== undefined ||
-        ALIAS_CAPABLE_MODULES.has(target.moduleId) ||
+        (ALIAS_CAPABLE_MODULES.has(target.moduleId) &&
+          target.actionKind !== 'user-command') ||
         (target.moduleId === 'flashcards' && target.actionKind === 'start-quiz'))
     if (!hasAction) return
     setSelectedIndex(index)

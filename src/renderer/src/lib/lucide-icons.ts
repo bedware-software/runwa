@@ -22,6 +22,7 @@ import Mic from 'lucide-react/dist/esm/icons/mic.js'
 import Minimize2 from 'lucide-react/dist/esm/icons/minimize-2.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Replace from 'lucide-react/dist/esm/icons/replace.js'
 import Rocket from 'lucide-react/dist/esm/icons/rocket.js'
@@ -30,6 +31,7 @@ import Settings from 'lucide-react/dist/esm/icons/settings.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
 import Tag from 'lucide-react/dist/esm/icons/tag.js'
+import Terminal from 'lucide-react/dist/esm/icons/terminal.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import XCircle from 'lucide-react/dist/esm/icons/circle-x.js'
@@ -54,7 +56,8 @@ const ICONS_BY_HINT = {
   replace: Replace,
   rocket: Rocket,
   settings: Settings,
-  square: Square
+  square: Square,
+  terminal: Terminal
 } satisfies Record<string, LucideIcon>
 
 export function lucideIconFromHint(
@@ -91,11 +94,13 @@ export {
   Mic,
   Package,
   Pencil,
+  Plus,
   RefreshCw,
   RotateCcw,
   SlidersHorizontal,
   Square,
   Tag,
+  Terminal,
   Trash2,
   X,
   XCircle

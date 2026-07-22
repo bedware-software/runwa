@@ -249,6 +249,26 @@ export interface ModuleSettings {
   aliases?: Record<string, string>
 }
 
+/**
+ * A user-authored entry surfaced by the built-in Command Palette.
+ *
+ * `action` is intentionally an opaque OS-shell command here. It is only
+ * executed after main re-resolves `id` against its authoritative store; the
+ * renderer never sends command text across the execute boundary.
+ */
+export interface UserCommand {
+  id: string
+  name: string
+  action: string
+}
+
+/** Renderer → main payload for creating a command. Main trims, validates,
+ * and assigns the stable id. */
+export interface NewUserCommand {
+  name: string
+  action: string
+}
+
 export interface PaletteSize {
   width: number
   height: number
@@ -550,6 +570,12 @@ export interface ElectronAPI {
     itemId: string,
     alias: string | null
   ) => Promise<Settings>
+
+  // User Commands — dedicated CRUD keeps arbitrary shell text out of the
+  // generic settings patch surface. Main validates every write.
+  userCommandsList: () => Promise<UserCommand[]>
+  userCommandsAdd: (command: NewUserCommand) => Promise<UserCommand[]>
+  userCommandsRemove: (commandId: string) => Promise<UserCommand[]>
 
   // Palette window control
   paletteHide: () => Promise<void>
