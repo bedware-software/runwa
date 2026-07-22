@@ -95,7 +95,7 @@ space:
   on_tap: [space]
   on_hold:
     - { keys: [tab], to_hotkey: [ctrl, .] }
-    - { keys: [\], to_hotkey: [ctrl, b] }
+    - { keys: [\\], to_hotkey: [ctrl, b] }
 
     - { keys: [a], switch_to_workspace: 6 }
     - { keys: [m], to_hotkey: [menu] }
@@ -138,6 +138,6 @@ space:
     - { keys: [r], change_language: ru }
 
     - { os: windows, keys: [q], to_hotkey: [opt, f4] }
-    - { os: windows, keys: ["`"], to_hotkey: [win, "`"] }
+    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
     - { os: macos, keys: [any], to_hotkey: [cmd] }
 `
