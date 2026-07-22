@@ -6,6 +6,7 @@ import { createKeyboardRemapModule } from './keyboard-remap'
 import { createGroqSttModule } from './groq-stt'
 import { createHotstringsModule } from './hotstrings'
 import { createFlashcardsModule } from './flashcards'
+import { createUserCommandsModule } from './user-commands'
 
 /**
  * Hard-coded module registration. Adding a new module is a one-file change:
@@ -15,8 +16,8 @@ import { createFlashcardsModule } from './flashcards'
  * Registration order is what both the palette home-screen picker and the
  * settings sidebar show. User-facing launchers first (app-search,
  * window-switcher, command-palette), then the background services
- * (keyboard-remap, hotstrings), then the hotkey-only utility (groq-stt)
- * at the bottom.
+ * (keyboard-remap, hotstrings), then settings-only / hotkey utilities
+ * (user-commands, groq-stt) in the Other group.
  */
 export async function registerModules(): Promise<void> {
   // Instantiate the non-command-palette modules first so we can harvest
@@ -25,6 +26,7 @@ export async function registerModules(): Promise<void> {
   // adds itself to that list inside its factory.
   const appSearch = createAppSearchModule()
   const windowSwitcher = createWindowSwitcherModule()
+  const userCommands = createUserCommandsModule()
   const flashcards = createFlashcardsModule()
   const keyboardRemap = createKeyboardRemapModule()
   const hotstrings = createHotstringsModule()
@@ -33,6 +35,7 @@ export async function registerModules(): Promise<void> {
   const otherModules = [
     appSearch,
     windowSwitcher,
+    userCommands,
     flashcards,
     keyboardRemap,
     hotstrings,
@@ -48,6 +51,7 @@ export async function registerModules(): Promise<void> {
   moduleRegistry.register(appSearch)
   moduleRegistry.register(windowSwitcher)
   moduleRegistry.register(commandPalette)
+  moduleRegistry.register(userCommands)
   moduleRegistry.register(flashcards)
   moduleRegistry.register(keyboardRemap)
   moduleRegistry.register(hotstrings)

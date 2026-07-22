@@ -15,6 +15,7 @@ import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { hotstringService } from './modules/hotstrings/service'
 import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { flashcardsStore } from './modules/flashcards/store'
+import { userCommandsStore } from './modules/user-commands/store'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import {
@@ -155,6 +156,7 @@ app.whenReady().then(async () => {
   // 1. Persistence layer
   settingsStore.init()
   flashcardsStore.init()
+  userCommandsStore.init()
 
   // 2. Module registry (cache hydrated from settings internally)
   moduleRegistry.init()

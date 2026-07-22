@@ -13,6 +13,7 @@ import type {
   ModuleId,
   ModuleSettings,
   ModuleConfigValue,
+  NewUserCommand,
   PermissionName,
   PermissionStatus
 } from '@shared/types'
@@ -23,6 +24,7 @@ import { settingsWindow } from '../settings-window'
 import { keyboardRemapService } from '../modules/keyboard-remap/service'
 import { flashcardsStore } from '../modules/flashcards/store'
 import { flashcardsService } from '../modules/flashcards/service'
+import { userCommandsStore } from '../modules/user-commands/store'
 import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
@@ -34,6 +36,26 @@ import {
   requestAccessibilityPermission,
   requestScreenRecordingPermission
 } from '../modules/window-switcher/native'
+
+/**
+ * Every BrowserWindow loads the same preload bundle, so capability checks
+ * belong in main as well as in the renderer UI. A compromised recorder or
+ * indicator renderer must not be able to save an arbitrary shell action and
+ * then ask the module registry to execute it.
+ */
+function assertSenderWindow(
+  event: Electron.IpcMainInvokeEvent,
+  expected: BrowserWindow | null,
+  capability: string
+): void {
+  if (
+    !expected ||
+    expected.isDestroyed() ||
+    event.sender.id !== expected.webContents.id
+  ) {
+    throw new Error(`${capability} is not available from this window.`)
+  }
+}
 
 export function registerIpcHandlers(): void {
   // Environment snapshot for renderer (gates packaged-only settings, drives
@@ -49,15 +71,18 @@ export function registerIpcHandlers(): void {
   // Modules
   ipcMain.handle('modules:list', async () => moduleRegistry.getManifests())
 
-  ipcMain.handle('modules:search', async (_e, req: SearchRequest) =>
-    moduleRegistry.search(req)
-  )
+  ipcMain.handle('modules:search', async (event, req: SearchRequest) => {
+    assertSenderWindow(event, paletteWindow.getBrowserWindow(), 'Module search')
+    return moduleRegistry.search(req)
+  })
 
-  ipcMain.handle('modules:cancelSearch', async (_e, requestId: number) => {
+  ipcMain.handle('modules:cancelSearch', async (event, requestId: number) => {
+    assertSenderWindow(event, paletteWindow.getBrowserWindow(), 'Module search')
     moduleRegistry.cancelSearch(requestId)
   })
 
-  ipcMain.handle('modules:execute', async (_e, item: PaletteItem) => {
+  ipcMain.handle('modules:execute', async (event, item: PaletteItem) => {
+    assertSenderWindow(event, paletteWindow.getBrowserWindow(), 'Module execution')
     const result = await moduleRegistry.execute(item)
     if (result.dismissPalette) {
       paletteWindow.hide()
@@ -95,6 +120,41 @@ export function registerIpcHandlers(): void {
     'settings:setModuleAlias',
     async (_e, moduleId: ModuleId, itemId: string, alias: string | null) =>
       settingsStore.patchModuleAlias(moduleId, itemId, alias)
+  )
+
+  // User Commands — command ids are created in main and writes are validated
+  // by the dedicated store. Keeping this separate from generic settings
+  // patches prevents arbitrary renderer-shaped data entering the executable
+  // command list.
+  ipcMain.handle('user-commands:list', async (event) => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'User Commands management'
+    )
+    return userCommandsStore.list()
+  })
+  ipcMain.handle(
+    'user-commands:add',
+    async (event, command: NewUserCommand) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'User Commands management'
+      )
+      return userCommandsStore.add(command)
+    }
+  )
+  ipcMain.handle(
+    'user-commands:remove',
+    async (event, commandId: string) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'User Commands management'
+      )
+      return userCommandsStore.remove(commandId)
+    }
   )
 
   // Window-switcher: close the OS window behind a palette row (Ctrl/Cmd+D).

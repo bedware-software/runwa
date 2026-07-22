@@ -7,6 +7,7 @@ import { ConfigField } from './ConfigField'
 import { KeyboardRemapSection } from './KeyboardRemapSection'
 import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
 import { PermissionSection } from './PermissionSection'
+import { UserCommandsSection } from './UserCommandsSection'
 
 interface Props {
   moduleId: string
@@ -106,6 +107,8 @@ export function ModulePanel({ moduleId }: Props) {
       {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
 
       {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
+
+      {module.enabled && module.id === 'user-commands' && <UserCommandsSection />}
 
       {module.enabled && module.id === 'window-switcher' && (
         <PermissionSection

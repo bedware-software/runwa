@@ -34,6 +34,9 @@ export function buildRulesView(filePath: string): KeyboardRemapRulesView {
 
   const triggers: KeyboardRemapTriggerView[] = []
   for (const [name, block] of Object.entries(cfg as Record<string, unknown>)) {
+    // Mirrors the native parser's reserved top-level settings block; it is
+    // configuration metadata, not a remappable trigger.
+    if (name === 'settings') continue
     if (!block || typeof block !== 'object') continue
     const view = readTriggerBlock(name, block as Record<string, unknown>)
     if (view) triggers.push(view)

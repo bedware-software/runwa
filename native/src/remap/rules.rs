@@ -372,9 +372,11 @@ pub enum NamedKey {
     Comma,
     Period,
     Slash,
-    /// The context-menu / "Apps" key (Windows only; no macOS equivalent, so
-    /// `named_to_keycode` maps it to `None` there).
-    AppsKey,
+    /// The Windows "Application" / Menu key (`VK_APPS`) — opens a context
+    /// menu, the target of AutoHotkey's `{AppsKey}`. Windows-only: macOS has
+    /// no equivalent key, so synthesis there is a no-op (use `[shift, f10]`
+    /// on macOS instead).
+    Apps,
     /// An uppercase ASCII alpha (A–Z) or digit (0–9). Stored as the ASCII
     /// byte so callers can match/synth uniformly.
     Alpha(u8),
@@ -443,12 +445,27 @@ impl LanguageCode {
 // ---------------------------------------------------------------------------
 // Resolved form — what the state machine consumes.
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ResolvedRules {
     /// Per-trigger bindings keyed by the logical key the trigger corresponds
     /// to. The state machine does `triggers.get(&incoming_key)` to decide
     /// whether a key should enter Pending.
     pub triggers: HashMap<LogicalKey, ResolvedBinding>,
+    /// macOS-only: modifier(s) runwa chords with the desktop digit when it
+    /// fires a `switch_to_workspace` / `move_to_workspace` action. Must match
+    /// the combo bound to Mission Control's "Switch to Desktop N" shortcut.
+    /// Sourced from `settings.macos_switch_workspace_modifiers`; defaults to
+    /// `[Ctrl]` (macOS's factory binding). Ignored on other platforms.
+    pub macos_switch_workspace_modifiers: SmallVec<[Modifier; 4]>,
+}
+
+impl Default for ResolvedRules {
+    fn default() -> Self {
+        Self {
+            triggers: HashMap::new(),
+            macos_switch_workspace_modifiers: smallvec::smallvec![Modifier::Ctrl],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +575,49 @@ struct KeyRemap {
     on_tap: Option<serde_yml::Value>,
     #[serde(default)]
     on_hold: Option<serde_yml::Value>,
+}
+
+/// Reserved top-level `settings:` block — global options that aren't
+/// per-key triggers. `parse` pulls this key out of the mapping before the
+/// remaining entries are read as triggers. All fields optional; omit the
+/// whole block for defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Settings {
+    /// macOS only: which modifier(s) to synthesize alongside the desktop
+    /// digit for `switch_to_workspace` / `move_to_workspace`. Must match the
+    /// combo bound to System Settings → Keyboard → Shortcuts → Mission
+    /// Control → "Switch to Desktop N". Defaults to `[ctrl]` (the factory
+    /// binding); set e.g. `[ctrl, opt, cmd]` if you've rebound it.
+    #[serde(default)]
+    macos_switch_workspace_modifiers: Option<Vec<YamlToken>>,
+}
+
+impl Settings {
+    /// Resolve the configured Space-switch chord to concrete modifiers,
+    /// falling back to `[Ctrl]` when the block or field is absent.
+    fn resolve_switch_modifiers(&self) -> Result<SmallVec<[Modifier; 4]>, String> {
+        let Some(tokens) = &self.macos_switch_workspace_modifiers else {
+            return Ok(smallvec::smallvec![Modifier::Ctrl]);
+        };
+        if tokens.is_empty() {
+            return Err(
+                "settings.macos_switch_workspace_modifiers must list at least one modifier".into(),
+            );
+        }
+        tokens
+            .iter()
+            .map(|t| {
+                parse_modifier(t.as_str()).ok_or_else(|| {
+                    format!(
+                        "settings.macos_switch_workspace_modifiers: '{}' is not a modifier name \
+                         (expected ctrl, alt/opt, shift, cmd, …)",
+                        t.as_str()
+                    )
+                })
+            })
+            .collect()
+    }
 }
 
 /// Parsed form of `on_tap:` — either a single key name or a combo list.
@@ -711,20 +771,37 @@ pub fn parse(yaml: &str) -> Result<ResolvedRules, String> {
     if trimmed.is_empty() {
         return Ok(ResolvedRules::default());
     }
-    let cfg: Config = serde_yml::from_str(yaml).map_err(|e| format!("{e}"))?;
+    let mut root: serde_yml::Value = serde_yml::from_str(yaml).map_err(|e| format!("{e}"))?;
+    let mapping = root
+        .as_mapping_mut()
+        .ok_or_else(|| "top level of keyboard-rules.yaml must be a mapping".to_string())?;
+
+    // Pull the reserved `settings:` block out before the rest is read as
+    // triggers — otherwise `settings` would parse as an (invalid) trigger key.
+    let settings = match mapping.remove("settings") {
+        Some(v) => serde_yml::from_value::<Settings>(v).map_err(|e| format!("settings: {e}"))?,
+        None => Settings::default(),
+    };
+    let macos_switch_workspace_modifiers = settings.resolve_switch_modifiers()?;
+
+    let cfg: Config = serde_yml::from_value(root).map_err(|e| format!("{e}"))?;
     let mut triggers: HashMap<LogicalKey, ResolvedBinding> = HashMap::new();
     for (name, remap) in &cfg {
         let key = parse_trigger_key(name).ok_or_else(|| {
             format!(
                 "unknown trigger key '{name}' at top level — expected a logical key name like \
                  capslock, space, shift/right_shift, ctrl/left_ctrl, alt/right_alt, cmd/left_cmd, \
-                 a letter, a named key (escape/tab/…), or a punctuation alias"
+                 a letter, a named key (escape/tab/…), or a punctuation alias (or the reserved \
+                 `settings:` block)"
             )
         })?;
         let binding = resolve_binding(key, remap)?;
         triggers.insert(key, binding);
     }
-    Ok(ResolvedRules { triggers })
+    Ok(ResolvedRules {
+        triggers,
+        macos_switch_workspace_modifiers,
+    })
 }
 
 fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBinding, String> {
@@ -1103,6 +1180,8 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "f10" => Some(NamedKey::F10),
         "f11" => Some(NamedKey::F11),
         "f12" => Some(NamedKey::F12),
+        // Context-menu key. `apps` / `menu` mirror AutoHotkey's `{AppsKey}`.
+        "apps" | "appskey" | "menu" | "contextmenu" | "context_menu" => Some(NamedKey::Apps),
         // Navigation — word forms only (arrows aren't typable as a single
         // character in YAML).
         "left" => Some(NamedKey::Left),
@@ -1126,7 +1205,6 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "comma" => Some(NamedKey::Comma),
         "period" | "dot" => Some(NamedKey::Period),
         "slash" | "forwardslash" => Some(NamedKey::Slash),
-        "apps" | "appskey" | "menu" | "contextmenu" => Some(NamedKey::AppsKey),
         other if other.len() == 1 => parse_single_char(other.as_bytes()[0]),
         _ => None,
     }
@@ -1518,6 +1596,82 @@ space:
                     &[SyntheticEvent::MoveToWorkspace(2)]
                 );
                 assert!(p2.on_release.is_empty());
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn default_switch_workspace_modifier_is_ctrl() {
+        // No `settings:` block → macOS Space switches synth plain Ctrl+N,
+        // matching the factory Mission Control shortcut.
+        let r = parse("space:\n  on_tap: [space]\n").unwrap();
+        assert_eq!(
+            r.macos_switch_workspace_modifiers.as_slice(),
+            &[Modifier::Ctrl]
+        );
+    }
+
+    #[test]
+    fn settings_switch_workspace_modifiers_parse() {
+        let src = r#"
+settings:
+  macos_switch_workspace_modifiers: [ctrl, opt, cmd]
+
+space:
+  on_hold:
+    - keys: [1]
+      switch_to_workspace: 1
+"#;
+        let r = parse(src).expect("parse");
+        assert_eq!(
+            r.macos_switch_workspace_modifiers.as_slice(),
+            &[Modifier::Ctrl, Modifier::Alt, Modifier::Cmd]
+        );
+        // The reserved `settings` key is pulled out, not read as a trigger.
+        assert!(r.triggers.contains_key(&LogicalKey::Space));
+    }
+
+    #[test]
+    fn settings_rejects_unknown_modifier() {
+        let src = "settings:\n  macos_switch_workspace_modifiers: [ctrl, banana]\n";
+        assert!(parse(src).is_err());
+    }
+
+    #[test]
+    fn settings_rejects_empty_modifier_list() {
+        let src = "settings:\n  macos_switch_workspace_modifiers: []\n";
+        assert!(parse(src).is_err());
+    }
+
+    #[test]
+    fn settings_rejects_unknown_field() {
+        let src = "settings:\n  bogus: 1\n";
+        assert!(parse(src).is_err());
+    }
+
+    #[test]
+    fn apps_key_bakes_as_context_menu_synth() {
+        // `apps` / `menu` is AutoHotkey's {AppsKey}. Baking is OS-agnostic;
+        // macOS just declines to synthesize it at inject time.
+        let src = r#"
+space:
+  on_hold:
+    - keys: [m]
+      to_hotkey: [apps]
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let m = overrides.get(&ov(alpha('M'))).unwrap();
+                assert_eq!(
+                    m.on_press.as_slice(),
+                    &[SyntheticEvent::KeyDown(NamedKey::Apps)]
+                );
+                assert_eq!(
+                    m.on_release.as_slice(),
+                    &[SyntheticEvent::KeyUp(NamedKey::Apps)]
+                );
             }
             _ => panic!(),
         }

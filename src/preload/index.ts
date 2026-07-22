@@ -12,6 +12,7 @@ import type {
   ModuleId,
   ModuleSettings,
   ModuleConfigValue,
+  NewUserCommand,
   PaletteItem,
   PaletteShowPayload,
   PermissionName,
@@ -20,6 +21,7 @@ import type {
   SearchResult,
   Settings,
   SettingsTabId,
+  UserCommand,
   ExecuteResult,
   UpdateStatus
 } from '@shared/types'
@@ -59,6 +61,14 @@ const api: ElectronAPI = {
     alias: string | null
   ): Promise<Settings> =>
     ipcRenderer.invoke('settings:setModuleAlias', moduleId, itemId, alias),
+
+  // User Commands
+  userCommandsList: (): Promise<UserCommand[]> =>
+    ipcRenderer.invoke('user-commands:list'),
+  userCommandsAdd: (command: NewUserCommand): Promise<UserCommand[]> =>
+    ipcRenderer.invoke('user-commands:add', command),
+  userCommandsRemove: (commandId: string): Promise<UserCommand[]> =>
+    ipcRenderer.invoke('user-commands:remove', commandId),
 
   // Palette / settings window control
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),

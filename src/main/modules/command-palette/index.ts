@@ -2,11 +2,15 @@ import type { ModuleId, ModuleManifest, PaletteItem, SettingsTabId } from '@shar
 import type { PaletteModule } from '../types'
 import { paletteWindow } from '../../palette-window'
 import { settingsWindow } from '../../settings-window'
+import { settingsStore } from '../../settings-store'
 import { simulateWindowCommand, type WindowCommand } from './keystrokes'
+import { executeUserCommand } from '../user-commands/executor'
+import { userCommandsStore } from '../user-commands/store'
 
 /**
- * Command Palette — system commands exposed as palette entries. Ships
- * window-management commands (Maximize, Minimize, Restore), a built-in
+ * Command Palette — system and user-defined commands exposed as palette
+ * entries. Ships window-management commands (Maximize, Minimize, Restore),
+ * a built-in
  * "Open Settings" entry under the Settings group, and one
  * "Open <Module> Settings" deep-link per registered module under the
  * "Module Settings" group.
@@ -149,7 +153,12 @@ interface OpenSettingsAction {
   tab?: SettingsTabId
 }
 
-type ActionPayload = WindowCommandAction | OpenSettingsAction
+interface UserCommandAction {
+  kind: 'user-command'
+  commandId: string
+}
+
+type ActionPayload = WindowCommandAction | OpenSettingsAction | UserCommandAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
   if (typeof a !== 'object' || a === null) return false
@@ -161,7 +170,14 @@ function isActionPayload(a: unknown): a is ActionPayload {
     const tab = (a as { tab?: unknown }).tab
     return tab === undefined || typeof tab === 'string'
   }
+  if (k === 'user-command') {
+    return typeof (a as { commandId?: unknown }).commandId === 'string'
+  }
   return false
+}
+
+function userCommandsEnabled(): boolean {
+  return settingsStore.get().modules['user-commands']?.enabled ?? true
 }
 
 export function createCommandPaletteModule(
@@ -204,7 +220,7 @@ export function createCommandPaletteModule(
     icon: MODULE_ICON,
     kind: 'search',
     description:
-      'System commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. Each command is toggleable below except the built-in Settings entry.',
+      'System and user-defined commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. User-created entries are managed in User Commands under Other.',
     defaultEnabled: true,
     supportsDirectLaunch: true,
     defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
@@ -237,7 +253,37 @@ export function createCommandPaletteModule(
       const items: Array<Omit<PaletteItem, 'moduleId'>> = []
       let aliasMatch: { c: CommandDef; alias: string } | undefined
       let rank = 0
-      for (const c of COMMANDS) {
+
+      const appendUserCommands = (): void => {
+        if (!userCommandsEnabled()) return
+        for (const command of userCommandsStore.list()) {
+          if (trimmed && !command.name.toLowerCase().includes(normalisedQuery)) {
+            continue
+          }
+          items.push({
+            id: `user-command:${command.id}`,
+            title: command.name,
+            // Do not send saved shell text to the palette renderer: actions
+            // may contain tokens and Settings is the authorized detail view.
+            subtitle: 'Runs in background',
+            iconHint: 'terminal',
+            group: 'User Commands',
+            actionKind: 'user-command',
+            action: {
+              kind: 'user-command',
+              commandId: command.id
+            } satisfies UserCommandAction,
+            score: rank++ / 10000
+          })
+        }
+      }
+
+      for (let commandIndex = 0; commandIndex < COMMANDS.length; commandIndex++) {
+        // Keep user-authored entries above the long generated list of module
+        // settings links, while preserving the concise built-in Settings and
+        // Windows Control groups at the top.
+        if (commandIndex === STATIC_COMMANDS.length) appendUserCommands()
+        const c = COMMANDS[commandIndex]
         // readOnly entries always run regardless of stored config — the
         // settings UI hides the toggle so this guards against a hand-edited
         // settings.json zero-ing the flag.
@@ -326,6 +372,15 @@ export function createCommandPaletteModule(
       if (!isActionPayload(item.action)) {
         console.warn('[command-palette] invalid action', item)
         return { dismissPalette: false }
+      }
+
+      if (item.action.kind === 'user-command') {
+        if (item.actionKind !== 'user-command' || !userCommandsEnabled()) {
+          return { dismissPalette: false }
+        }
+        return {
+          dismissPalette: await executeUserCommand(item.action.commandId)
+        }
       }
 
       if (item.action.kind === 'open-settings') {

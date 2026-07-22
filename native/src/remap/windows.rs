@@ -306,10 +306,11 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
 fn vk_to_logical(vk: u32) -> LogicalKey {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VK_BACK, VK_DOWN, VK_END, VK_ESCAPE as VK_ESC_C, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
-        VK_F3, VK_F4 as VK_F4_C, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_LEFT, VK_NEXT,
-        VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA,
-        VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
+        VK_APPS, VK_BACK, VK_DOWN, VK_END, VK_ESCAPE as VK_ESC_C, VK_F1, VK_F10, VK_F11, VK_F12,
+        VK_F2, VK_F3, VK_F4 as VK_F4_C, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_LEFT,
+        VK_NEXT, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7,
+        VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT,
+        VK_TAB, VK_UP,
     };
     const VK_A: u32 = 0x41;
     const VK_Z: u32 = 0x5A;
@@ -380,6 +381,7 @@ fn vk_to_logical(vk: u32) -> LogicalKey {
         v if v == VK_OEM_COMMA.0 => NamedKey::Comma,
         v if v == VK_OEM_PERIOD.0 => NamedKey::Period,
         v if v == VK_OEM_2.0 => NamedKey::Slash,
+        v if v == VK_APPS.0 => NamedKey::Apps,
         _ => return LogicalKey::Other,
     };
     LogicalKey::Named(nk)
@@ -429,7 +431,7 @@ fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
         NamedKey::Comma => VK_OEM_COMMA,
         NamedKey::Period => VK_OEM_PERIOD,
         NamedKey::Slash => VK_OEM_2,
-        NamedKey::AppsKey => VK_APPS,
+        NamedKey::Apps => VK_APPS,
         NamedKey::Alpha(b) => VIRTUAL_KEY(b as u16),
     }
 }

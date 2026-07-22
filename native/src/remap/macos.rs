@@ -27,6 +27,7 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
+use smallvec::{smallvec, SmallVec};
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
 use super::state::{Action, EventKind, LogicalKey, RawEvent, StateMachine};
@@ -91,6 +92,10 @@ pub fn install(rules: ResolvedRules) -> Result<MacosHook, String> {
     } else {
         false
     };
+
+    // Record the configured Space-switch chord for the inject paths, which
+    // read it via `switch_workspace_modifiers()` and don't hold the rules.
+    *MAC_SWITCH_MODIFIERS.lock() = rules.macos_switch_workspace_modifiers.clone();
 
     {
         let mut guard = SM_SLOT.lock();
@@ -565,7 +570,9 @@ fn named_to_keycode(key: NamedKey) -> Option<u16> {
         NamedKey::Comma => Some(KC_COMMA),
         NamedKey::Period => Some(KC_PERIOD),
         NamedKey::Slash => Some(KC_SLASH),
-        NamedKey::AppsKey => None,
+        // No macOS equivalent of the Windows context-menu key. Callers
+        // should route macOS context-menu intent through `[shift, f10]`.
+        NamedKey::Apps => None,
         NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }
@@ -753,6 +760,35 @@ fn modifier_mask_from_flags(flags: CGEventFlags) -> ModifierMask {
 /// same-Space tap toggles back to. 0-based; `None` until runwa's first switch.
 static MAC_VD_ALTERNATE: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
 
+/// The modifier(s) we chord with the desktop digit when synthesizing a
+/// Space switch — must match Mission Control's "Switch to Desktop N"
+/// shortcut. Set from `settings.macos_switch_workspace_modifiers` at
+/// `install`; defaults to `[Ctrl]` (macOS's factory binding). Read by both
+/// inject paths (plain switch here + the window-move drag in
+/// `macos_move_window`), which don't otherwise hold the resolved rules.
+static MAC_SWITCH_MODIFIERS: Lazy<Mutex<SmallVec<[Modifier; 4]>>> =
+    Lazy::new(|| Mutex::new(smallvec![Modifier::Ctrl]));
+
+/// The configured Space-switch chord. See `MAC_SWITCH_MODIFIERS`.
+fn switch_workspace_modifiers() -> SmallVec<[Modifier; 4]> {
+    MAC_SWITCH_MODIFIERS.lock().clone()
+}
+
+/// Build the synth burst for a Space switch to the (1-based) desktop
+/// `dest`: press every configured modifier, tap the desktop digit, then
+/// release the modifiers in reverse. Shared by the plain-switch inject path
+/// and the window-move drag in `macos_move_window`.
+pub(super) fn switch_workspace_events(dest: u32) -> SmallVec<[SyntheticEvent; 8]> {
+    let mods = switch_workspace_modifiers();
+    let key = NamedKey::Alpha(b'0' + dest as u8);
+    let mut seq: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+    seq.extend(mods.iter().map(|m| SyntheticEvent::ModifierDown(*m)));
+    seq.push(SyntheticEvent::KeyDown(key));
+    seq.push(SyntheticEvent::KeyUp(key));
+    seq.extend(mods.iter().rev().map(|m| SyntheticEvent::ModifierUp(*m)));
+    seq
+}
+
 /// Resolve `switch_to_workspace: requested` (1-based) to the Space we should
 /// actually jump to, updating the shadow ordinal + alternate as a side effect.
 /// Returns the 1-based destination for the `Ctrl+N` synth, or `None` when the
@@ -834,9 +870,11 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 // from the previous space bleeding through. Without a
                 // yabai-style scripting addition (SIP partially disabled),
                 // the pragmatic approach is to synthesize the built-in
-                // `Ctrl+N` shortcut — users enable it once in
-                // System Settings → Keyboard → Shortcuts → Mission Control
-                // → Switch to Desktop N.
+                // "Switch to Desktop N" shortcut — users enable it once in
+                // System Settings → Keyboard → Shortcuts → Mission Control.
+                // The chord modifier(s) default to Ctrl but are configurable
+                // via `settings.macos_switch_workspace_modifiers` (see
+                // `switch_workspace_events`) for users who've rebound it.
                 let requested = *n;
                 // Resolve the alternate-desktop toggle: a same-Space tap
                 // bounces to the previous Space instead of re-switching. Also
@@ -847,16 +885,9 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                     );
                     continue;
                 };
-                let key = NamedKey::Alpha(b'0' + dest as u8);
-                inject(
-                    &[
-                        SyntheticEvent::ModifierDown(Modifier::Ctrl),
-                        SyntheticEvent::KeyDown(key),
-                        SyntheticEvent::KeyUp(key),
-                        SyntheticEvent::ModifierUp(Modifier::Ctrl),
-                    ],
-                    flags,
-                );
+                // Chord the digit with the user-configured modifier(s)
+                // (default Ctrl) — must match their Mission Control shortcut.
+                inject(&switch_workspace_events(dest), flags);
                 continue;
             }
             SyntheticEvent::MoveToWorkspace(n) => {
