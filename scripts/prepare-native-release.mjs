@@ -19,7 +19,7 @@ import {
   statSync
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -65,11 +65,11 @@ if (!existsSync(napiCli)) {
   )
 }
 
-function run(command, args, cwd = projectDir) {
+function run(command, args, cwd = projectDir, env = process.env) {
   console.log(`[native-release] ${command} ${args.join(' ')}`)
   const result = spawnSync(command, args, {
     cwd,
-    env: process.env,
+    env,
     stdio: 'inherit'
   })
   if (result.error) throw result.error
@@ -80,8 +80,29 @@ function run(command, args, cwd = projectDir) {
   }
 }
 
-function runNapi(args) {
-  run(process.execPath, [napiCli, ...args], nativeDir)
+function runNapi(args, env = process.env) {
+  run(process.execPath, [napiCli, ...args], nativeDir, env)
+}
+
+function rustupWhich(tool) {
+  console.log(`[native-release] rustup which ${tool}`)
+  const result = spawnSync('rustup', ['which', tool], {
+    cwd: projectDir,
+    env: process.env,
+    encoding: 'utf8'
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    process.stdout.write(result.stdout)
+    process.stderr.write(result.stderr)
+    throw new Error(
+      `rustup which ${tool} exited with status ${result.status ?? 'unknown'}`
+    )
+  }
+
+  const toolPath = result.stdout.trim()
+  assertFile(toolPath)
+  return toolPath
 }
 
 function removeGeneratedBindings() {
@@ -126,8 +147,23 @@ function buildUniversalMacAddon() {
   )
 
   run('rustup', ['target', 'add', x64Target, arm64Target])
-  runNapi(['build', '--platform', '--release', '--target', x64Target])
-  runNapi(['build', '--platform', '--release', '--target', arm64Target])
+  const cargoPath = rustupWhich('cargo')
+  const rustcPath = rustupWhich('rustc')
+  const rustupToolchainEnv = {
+    ...process.env,
+    PATH: [dirname(cargoPath), process.env.PATH].filter(Boolean).join(delimiter),
+    CARGO: cargoPath,
+    RUSTC: rustcPath
+  }
+
+  runNapi(
+    ['build', '--platform', '--release', '--target', x64Target],
+    rustupToolchainEnv
+  )
+  runNapi(
+    ['build', '--platform', '--release', '--target', arm64Target],
+    rustupToolchainEnv
+  )
   assertFile(x64Binary)
   assertFile(arm64Binary)
 
@@ -135,7 +171,7 @@ function buildUniversalMacAddon() {
   assertFile(universalBinary)
   // napi 2.x does not propagate lipo's exit status from `napi universal`.
   // Verify both slices explicitly before allowing electron-builder to run.
-  run('lipo', ['-verify_arch', 'x86_64', 'arm64', universalBinary], nativeDir)
+  run('lipo', [universalBinary, '-verify_arch', 'x86_64', 'arm64'], nativeDir)
 
   // The universal binary is the release artifact. Removing thin binaries
   // makes it impossible for a package to accidentally select a host-only
