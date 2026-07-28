@@ -6,6 +6,8 @@ import { settingsStore } from '../../settings-store'
 import { simulateWindowCommand, type WindowCommand } from './keystrokes'
 import { executeUserCommand } from '../user-commands/executor'
 import { userCommandsStore } from '../user-commands/store'
+import { autoDarkModeService } from '../auto-dark-mode/service'
+import { AUTO_DARK_MODE_ID } from '@shared/auto-dark-mode'
 
 /**
  * Command Palette — system and user-defined commands exposed as palette
@@ -32,6 +34,7 @@ import { userCommandsStore } from '../user-commands/store'
 type CommandKind =
   | { kind: 'window'; command: WindowCommand }
   | { kind: 'open-settings'; tab?: SettingsTabId }
+  | { kind: 'auto-dark-mode'; command: 'schedule' | 'toggle' }
 
 /**
  * Identity of a module the Command Palette will surface as a deep-link
@@ -74,6 +77,8 @@ interface CommandDef {
   defaultAlias?: string
   /** What the command actually does on execute. */
   action: CommandKind
+  /** Hide and reject this command unless the owning module is enabled. */
+  requiresModuleId?: ModuleId
   /** Longer description shown in the settings checkbox row. */
   configDescription: string
 }
@@ -140,6 +145,32 @@ const STATIC_COMMANDS: CommandDef[] = [
     action: { kind: 'window', command: 'restore' },
     configDescription:
       'Returns the previously-focused window to a normal size. Windows / Linux: drives Alt+Space → R. macOS: un-fullscreens or un-minimizes if applicable, otherwise resizes to 70% of the screen, centred.'
+  },
+  {
+    id: 'themes-on-schedule',
+    title: 'Themes on Schedule',
+    icon: 'clock',
+    subtitle: 'Resume automatic light and dark theme changes.',
+    group: 'Themes',
+    configKey: 'enableThemesOnSchedule',
+    defaultEnabled: true,
+    action: { kind: 'auto-dark-mode', command: 'schedule' },
+    requiresModuleId: AUTO_DARK_MODE_ID,
+    configDescription:
+      'Switch Auto Dark Mode to Scheduled and immediately apply the theme for the current local-time interval.'
+  },
+  {
+    id: 'toggle-theme',
+    title: 'Toggle Theme',
+    icon: 'sun-moon',
+    subtitle: 'Switch between the light and dark system themes.',
+    group: 'Themes',
+    configKey: 'enableToggleTheme',
+    defaultEnabled: true,
+    action: { kind: 'auto-dark-mode', command: 'toggle' },
+    requiresModuleId: AUTO_DARK_MODE_ID,
+    configDescription:
+      'Switch the system appearance and enter Manual mode so the schedule does not immediately undo the change.'
   }
 ]
 
@@ -158,7 +189,16 @@ interface UserCommandAction {
   commandId: string
 }
 
-type ActionPayload = WindowCommandAction | OpenSettingsAction | UserCommandAction
+interface AutoDarkModeAction {
+  kind: 'auto-dark-mode'
+  command: 'schedule' | 'toggle'
+}
+
+type ActionPayload =
+  | WindowCommandAction
+  | OpenSettingsAction
+  | UserCommandAction
+  | AutoDarkModeAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
   if (typeof a !== 'object' || a === null) return false
@@ -173,11 +213,52 @@ function isActionPayload(a: unknown): a is ActionPayload {
   if (k === 'user-command') {
     return typeof (a as { commandId?: unknown }).commandId === 'string'
   }
+  if (k === 'auto-dark-mode') {
+    const command = (a as { command?: unknown }).command
+    return command === 'schedule' || command === 'toggle'
+  }
   return false
 }
 
 function userCommandsEnabled(): boolean {
   return settingsStore.get().modules['user-commands']?.enabled ?? true
+}
+
+function requiredModuleEnabled(moduleId: ModuleId | undefined): boolean {
+  if (!moduleId) return true
+  if (
+    moduleId === AUTO_DARK_MODE_ID &&
+    process.platform !== 'win32' &&
+    process.platform !== 'darwin'
+  ) {
+    return false
+  }
+  return settingsStore.get().modules[moduleId]?.enabled ?? true
+}
+
+function actionKindFor(action: CommandKind): string {
+  if (action.kind === 'open-settings') return 'open-settings'
+  if (action.kind === 'auto-dark-mode') return 'auto-dark-mode'
+  return 'window-command'
+}
+
+function actionPayloadFor(action: CommandKind): ActionPayload {
+  if (action.kind === 'open-settings') {
+    return {
+      kind: 'open-settings',
+      ...(action.tab ? { tab: action.tab } : {})
+    } satisfies OpenSettingsAction
+  }
+  if (action.kind === 'auto-dark-mode') {
+    return {
+      kind: 'auto-dark-mode',
+      command: action.command
+    } satisfies AutoDarkModeAction
+  }
+  return {
+    kind: 'window',
+    command: action.command
+  } satisfies WindowCommandAction
 }
 
 export function createCommandPaletteModule(
@@ -205,6 +286,16 @@ export function createCommandPaletteModule(
   }))
 
   const COMMANDS: CommandDef[] = [...STATIC_COMMANDS, ...dynamicCommands]
+
+  const commandIsEnabledNow = (command: CommandDef): boolean => {
+    const moduleSettings = settingsStore.get().modules[MODULE_ID]
+    if (!(moduleSettings?.enabled ?? true)) return false
+    if (!requiredModuleEnabled(command.requiresModuleId)) return false
+    return (
+      command.readOnly === true ||
+      moduleSettings?.config?.[command.configKey] !== false
+    )
+  }
 
   // Default aliases shipped with the module. Keyed by the same stable id
   // the search builder stamps onto each PaletteItem (`cmd:<id>`) so the
@@ -284,6 +375,7 @@ export function createCommandPaletteModule(
         // Windows Control groups at the top.
         if (commandIndex === STATIC_COMMANDS.length) appendUserCommands()
         const c = COMMANDS[commandIndex]
+        if (!requiredModuleEnabled(c.requiresModuleId)) continue
         // readOnly entries always run regardless of stored config — the
         // settings UI hides the toggle so this guards against a hand-edited
         // settings.json zero-ing the flag.
@@ -315,18 +407,8 @@ export function createCommandPaletteModule(
           iconHint: c.icon,
           alias,
           group: c.group,
-          actionKind:
-            c.action.kind === 'open-settings' ? 'open-settings' : 'window-command',
-          action:
-            c.action.kind === 'open-settings'
-              ? ({
-                  kind: 'open-settings',
-                  ...(c.action.tab ? { tab: c.action.tab } : {})
-                } satisfies OpenSettingsAction)
-              : ({
-                  kind: 'window',
-                  command: c.action.command
-                } satisfies WindowCommandAction),
+          actionKind: actionKindFor(c.action),
+          action: actionPayloadFor(c.action),
           score: rank++ / 10000
         })
       }
@@ -346,20 +428,8 @@ export function createCommandPaletteModule(
             alias,
             group: c.group,
             autoExecute: true,
-            actionKind:
-              c.action.kind === 'open-settings'
-                ? 'open-settings'
-                : 'window-command',
-            action:
-              c.action.kind === 'open-settings'
-                ? ({
-                    kind: 'open-settings',
-                    ...(c.action.tab ? { tab: c.action.tab } : {})
-                  } satisfies OpenSettingsAction)
-                : ({
-                    kind: 'window',
-                    command: c.action.command
-                  } satisfies WindowCommandAction),
+            actionKind: actionKindFor(c.action),
+            action: actionPayloadFor(c.action),
             score: -1
           }
         ]
@@ -390,6 +460,38 @@ export function createCommandPaletteModule(
         // dynamic "Open <Module> Settings" entries.
         paletteWindow.hide()
         settingsWindow.open(item.action.tab)
+        return { dismissPalette: false }
+      }
+
+      if (item.action.kind === 'auto-dark-mode') {
+        const command = COMMANDS.find(
+          (candidate) => `cmd:${candidate.id}` === item.id
+        )
+        if (
+          item.moduleId !== MODULE_ID ||
+          item.actionKind !== 'auto-dark-mode' ||
+          !command ||
+          command.action.kind !== 'auto-dark-mode' ||
+          command.action.command !== item.action.command ||
+          !commandIsEnabledNow(command)
+        ) {
+          return { dismissPalette: false }
+        }
+
+        // Restore the previous app before the OS appearance animation and
+        // Desktop Hint begin. The hint itself is focusless/click-through.
+        paletteWindow.hide(true)
+        try {
+          if (item.action.command === 'schedule') {
+            await autoDarkModeService.enableScheduledMode()
+          } else {
+            await autoDarkModeService.toggleTheme()
+          }
+        } catch (error) {
+          // The service already logged the detailed platform error and showed
+          // a concise failure Desktop Hint. Keep the palette dismissed.
+          console.warn('[command-palette] Auto Dark Mode command failed:', error)
+        }
         return { dismissPalette: false }
       }
 

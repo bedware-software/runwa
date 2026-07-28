@@ -3,8 +3,8 @@ import path from 'path'
 import type { ModuleConfigValue, ModuleManifest } from '@shared/types'
 import type { DirectLaunchEvent, PaletteModule } from '../types'
 import { settingsStore } from '../../settings-store'
+import { desktopHintWindow } from '../../desktop-hint-window'
 import { recorderWindow } from './recorder-window'
-import { indicatorWindow } from './indicator-window'
 import { GroqError, transcribe } from './groq-client'
 import { simulatePaste } from './uiohook-bridge'
 
@@ -18,6 +18,7 @@ import { simulatePaste } from './uiohook-bridge'
  */
 
 const MODULE_ID = 'groq-stt'
+const DESKTOP_HINT_SOURCE = MODULE_ID
 
 const MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'whisper-large-v3', label: 'Whisper Large v3' },
@@ -175,7 +176,11 @@ export function createGroqSttModule(): PaletteModule {
     // Synchronously mark recording + capture the promise so a near-instant
     // release/toggle event sees a real in-flight result instead of null.
     state.state = 'recording'
-    indicatorWindow.setState('recording')
+    desktopHintWindow.show({
+      source: DESKTOP_HINT_SOURCE,
+      message: 'Listening…',
+      icon: 'microphone'
+    })
     state.recordingResult = recorderWindow.start()
     // Swallow unhandled-rejection noise for the fire-and-forget case where
     // the user never releases the key (app quits mid-recording, etc.).
@@ -188,7 +193,11 @@ export function createGroqSttModule(): PaletteModule {
   const endRecording = async (): Promise<void> => {
     if (state.state !== 'recording' || !state.recordingResult) return
     state.state = 'transcribing'
-    indicatorWindow.setState('transcribing')
+    desktopHintWindow.show({
+      source: DESKTOP_HINT_SOURCE,
+      message: 'Transcribing…',
+      icon: 'spinner'
+    })
     recorderWindow.stop()
     let audio: { data: Uint8Array; mimeType: string }
     try {
@@ -196,7 +205,7 @@ export function createGroqSttModule(): PaletteModule {
     } catch (err) {
       state.state = 'idle'
       state.recordingResult = null
-      indicatorWindow.setState('hidden')
+      desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
       const msg = (err as Error).message
       // "Released too fast" / "no audio captured" / "mic not ready"
       // all map to the same user-facing reality: the push-to-talk
@@ -249,7 +258,7 @@ export function createGroqSttModule(): PaletteModule {
         // isn't loaded, simulatePaste() returns false and the user
         // still has the text on their clipboard for a manual paste.
         state.state = 'idle'
-        indicatorWindow.setState('hidden')
+        desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
         setTimeout(() => {
           simulatePaste()
         }, 40)
@@ -267,7 +276,7 @@ export function createGroqSttModule(): PaletteModule {
       }
     } finally {
       state.state = 'idle'
-      indicatorWindow.setState('hidden')
+      desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
     }
   }
 

@@ -40,8 +40,8 @@ import {
 /**
  * Every BrowserWindow loads the same preload bundle, so capability checks
  * belong in main as well as in the renderer UI. A compromised recorder or
- * indicator renderer must not be able to save an arbitrary shell action and
- * then ask the module registry to execute it.
+ * Desktop Hint renderer must not be able to save an arbitrary shell action
+ * and then ask the module registry to execute it.
  */
 function assertSenderWindow(
   event: Electron.IpcMainInvokeEvent,

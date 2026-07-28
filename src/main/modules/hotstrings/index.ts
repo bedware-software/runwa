@@ -15,11 +15,13 @@ import type { PaletteModule } from '../types'
  * src/main/index.ts, mirroring the keyboard-remap service.
  */
 
+const PASTE_SHORTCUT = process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'
+
 const DEFAULT_RULES = [
   '# One rule per line.',
   '#   trigger -> replacement   pastes the replacement automatically',
   '#   trigger => replacement   puts the replacement on the clipboard',
-  '#                            and shows a "Press ⌘V to paste" hint',
+  `#                            and shows a "Press ${PASTE_SHORTCUT} to paste" hint`,
   '# Comments start with #. Empty lines are ignored.',
   "# Try typing one of these examples in any app (you won't see the trigger",
   '# once the replacement fires):',
@@ -31,7 +33,7 @@ const DEFAULT_RULES = [
   '',
   '# Use `=>` for snippets you want to paste into a password field. Type',
   '# the trigger in a normal field; runwa stages the value on the clipboard',
-  '# and shows the hint. Then click into the password field and ⌘V.',
+  `# and shows the hint. Then click into the password field and ${PASTE_SHORTCUT}.`,
   '# Example:',
   '# ;pw => U_M29GP'
 ].join('\n')
@@ -53,7 +55,7 @@ const MANIFEST: ModuleManifest = {
       type: 'text',
       label: 'Rules',
       description:
-        'One rule per line. Use `trigger -> replacement` to paste the replacement automatically, or `trigger => replacement` to put the replacement on the clipboard and show a "Press ⌘V to paste" hint instead — useful for password fields that ignore synthetic keystrokes (type the trigger anywhere normal, then ⌘V where you actually need it). Trigger matching is case-sensitive and only fires when the character before the trigger is not a letter or digit, so e.g. `AFAIK` will not fire inside `SAFAIKY`. Comment lines start with `#`.',
+        `One rule per line. Use \`trigger -> replacement\` to paste the replacement automatically, or \`trigger => replacement\` to put the replacement on the clipboard and show a "Press ${PASTE_SHORTCUT} to paste" hint instead — useful for password fields that ignore synthetic keystrokes (type the trigger anywhere normal, then ${PASTE_SHORTCUT} where you actually need it). Trigger matching is case-sensitive and only fires when the character before the trigger is not a letter or digit, so e.g. \`AFAIK\` will not fire inside \`SAFAIKY\`. Comment lines start with \`#\`.`,
       multiline: true,
       defaultValue: DEFAULT_RULES,
       placeholder: ';addr -> 1 Infinite Loop, Cupertino, CA'

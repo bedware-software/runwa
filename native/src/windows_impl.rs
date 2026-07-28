@@ -2,7 +2,9 @@ use crate::{FocusTopmostResult, NativeWindow, WindowIcon};
 use std::cell::OnceCell;
 use std::ffi::c_void;
 use windows::core::PWSTR;
-use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, RECT, TRUE, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, BOOL, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
+};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetObjectW,
@@ -11,6 +13,10 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_VALUE_TYPE,
 };
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
@@ -22,8 +28,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetIconInfo, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
     PostMessageW, SendMessageTimeoutW, SetForegroundWindow, ShowWindow, DI_NORMAL, GCL_HICON,
-    GCL_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, ICONINFO, ICON_BIG, ICON_SMALL,
-    ICON_SMALL2, SMTO_ABORTIFHUNG, SW_RESTORE, WM_CLOSE, WM_GETICON, WS_EX_TOOLWINDOW,
+    GCL_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, HWND_BROADCAST, ICONINFO, ICON_BIG,
+    ICON_SMALL, ICON_SMALL2, SMTO_ABORTIFHUNG, SW_RESTORE, WM_CLOSE, WM_GETICON, WM_SETTINGCHANGE,
+    WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
@@ -1027,4 +1034,143 @@ pub fn get_current_desktop_number() -> napi::Result<u32> {
         },
         Err(_) => Ok(0),
     }
+}
+
+const PERSONALIZE_KEY: windows::core::PCWSTR =
+    windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+const APPS_USE_LIGHT_THEME: windows::core::PCWSTR = windows::core::w!("AppsUseLightTheme");
+const SYSTEM_USES_LIGHT_THEME: windows::core::PCWSTR = windows::core::w!("SystemUsesLightTheme");
+
+struct RegistryKey(HKEY);
+
+impl Drop for RegistryKey {
+    fn drop(&mut self) {
+        if !self.0.is_invalid() {
+            unsafe {
+                let _ = RegCloseKey(self.0);
+            }
+        }
+    }
+}
+
+fn registry_error(action: &str, status: WIN32_ERROR) -> napi::Error {
+    let source = windows::core::Error::from(status);
+    napi::Error::from_reason(format!(
+        "{action} failed: {source} (Windows error {})",
+        status.0
+    ))
+}
+
+fn open_personalize_key(
+    access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+) -> napi::Result<RegistryKey> {
+    let mut key = HKEY::default();
+    let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, PERSONALIZE_KEY, 0, access, &mut key) };
+    if status.is_err() {
+        return Err(registry_error(
+            "Opening HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            status,
+        ));
+    }
+    Ok(RegistryKey(key))
+}
+
+fn read_theme_value(key: HKEY, name: windows::core::PCWSTR) -> napi::Result<u32> {
+    let mut value = 0u32;
+    let mut value_type = REG_VALUE_TYPE::default();
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            name,
+            None,
+            Some(&mut value_type),
+            Some((&mut value as *mut u32).cast::<u8>()),
+            Some(&mut size),
+        )
+    };
+    if status.is_err() {
+        return Err(registry_error("Reading the Windows theme setting", status));
+    }
+    if value_type != REG_DWORD || size != std::mem::size_of::<u32>() as u32 {
+        return Err(napi::Error::from_reason(
+            "The Windows theme registry value is not a REG_DWORD",
+        ));
+    }
+    Ok(value)
+}
+
+fn write_theme_value(key: HKEY, name: windows::core::PCWSTR, value: u32) -> napi::Result<()> {
+    let bytes = value.to_le_bytes();
+    let status = unsafe { RegSetValueExW(key, name, 0, REG_DWORD, Some(&bytes)) };
+    if status.is_err() {
+        return Err(registry_error("Writing the Windows theme setting", status));
+    }
+    Ok(())
+}
+
+pub fn get_system_theme() -> napi::Result<String> {
+    let key = open_personalize_key(KEY_QUERY_VALUE)?;
+    let uses_light_theme = read_theme_value(key.0, APPS_USE_LIGHT_THEME)?;
+    Ok(if uses_light_theme == 0 {
+        "dark".to_owned()
+    } else {
+        "light".to_owned()
+    })
+}
+
+pub fn set_system_theme(theme: &str) -> napi::Result<()> {
+    let uses_light_theme = match theme {
+        "light" => 1,
+        "dark" => 0,
+        _ => {
+            return Err(napi::Error::from_reason(format!(
+                "Invalid system theme {theme:?}; expected \"light\" or \"dark\""
+            )))
+        }
+    };
+
+    let key = open_personalize_key(KEY_QUERY_VALUE | KEY_SET_VALUE)?;
+    write_theme_value(key.0, APPS_USE_LIGHT_THEME, uses_light_theme)?;
+    write_theme_value(key.0, SYSTEM_USES_LIGHT_THEME, uses_light_theme)?;
+
+    let verified_apps = read_theme_value(key.0, APPS_USE_LIGHT_THEME)?;
+    let verified_system = read_theme_value(key.0, SYSTEM_USES_LIGHT_THEME)?;
+    if verified_apps != uses_light_theme || verified_system != uses_light_theme {
+        return Err(napi::Error::from_reason(
+            "Windows did not persist both application and system theme settings",
+        ));
+    }
+
+    // HWND_BROADCAST applies the timeout once per top-level window, so doing
+    // this synchronously could freeze Electron's main thread for many seconds
+    // when another app is hung. Keep the required pointer-bearing
+    // WM_SETTINGCHANGE on a worker thread (the asynchronous Win32 messaging
+    // APIs reject pointer parameters for messages below WM_USER).
+    if let Err(error) = std::thread::Builder::new()
+        .name("runwa-theme-broadcast".to_owned())
+        .spawn(|| {
+            let setting = "ImmersiveColorSet\0".encode_utf16().collect::<Vec<_>>();
+            let result = unsafe {
+                SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    WPARAM(0),
+                    LPARAM(setting.as_ptr() as isize),
+                    SMTO_ABORTIFHUNG,
+                    500,
+                    None,
+                )
+            };
+            if result.0 == 0 {
+                diag_log("Auto Dark Mode: WM_SETTINGCHANGE broadcast timed out or failed");
+            }
+        })
+    {
+        diag_log(&format!(
+            "Auto Dark Mode: could not start theme notification thread: {error}"
+        ));
+    }
+
+    Ok(())
 }

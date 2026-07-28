@@ -236,6 +236,30 @@ export interface ExecuteResult {
 
 export type Theme = 'light' | 'dark' | 'system'
 
+/**
+ * Optional leading artwork for the shared, focusless Desktop Hint overlay.
+ * Keep this list deliberately small: these values cross the preload boundary
+ * and are rendered by a fixed icon map rather than accepting arbitrary HTML.
+ */
+export type DesktopHintIcon = 'clipboard' | 'microphone' | 'spinner'
+
+/**
+ * Main → renderer payload for the small, always-on-top Desktop Hint.
+ *
+ * `source` identifies the owner of the current hint. A caller may pass that
+ * same value to `DesktopHintWindow.hide(source)` so a late async cleanup from
+ * one module cannot dismiss a newer hint owned by another module.
+ *
+ * Omit `durationMs` for a persistent status (for example recording); positive
+ * values auto-hide one-shot feedback such as a clipboard or mode-change hint.
+ */
+export interface DesktopHintPayload {
+  source: string
+  message: string
+  icon?: DesktopHintIcon
+  durationMs?: number
+}
+
 export interface ModuleSettings {
   enabled: boolean
   directLaunchHotkey?: string

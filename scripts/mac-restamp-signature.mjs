@@ -78,19 +78,28 @@ const DESIGNATED_REQUIREMENT = `=designated => identifier "${BUNDLE_ID}"`
 
 for (const app of bundles) {
   try {
+    // Nested code is already signed by electron-builder. Re-signing only the
+    // outer bundle preserves helper identifiers and per-process entitlements.
     execFileSync(
       'codesign',
       [
-        '--deep',
         '--force',
         '--sign', '-',
         '--identifier', BUNDLE_ID,
         '--requirements', DESIGNATED_REQUIREMENT,
+        '--preserve-metadata=entitlements,flags,runtime',
         app
       ],
       { stdio: ['ignore', 'inherit', 'inherit'] }
     )
-    console.log(`[mac-restamp-signature] re-signed ${app} with identifier=${BUNDLE_ID}, DR=identifier-based`)
+    execFileSync(
+      'codesign',
+      ['--verify', '--deep', '--strict', '--verbose=2', app],
+      { stdio: ['ignore', 'inherit', 'inherit'] }
+    )
+    console.log(
+      `[mac-restamp-signature] re-signed and verified ${app} with identifier=${BUNDLE_ID}, DR=identifier-based`
+    )
   } catch (err) {
     console.error(`[mac-restamp-signature] failed to re-sign ${app}:`, err.message)
     process.exitCode = 1

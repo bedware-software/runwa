@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppInfo,
+  DesktopHintPayload,
   ElectronAPI,
   FlashcardAnswerRequest,
   FlashcardCardState,
@@ -251,30 +252,30 @@ const recorderApi: RecorderAPI = {
 
 contextBridge.exposeInMainWorld('groqRecorder', recorderApi)
 
-/** Bridge for the small recording-indicator window. */
-type GroqIndicatorState = 'hidden' | 'recording' | 'transcribing'
-
-interface IndicatorAPI {
+/** Bridge for the shared, focusless Desktop Hint window. */
+interface DesktopHintAPI {
   signalReady: () => void
-  onState: (cb: (state: GroqIndicatorState) => void) => () => void
+  onPayload: (
+    cb: (payload: DesktopHintPayload | null) => void
+  ) => () => void
 }
 
-const indicatorApi: IndicatorAPI = {
+const desktopHintApi: DesktopHintAPI = {
   signalReady: () => {
-    ipcRenderer.send('groq-stt:indicator:ready')
+    ipcRenderer.send('desktop-hint:ready')
   },
-  onState: (cb) => {
+  onPayload: (cb) => {
     const listener = (
       _e: Electron.IpcRendererEvent,
-      state: GroqIndicatorState
+      payload: DesktopHintPayload | null
     ): void => {
-      cb(state)
+      cb(payload)
     }
-    ipcRenderer.on('groq-stt:indicator:state', listener)
+    ipcRenderer.on('desktop-hint:payload', listener)
     return () => {
-      ipcRenderer.removeListener('groq-stt:indicator:state', listener)
+      ipcRenderer.removeListener('desktop-hint:payload', listener)
     }
   }
 }
 
-contextBridge.exposeInMainWorld('groqIndicator', indicatorApi)
+contextBridge.exposeInMainWorld('desktopHint', desktopHintApi)

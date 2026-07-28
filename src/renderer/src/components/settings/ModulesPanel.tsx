@@ -8,6 +8,7 @@ import { KeyboardRemapSection } from './KeyboardRemapSection'
 import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
 import { PermissionSection } from './PermissionSection'
 import { UserCommandsSection } from './UserCommandsSection'
+import { AutoDarkModeSection } from './AutoDarkModeSection'
 
 interface Props {
   moduleId: string
@@ -42,7 +43,7 @@ export function ModulePanel({ moduleId }: Props) {
         </div>
       )}
 
-      {module.enabled && module.configFields && (() => {
+      {module.enabled && module.id !== 'auto-dark-mode' && module.configFields && (() => {
         // Drop fields gated to other operating systems — e.g. App
         // Search's "Store / UWP apps" and "Desktop shortcuts" are
         // Windows-only enumeration sources and would just confuse a mac
@@ -105,6 +106,8 @@ export function ModulePanel({ moduleId }: Props) {
       })()}
 
       {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
+
+      {module.enabled && module.id === 'auto-dark-mode' && <AutoDarkModeSection />}
 
       {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
 

@@ -29,6 +29,7 @@ function resolveTheme(theme: Theme): 'light' | 'dark' {
 class SettingsWindow {
   private window: BrowserWindow | null = null
   private offSettingsChange: (() => void) | null = null
+  private offNativeThemeChange: (() => void) | null = null
 
   open(tab?: SettingsTabId): void {
     if (this.window && !this.window.isDestroyed()) {
@@ -85,9 +86,9 @@ class SettingsWindow {
     // settings window is open. Windows/Linux only — macOS draws the traffic
     // lights itself and doesn't need re-tinting.
     if (!isMac) {
-      const handler = (next: Settings): void => {
+      const applyChromeTheme = (theme: Theme): void => {
         if (!this.window || this.window.isDestroyed()) return
-        const nextColors = CHROME_COLORS[resolveTheme(next.theme)]
+        const nextColors = CHROME_COLORS[resolveTheme(theme)]
         this.window.setTitleBarOverlay({
           color: nextColors.bg,
           symbolColor: nextColors.fg,
@@ -95,13 +96,27 @@ class SettingsWindow {
         })
         this.window.setBackgroundColor(nextColors.bg)
       }
+      const handler = (next: Settings): void => {
+        applyChromeTheme(next.theme)
+      }
+      const nativeThemeHandler = (): void => {
+        // When Runwa follows System, Auto Dark Mode changes the OS without
+        // mutating Settings.theme. Listen to nativeTheme as well so the
+        // Windows title-bar overlay follows that live appearance change.
+        applyChromeTheme(settingsStore.get().theme)
+      }
       settingsStore.on('change', handler)
+      nativeTheme.on('updated', nativeThemeHandler)
       this.offSettingsChange = () => settingsStore.off('change', handler)
+      this.offNativeThemeChange = () =>
+        nativeTheme.off('updated', nativeThemeHandler)
     }
 
     this.window.on('closed', () => {
       this.offSettingsChange?.()
       this.offSettingsChange = null
+      this.offNativeThemeChange?.()
+      this.offNativeThemeChange = null
       this.window = null
     })
 

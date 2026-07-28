@@ -1,4 +1,4 @@
-import type { ElectronAPI } from '@shared/types'
+import type { DesktopHintPayload, ElectronAPI } from '@shared/types'
 
 /**
  * Bridge exposed only to the hidden recorder window. Mirrors the shape in
@@ -13,17 +13,18 @@ interface GroqRecorderAPI {
   onStop: (cb: () => void) => () => void
 }
 
-type GroqIndicatorState = 'hidden' | 'recording' | 'transcribing'
-interface GroqIndicatorAPI {
+interface DesktopHintAPI {
   signalReady: () => void
-  onState: (cb: (state: GroqIndicatorState) => void) => () => void
+  onPayload: (
+    cb: (payload: DesktopHintPayload | null) => void
+  ) => () => void
 }
 
 declare global {
   interface Window {
     electronAPI: ElectronAPI
     groqRecorder?: GroqRecorderAPI
-    groqIndicator?: GroqIndicatorAPI
+    desktopHint?: DesktopHintAPI
   }
 }
 

@@ -364,3 +364,37 @@ pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
 pub fn set_input_language(code: String) -> napi::Result<()> {
     remap::set_input_language(&code).map_err(napi::Error::from_reason)
 }
+
+/// Read the Windows application appearance preference. Returns `"light"` or
+/// `"dark"`. The TypeScript system-theme driver uses an AppleScript backend on
+/// macOS, so this native API intentionally reports unsupported elsewhere.
+#[napi]
+pub fn get_system_theme() -> napi::Result<String> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::get_system_theme()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(napi::Error::from_reason(
+            "Native system theme control is only available on Windows",
+        ))
+    }
+}
+
+/// Set both the Windows application and system appearance preferences, then
+/// broadcast `WM_SETTINGCHANGE` so the shell and running applications refresh.
+#[napi]
+pub fn set_system_theme(theme: String) -> napi::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::set_system_theme(&theme)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = theme;
+        Err(napi::Error::from_reason(
+            "Native system theme control is only available on Windows",
+        ))
+    }
+}

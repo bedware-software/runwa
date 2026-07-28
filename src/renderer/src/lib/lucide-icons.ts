@@ -30,6 +30,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Settings from 'lucide-react/dist/esm/icons/settings.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
+import SunMoon from 'lucide-react/dist/esm/icons/sun-moon.js'
 import Tag from 'lucide-react/dist/esm/icons/tag.js'
 import Terminal from 'lucide-react/dist/esm/icons/terminal.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -57,6 +58,7 @@ const ICONS_BY_HINT = {
   rocket: Rocket,
   settings: Settings,
   square: Square,
+  'sun-moon': SunMoon,
   terminal: Terminal
 } satisfies Record<string, LucideIcon>
 
@@ -99,6 +101,7 @@ export {
   RotateCcw,
   SlidersHorizontal,
   Square,
+  SunMoon,
   Tag,
   Terminal,
   Trash2,

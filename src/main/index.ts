@@ -9,11 +9,12 @@ import { hotkeyManager } from './hotkey-manager'
 import { registerIpcHandlers, wireSettingsBroadcast } from './ipc/handlers'
 import { trayManager } from './tray'
 import { recorderWindow } from './modules/groq-stt/recorder-window'
-import { indicatorWindow } from './modules/groq-stt/indicator-window'
+import { desktopHintWindow } from './desktop-hint-window'
 import { keyboardRemapService } from './modules/keyboard-remap/service'
 import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { hotstringService } from './modules/hotstrings/service'
 import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
+import { autoDarkModeService } from './modules/auto-dark-mode/service'
 import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
 import { initAutoUpdater } from './auto-update'
@@ -173,10 +174,14 @@ app.whenReady().then(async () => {
   //    disabled — the window is cheap (1×1, never shown) and the mic only
   //    opens on demand.
   recorderWindow.init()
-  // Pre-create the recording-indicator window (hidden until needed) so the
-  // first hotkey press doesn't have to wait for a renderer cold-boot
-  // before the user sees the "Listening…" pill.
-  indicatorWindow.init()
+  // Pre-create the shared Desktop Hint window (hidden until needed) so the
+  // first status or mode-change hint doesn't wait on a renderer cold boot.
+  desktopHintWindow.init()
+
+  // Auto Dark Mode must be ready before IPC and global hotkeys can execute
+  // its Command Palette actions. Manual mode remains idle; Scheduled mode
+  // reconciles immediately and then owns its local-time boundary timers.
+  autoDarkModeService.start()
 
   // 6. IPC + settings broadcast
   registerIpcHandlers()
@@ -282,13 +287,6 @@ app.on('will-quit', () => {
     console.warn('[shutdown] recorderWindow.dispose threw:', err)
   }
   try {
-    console.log('[shutdown] indicatorWindow.dispose…')
-    indicatorWindow.dispose()
-    console.log('[shutdown] indicatorWindow.dispose OK')
-  } catch (err) {
-    console.warn('[shutdown] indicatorWindow.dispose threw:', err)
-  }
-  try {
     console.log('[shutdown] keyboardRemapService.stop…')
     keyboardRemapService.stop()
     console.log('[shutdown] keyboardRemapService.stop OK')
@@ -301,6 +299,22 @@ app.on('will-quit', () => {
     console.log('[shutdown] hotstringService.stop OK')
   } catch (err) {
     console.warn('[shutdown] hotstringService.stop threw:', err)
+  }
+  try {
+    console.log('[shutdown] autoDarkModeService.stop…')
+    autoDarkModeService.stop()
+    console.log('[shutdown] autoDarkModeService.stop OK')
+  } catch (err) {
+    console.warn('[shutdown] autoDarkModeService.stop threw:', err)
+  }
+  try {
+    // Dispose the shared surface only after every service that can publish or
+    // dismiss a hint has stopped.
+    console.log('[shutdown] desktopHintWindow.dispose…')
+    desktopHintWindow.dispose()
+    console.log('[shutdown] desktopHintWindow.dispose OK')
+  } catch (err) {
+    console.warn('[shutdown] desktopHintWindow.dispose threw:', err)
   }
   // Exit via external `taskkill /F /PID self` rather than Node's
   // `process.exit(0)`. Why: when Electron's stdio is piped to a Node

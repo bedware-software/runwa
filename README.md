@@ -18,6 +18,8 @@ A cross-platform (Win & Mac) command palette launcher inspired by [PowerToys Com
 - **Window Switcher** — list and focus any open window. Rust napi-rs addon over Win32 on Windows, CoreGraphics/AX on macOS, `osascript` fallback. Uses the window's own icon (WM_GETICON / class) before falling back to the exe icon — correct for UWP/PWA/shared-exe apps. Double-press of the hotkey jumps straight to the previous window (Alt+Tab-style, works across windows of the same app); Ctrl/Cmd+D closes the highlighted window without leaving the list.
 - **Groq Transcription** — push-to-talk or toggle voice-to-text via Groq Whisper. Direct-launch hotkey captures mic audio, transcribes, and drops the result on the clipboard (optional auto-paste).
 - **Keyboard Remap** — low-level, system-wide remap layer. CapsLock → Ctrl (tap = Escape), Space → modifier layer (tap = space). YAML rules file, cross-platform (Windows hook, macOS CGEventTap, Linux uinput). Covers the AutoHotkey / Karabiner-Elements basics.
+- **Auto Dark Mode** — switch the Windows or macOS system appearance manually or on a two-time local schedule. Includes `Themes on Schedule` and `Toggle Theme` commands.
+- **Desktop Hint** — shared, focusless status popup with native-inspired light and dark styling, used by Hotstrings, transcription, and Auto Dark Mode.
 - **User Commands** — add named shell actions under Settings → Other and run them from Command Palette. Supports scripts, environment expansion, pipelines, and launching apps with arguments; includes removable platform-specific examples on first use.
 - **Settings UI** — per-module toggles, config fields, hotkey rebinding.
 - **Hotkey system** — per-module direct-launch hotkeys; each module's palette is reachable via its own configurable chord.

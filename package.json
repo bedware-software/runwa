@@ -10,11 +10,12 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "build:native": "cd native && napi build --platform --release",
+    "prepare:native:release": "node scripts/prepare-native-release.mjs",
     "typecheck": "tsc --noEmit",
-    "dist": "electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js",
-    "dist:win": "electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --win --x64",
-    "dist:mac": "electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --mac",
-    "dist:linux": "electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --linux",
+    "dist": "npm run prepare:native:release && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js",
+    "dist:win": "npm run prepare:native:release -- win32 && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --win --x64",
+    "dist:mac": "npm run prepare:native:release -- darwin && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --mac",
+    "dist:linux": "npm run prepare:native:release -- linux && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --linux",
     "prepare": "husky"
   },
   "dependencies": {

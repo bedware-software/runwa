@@ -17,12 +17,12 @@
  *     Cmd+V (or Ctrl+V on Windows / Linux) so the replacement lands in
  *     the focused field.
  *   - `=>` (clipboard mode): on match, runwa erases the trigger and stages
- *     the replacement on the clipboard, then shows a small "Press ⌘V to
- *     paste" indicator. The user pastes manually wherever they actually
- *     need the text — typical use case is "type trigger in a normal field,
- *     then switch to a password field and ⌘V there" (password fields
- *     ignore both typed triggers and synth Cmd+V, so a separate stage
- *     for them is the only thing that works).
+ *     the replacement on the clipboard, then shows a Desktop Hint with the
+ *     platform's paste shortcut. The user pastes manually wherever they
+ *     actually need the text — typical use case is "type trigger in a
+ *     normal field, then switch to a password field and paste there"
+ *     (password fields ignore both typed triggers and synthetic paste, so
+ *     a separate stage for them is the only thing that works).
  *   - An empty trigger or a line without either separator is skipped
  *     silently (the settings panel shows a live preview so users see
  *     when a rule didn't parse).
@@ -39,8 +39,9 @@ export interface HotstringRule {
   trigger: string
   replacement: string
   /** When true, the service erases the trigger and stages the replacement
-   *  on the clipboard, then shows the manual-paste indicator — instead of
-   *  synthesising ⌘V. Set when the rule line uses `=>` as its separator
+   *  on the clipboard, then shows the manual-paste Desktop Hint — instead
+   *  of synthesising the platform paste shortcut. Set when the rule line
+   *  uses `=>` as its separator
    *  instead of `->`. */
   clipboardOnly: boolean
 }
