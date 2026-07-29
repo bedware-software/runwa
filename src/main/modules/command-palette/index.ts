@@ -86,7 +86,7 @@ interface CommandDef {
 const STATIC_COMMANDS: CommandDef[] = [
   {
     id: 'open-settings',
-    title: 'Open Settings',
+    title: 'Open settings',
     icon: 'settings',
     subtitle: 'Open the runwa settings window.',
     group: 'Settings',
@@ -148,7 +148,7 @@ const STATIC_COMMANDS: CommandDef[] = [
   },
   {
     id: 'themes-on-schedule',
-    title: 'Themes on Schedule',
+    title: 'Themes on schedule',
     icon: 'clock',
     subtitle: 'Resume automatic light and dark theme changes.',
     group: 'Themes',
@@ -161,7 +161,7 @@ const STATIC_COMMANDS: CommandDef[] = [
   },
   {
     id: 'toggle-theme',
-    title: 'Toggle Theme',
+    title: 'Toggle theme',
     icon: 'sun-moon',
     subtitle: 'Switch between the light and dark system themes.',
     group: 'Themes',
@@ -275,7 +275,7 @@ export function createCommandPaletteModule(
 
   const dynamicCommands: CommandDef[] = settingsTargets.map((m) => ({
     id: `open-settings-${m.id}`,
-    title: `Open ${m.name} Settings`,
+    title: `Open ${m.name} settings`,
     icon: m.icon,
     subtitle: `Jump straight to the ${m.name} settings tab.`,
     group: 'Module Settings',
