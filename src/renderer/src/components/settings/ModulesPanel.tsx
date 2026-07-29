@@ -9,6 +9,7 @@ import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
 import { PermissionSection } from './PermissionSection'
 import { UserCommandsSection } from './UserCommandsSection'
 import { AutoDarkModeSection } from './AutoDarkModeSection'
+import { WindowSwitcherIgnoreSection } from './WindowSwitcherIgnoreSection'
 
 interface Props {
   moduleId: string
@@ -112,6 +113,10 @@ export function ModulePanel({ moduleId }: Props) {
       {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
 
       {module.enabled && module.id === 'user-commands' && <UserCommandsSection />}
+
+      {module.enabled && module.id === 'window-switcher' && (
+        <WindowSwitcherIgnoreSection />
+      )}
 
       {module.enabled && module.id === 'window-switcher' && (
         <PermissionSection

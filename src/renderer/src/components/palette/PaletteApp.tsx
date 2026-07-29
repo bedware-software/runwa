@@ -5,7 +5,14 @@ import { useSettingsStore } from '@/store/settings-store'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
-import { ContextMenu, resetDeckAction, revealAction, setAliasAction } from './ContextMenu'
+import {
+  ContextMenu,
+  ignoreProcessAction,
+  ignoreWindowAction,
+  resetDeckAction,
+  revealAction,
+  setAliasAction
+} from './ContextMenu'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { Toggle } from '../ui/Toggle'
 import { AliasInputModal } from './AliasInputModal'
@@ -13,6 +20,7 @@ import { FooterHint } from './FooterHint'
 import { Kbd, Hotkey } from '../ui/Kbd'
 import { QuizView } from './QuizView'
 import { IS_MAC } from '@/lib/platform'
+import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
 
 /**
  * Module ids whose built-in entries the user can attach a Ctrl+K alias to.
@@ -22,6 +30,14 @@ import { IS_MAC } from '@/lib/platform'
  * designed as a follow-up feature.
  */
 const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette'])
+
+/**
+ * True for a live-window row from the Window Switcher — the rows that can be
+ * added to the module's ignore list from the Ctrl+K menu.
+ */
+function isWindowSwitcherRow(item: PaletteItem | undefined): boolean {
+  return item?.moduleId === 'window-switcher' && item.actionKind === 'focus-window'
+}
 
 export function PaletteApp() {
   const query = usePaletteStore((s) => s.query)
@@ -118,6 +134,21 @@ export function PaletteApp() {
     typeof (selectedItem.action as { deckId?: unknown })?.deckId === 'string'
       ? ((selectedItem.action as { deckId: string }).deckId)
       : null
+  const isWindowRow = isWindowSwitcherRow(selectedItem)
+
+  // Add an ignore rule for the highlighted window and drop it (plus any
+  // sibling the rule now covers) from the list. Main derives the rule from
+  // the row itself — see `window-switcher:ignore-item`.
+  const ignoreSelected = (scope: WindowIgnoreScope): void => {
+    if (!selectedItem) return
+    void window.electronAPI
+      .windowSwitcherIgnoreItem(selectedItem, scope)
+      .then((ok) => {
+        if (ok) refresh()
+      })
+      .catch((err) => console.warn('[window-switcher] ignore failed', err))
+  }
+
   const contextActions = useMemo(() => {
     const actions = []
     if (canSetAlias) {
@@ -129,6 +160,17 @@ export function PaletteApp() {
       )
     }
     if (selectedItem?.revealPath) actions.push(revealAction(selectedItem.revealPath))
+    if (isWindowRow) {
+      actions.push(ignoreWindowAction(() => ignoreSelected('window')))
+      // The process-wide variant needs an executable name to key off — rows
+      // without a subtitle (macOS windows enumerated without a process name)
+      // only get the single-window rule.
+      if (selectedItem?.subtitle) {
+        actions.push(
+          ignoreProcessAction(selectedItem.subtitle, () => ignoreSelected('process'))
+        )
+      }
+    }
     if (selectedDeckId) {
       actions.push(
         resetDeckAction(() => {
@@ -138,10 +180,16 @@ export function PaletteApp() {
       )
     }
     return actions
+    // `selectedItem?.id` keeps the ignore closures bound to the row that is
+    // actually highlighted — the other deps are field values that can repeat
+    // across rows (two windows of the same app share a subtitle).
   }, [
+    selectedItem?.id,
     selectedItem?.revealPath,
     selectedItem?.alias,
+    selectedItem?.subtitle,
     canSetAlias,
+    isWindowRow,
     selectedDeckId
   ])
   const canOpenMenu = contextActions.length > 0
@@ -158,6 +206,7 @@ export function PaletteApp() {
       (target.revealPath !== undefined ||
         (ALIAS_CAPABLE_MODULES.has(target.moduleId) &&
           target.actionKind !== 'user-command') ||
+        isWindowSwitcherRow(target) ||
         (target.moduleId === 'flashcards' && target.actionKind === 'start-quiz'))
     if (!hasAction) return
     setSelectedIndex(index)

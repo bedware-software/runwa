@@ -17,6 +17,7 @@ import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { autoDarkModeService } from './modules/auto-dark-mode/service'
 import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
+import { windowIgnoreStore } from './modules/window-switcher/ignore-store'
 import { initAutoUpdater } from './auto-update'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import {
@@ -158,6 +159,7 @@ app.whenReady().then(async () => {
   settingsStore.init()
   flashcardsStore.init()
   userCommandsStore.init()
+  windowIgnoreStore.init()
 
   // 2. Module registry (cache hydrated from settings internally)
   moduleRegistry.init()

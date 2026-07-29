@@ -293,6 +293,35 @@ export interface NewUserCommand {
   action: string
 }
 
+/**
+ * One Window Switcher ignore rule. A window is hidden from the switcher when
+ * EVERY populated field of the rule matches it.
+ *
+ * Both fields are matched case-insensitively against the row as the palette
+ * renders it (`title` = the window title, `processName` = the executable name
+ * shown as the subtitle) and accept `*` as a wildcard. An empty field matches
+ * anything, so `{ title: '', processName: 'ktalk.exe' }` hides every window of
+ * that executable while `{ title: 'ktalk', processName: 'ktalk.exe' }` hides
+ * only the rows literally titled "ktalk". A rule with both fields empty would
+ * hide everything and is rejected.
+ */
+export interface WindowIgnoreRule {
+  id: string
+  title: string
+  processName: string
+}
+
+/** Renderer → main payload for creating a rule. Main trims, validates, and
+ * assigns the stable id. */
+export type NewWindowIgnoreRule = Omit<WindowIgnoreRule, 'id'>
+
+/**
+ * What the palette's Ctrl+K "ignore" actions build a rule from:
+ *  - 'window'  → title + executable (hide just this row)
+ *  - 'process' → executable only (hide every window of that app)
+ */
+export type WindowIgnoreScope = 'window' | 'process'
+
 export interface PaletteSize {
   width: number
   height: number
@@ -613,6 +642,23 @@ export interface ElectronAPI {
    */
   windowSwitcherCloseWindow: (item: PaletteItem) => Promise<boolean>
 
+  /**
+   * Window-switcher ignore list. `…IgnoreItem` is the palette-side entry
+   * point (Ctrl+K → "Ignore this window"): main derives the rule from the
+   * row so the renderer never hand-crafts one. The list/add/remove trio is
+   * the Settings-side management surface. Resolves false when the row isn't
+   * a window-switcher result.
+   */
+  windowSwitcherIgnoreItem: (
+    item: PaletteItem,
+    scope: WindowIgnoreScope
+  ) => Promise<boolean>
+  windowSwitcherListIgnoreRules: () => Promise<WindowIgnoreRule[]>
+  windowSwitcherAddIgnoreRule: (
+    rule: NewWindowIgnoreRule
+  ) => Promise<WindowIgnoreRule[]>
+  windowSwitcherRemoveIgnoreRule: (ruleId: string) => Promise<WindowIgnoreRule[]>
+
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>
 
@@ -686,6 +732,16 @@ export interface ElectronAPI {
    * the same window (no separate BrowserWindow is opened).
    */
   onFlashcardsStartQuiz: (cb: (payload: FlashcardsStartQuizPayload) => void) => () => void
+  /**
+   * Ignore rules changed. Fired at the settings window whenever the list is
+   * edited — including from the palette's Ctrl+K menu, which is the common
+   * case: the user hides a window while the Settings pane is already open
+   * behind it and expects the list there to be current.
+   */
+  onWindowSwitcherIgnoreRulesChanged: (
+    cb: (rules: WindowIgnoreRule[]) => void
+  ) => () => void
+
   onSettingsChanged: (cb: (settings: Settings) => void) => () => void
   /**
    * Main asks the settings renderer to switch to a specific tab. Fired when

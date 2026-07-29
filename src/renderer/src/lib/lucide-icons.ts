@@ -10,6 +10,7 @@ import Clipboard from 'lucide-react/dist/esm/icons/clipboard.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
 import CornerDownLeft from 'lucide-react/dist/esm/icons/corner-down-left.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import GraduationCap from 'lucide-react/dist/esm/icons/graduation-cap.js'
 import Hash from 'lucide-react/dist/esm/icons/hash.js'
@@ -87,6 +88,7 @@ export {
   Clock,
   CornerDownLeft,
   Download,
+  EyeOff,
   FolderOpen,
   GraduationCap,
   Hash,

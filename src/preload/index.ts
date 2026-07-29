@@ -14,6 +14,7 @@ import type {
   ModuleSettings,
   ModuleConfigValue,
   NewUserCommand,
+  NewWindowIgnoreRule,
   PaletteItem,
   PaletteShowPayload,
   PermissionName,
@@ -24,7 +25,9 @@ import type {
   SettingsTabId,
   UserCommand,
   ExecuteResult,
-  UpdateStatus
+  UpdateStatus,
+  WindowIgnoreRule,
+  WindowIgnoreScope
 } from '@shared/types'
 
 const api: ElectronAPI = {
@@ -78,6 +81,22 @@ const api: ElectronAPI = {
   // Window-switcher: close the OS window behind a palette row (Ctrl/Cmd+D).
   windowSwitcherCloseWindow: (item: PaletteItem): Promise<boolean> =>
     ipcRenderer.invoke('window-switcher:close-window', item),
+
+  // Window-switcher ignore list — palette-side (derive a rule from a row)
+  // plus the Settings-side management trio.
+  windowSwitcherIgnoreItem: (
+    item: PaletteItem,
+    scope: WindowIgnoreScope
+  ): Promise<boolean> =>
+    ipcRenderer.invoke('window-switcher:ignore-item', item, scope),
+  windowSwitcherListIgnoreRules: (): Promise<WindowIgnoreRule[]> =>
+    ipcRenderer.invoke('window-switcher:ignore-rules:list'),
+  windowSwitcherAddIgnoreRule: (
+    rule: NewWindowIgnoreRule
+  ): Promise<WindowIgnoreRule[]> =>
+    ipcRenderer.invoke('window-switcher:ignore-rules:add', rule),
+  windowSwitcherRemoveIgnoreRule: (ruleId: string): Promise<WindowIgnoreRule[]> =>
+    ipcRenderer.invoke('window-switcher:ignore-rules:remove', ruleId),
 
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>
@@ -163,6 +182,19 @@ const api: ElectronAPI = {
     ipcRenderer.on('palette:activate-second', listener)
     return () => {
       ipcRenderer.removeListener('palette:activate-second', listener)
+    }
+  },
+
+  onWindowSwitcherIgnoreRulesChanged: (cb: (rules: WindowIgnoreRule[]) => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      rules: WindowIgnoreRule[]
+    ): void => {
+      cb(rules)
+    }
+    ipcRenderer.on('window-switcher:ignore-rules-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('window-switcher:ignore-rules-changed', listener)
     }
   },
 

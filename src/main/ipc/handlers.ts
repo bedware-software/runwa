@@ -14,8 +14,11 @@ import type {
   ModuleSettings,
   ModuleConfigValue,
   NewUserCommand,
+  NewWindowIgnoreRule,
   PermissionName,
-  PermissionStatus
+  PermissionStatus,
+  WindowIgnoreRule,
+  WindowIgnoreScope
 } from '@shared/types'
 import { settingsStore } from '../settings-store'
 import { moduleRegistry } from '../modules/registry'
@@ -25,6 +28,7 @@ import { keyboardRemapService } from '../modules/keyboard-remap/service'
 import { flashcardsStore } from '../modules/flashcards/store'
 import { flashcardsService } from '../modules/flashcards/service'
 import { userCommandsStore } from '../modules/user-commands/store'
+import { windowIgnoreStore } from '../modules/window-switcher/ignore-store'
 import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
@@ -180,6 +184,90 @@ export function registerIpcHandlers(): void {
         console.warn('[window-switcher] close failed', err)
         return false
       }
+    }
+  )
+
+  // Window-switcher ignore list.
+  //
+  // The palette's Ctrl+K menu only ever hands over the row it's standing on
+  // — main derives the rule from it, so the renderer can't author an
+  // arbitrary pattern from behind the IPC firewall. Free-form rules (with
+  // `*` wildcards) come exclusively from the Settings pane, which is also
+  // the only window allowed to read or prune the list.
+  ipcMain.handle(
+    'window-switcher:ignore-item',
+    async (event, item: PaletteItem, scope: WindowIgnoreScope): Promise<boolean> => {
+      assertSenderWindow(
+        event,
+        paletteWindow.getBrowserWindow(),
+        'Window Switcher ignore list'
+      )
+      if (item?.moduleId !== 'window-switcher' || item.actionKind !== 'focus-window') {
+        return false
+      }
+      const title = typeof item.title === 'string' ? item.title : ''
+      // window-switcher renders the executable name as the row subtitle.
+      const processName = typeof item.subtitle === 'string' ? item.subtitle : ''
+      const rule: NewWindowIgnoreRule =
+        scope === 'process' ? { title: '', processName } : { title, processName }
+      if (!rule.title && !rule.processName) return false
+      try {
+        windowIgnoreStore.add(rule)
+      } catch (err) {
+        // The only expected failure is "already in the list", which from the
+        // palette's point of view is the desired end state anyway. Anything
+        // else (bad payload, quota) is logged and reported as a no-op.
+        const list = windowIgnoreStore.list()
+        const alreadyThere = list.some(
+          (r) =>
+            r.title.toLowerCase() === rule.title.toLowerCase() &&
+            r.processName.toLowerCase() === rule.processName.toLowerCase()
+        )
+        if (!alreadyThere) {
+          console.warn('[window-switcher] ignore failed', err)
+          return false
+        }
+        return true
+      }
+      broadcastIgnoreRules(windowIgnoreStore.list())
+      return true
+    }
+  )
+
+  ipcMain.handle('window-switcher:ignore-rules:list', async (event) => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'Window Switcher ignore list'
+    )
+    return windowIgnoreStore.list()
+  })
+
+  ipcMain.handle(
+    'window-switcher:ignore-rules:add',
+    async (event, rule: NewWindowIgnoreRule) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'Window Switcher ignore list'
+      )
+      const rules = windowIgnoreStore.add(rule)
+      broadcastIgnoreRules(rules)
+      return rules
+    }
+  )
+
+  ipcMain.handle(
+    'window-switcher:ignore-rules:remove',
+    async (event, ruleId: string) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'Window Switcher ignore list'
+      )
+      const rules = windowIgnoreStore.remove(ruleId)
+      broadcastIgnoreRules(rules)
+      return rules
     }
   )
 
@@ -529,6 +617,19 @@ async function wipeContents(dir) {
   ipcMain.on('palette:endMove', () => {
     paletteWindow.endMove()
   })
+}
+
+/**
+ * Push the current ignore list at the settings window. The palette can edit
+ * the list too (Ctrl+K → "Ignore this window"), and the pane is very often
+ * already open behind it — without this it would keep showing a stale list
+ * until the user navigated away and back.
+ */
+function broadcastIgnoreRules(rules: WindowIgnoreRule[]): void {
+  const win = settingsWindow.getBrowserWindow()
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('window-switcher:ignore-rules-changed', rules)
+  }
 }
 
 /**

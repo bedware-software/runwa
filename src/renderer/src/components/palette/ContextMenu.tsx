@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen, RotateCcw, Tag } from '@/lib/lucide-icons'
+import { EyeOff, FolderOpen, RotateCcw, Tag } from '@/lib/lucide-icons'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
@@ -176,6 +176,37 @@ export function setAliasAction(
     label: hasExisting ? 'Change alias…' : 'Set alias…',
     Icon: Tag,
     onActivate: openModal
+  }
+}
+
+/**
+ * Window-switcher: hide this row from future searches. Two scopes, both
+ * reversible from Settings → Window Switcher → Ignored windows, which is
+ * why neither goes through a confirmation dialog:
+ *
+ *  - window  — title + executable, i.e. exactly the row the user is on.
+ *  - process — every window of that executable. Handy for apps that spawn
+ *    a fleet of helper windows (call controls, screen-share bars, …) that
+ *    are never worth switching to.
+ */
+export function ignoreWindowAction(onActivate: () => void): ContextMenuAction {
+  return {
+    id: 'ignore-window',
+    label: 'Ignore this window',
+    Icon: EyeOff,
+    onActivate
+  }
+}
+
+export function ignoreProcessAction(
+  processName: string,
+  onActivate: () => void
+): ContextMenuAction {
+  return {
+    id: 'ignore-process',
+    label: `Ignore all ${processName} windows`,
+    Icon: EyeOff,
+    onActivate
   }
 }
 

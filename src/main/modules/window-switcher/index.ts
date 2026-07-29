@@ -12,6 +12,7 @@ import {
   getWindowIconDataUrl,
   warmIconCache
 } from '../../icon-cache'
+import { isWindowIgnored, windowIgnoreStore } from './ignore-store'
 
 const MANIFEST: ModuleManifest = {
   id: 'window-switcher',
@@ -143,6 +144,12 @@ export function createWindowSwitcherModule(): PaletteModule {
       // to the same page, two VS Code windows on the same project, etc.);
       // the HWND id stays unique, so clicking each one focuses its own
       // window.
+      // User-authored ignore list (Ctrl+K → "Ignore this window", managed in
+      // the module's settings pane). Matched against the same title /
+      // executable strings the palette renders, so a rule created from a row
+      // hides exactly that row.
+      const ignoreRules = windowIgnoreStore.listForMatching()
+
       const seen = new Set<string>()
       const all = listWindowsCached(currentDesktopOnly, hideSystemWindows)
         .filter((w) => w.pid !== ownPid)
@@ -158,6 +165,7 @@ export function createWindowSwitcherModule(): PaletteModule {
         })
         .filter((w) => {
           if (w.title.length === 0) return false
+          if (isWindowIgnored(ignoreRules, w.title, w.processName)) return false
           if (!w.titleFellBack) return true
           const key = `${w.pid}\x00${w.title}`
           if (seen.has(key)) return false
