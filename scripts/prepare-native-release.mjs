@@ -213,7 +213,8 @@ function validateGeneratedPackage() {
     'focusWindow',
     'startKeyboardRemap',
     'getSystemTheme',
-    'setSystemTheme'
+    'setSystemTheme',
+    'setDesktopBackgroundColor'
   ]
   const missingExports = requiredExports.filter(
     (name) => typeof binding[name] !== 'function'

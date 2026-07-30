@@ -3,7 +3,7 @@ use std::cell::OnceCell;
 use std::ffi::c_void;
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{
-    CloseHandle, BOOL, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
+    CloseHandle, BOOL, COLORREF, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL};
 use windows::Win32::Graphics::Gdi::{
@@ -12,7 +12,8 @@ use windows::Win32::Graphics::Gdi::{
     DIB_RGB_COLORS, HBITMAP, HGDIOBJ, MONITOR_DEFAULTTONULL,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER,
+    COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::System::Registry::{
     RegCloseKey, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
@@ -22,7 +23,9 @@ use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
     PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
+use windows::Win32::UI::Shell::{
+    DesktopWallpaper, IDesktopWallpaper, IVirtualDesktopManager, VirtualDesktopManager,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, DrawIconEx, EnumChildWindows, EnumWindows, GetClassLongPtrW, GetClassNameW,
     GetForegroundWindow, GetIconInfo, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
@@ -1173,4 +1176,85 @@ pub fn set_system_theme(theme: &str) -> napi::Result<()> {
     }
 
     Ok(())
+}
+
+fn parse_desktop_color(value: &str) -> Result<COLORREF, String> {
+    if value.len() != 7 || !value.starts_with('#') {
+        return Err(format!(
+            "Invalid desktop background color {value:?}; expected #RRGGBB"
+        ));
+    }
+
+    let rgb = u32::from_str_radix(&value[1..], 16)
+        .map_err(|_| format!("Invalid desktop background color {value:?}; expected #RRGGBB"))?;
+    let red = (rgb >> 16) & 0xff;
+    let green = (rgb >> 8) & 0xff;
+    let blue = rgb & 0xff;
+
+    // COLORREF stores bytes as 0x00BBGGRR, unlike the UI's #RRGGBB.
+    Ok(COLORREF(red | (green << 8) | (blue << 16)))
+}
+
+/// Reveal a solid desktop color while preserving Windows' configured image
+/// path so a future SetWallpaper call can turn picture mode back on.
+pub fn set_desktop_background_color(value: &str) -> napi::Result<()> {
+    let color = parse_desktop_color(value).map_err(napi::Error::from_reason)?;
+    ensure_com_init();
+
+    let wallpaper = unsafe {
+        CoCreateInstance::<_, IDesktopWallpaper>(&DesktopWallpaper, None, CLSCTX_LOCAL_SERVER)
+    }
+    .map_err(|error| {
+        napi::Error::from_reason(format!(
+            "Creating the Windows desktop wallpaper service failed: {error}"
+        ))
+    })?;
+
+    unsafe {
+        // Set the color before hiding the image to avoid flashing the previous
+        // color between the two COM calls.
+        wallpaper.SetBackgroundColor(color).map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Setting the Windows desktop background color failed: {error}"
+            ))
+        })?;
+        wallpaper.Enable(BOOL(0)).map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Showing the Windows desktop background color failed: {error}"
+            ))
+        })?;
+
+        let verified = wallpaper.GetBackgroundColor().map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Verifying the Windows desktop background color failed: {error}"
+            ))
+        })?;
+        if verified.0 != color.0 {
+            return Err(napi::Error::from_reason(
+                "Windows did not persist the requested desktop background color",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod desktop_color_tests {
+    use super::parse_desktop_color;
+
+    #[test]
+    fn converts_rgb_hex_to_windows_colorref_order() {
+        assert_eq!(parse_desktop_color("#123456").unwrap().0, 0x0056_3412);
+        assert_eq!(parse_desktop_color("#FF0000").unwrap().0, 0x0000_00ff);
+        assert_eq!(parse_desktop_color("#00FF00").unwrap().0, 0x0000_ff00);
+        assert_eq!(parse_desktop_color("#0000FF").unwrap().0, 0x00ff_0000);
+    }
+
+    #[test]
+    fn rejects_non_six_digit_hex_colors() {
+        for value in ["FFFFFF", "#FFF", "#GG0000", "#00000000", ""] {
+            assert!(parse_desktop_color(value).is_err(), "{value:?}");
+        }
+    }
 }

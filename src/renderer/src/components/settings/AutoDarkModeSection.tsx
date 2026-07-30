@@ -1,15 +1,21 @@
 import {
+  AUTO_DARK_MODE_DARK_BACKGROUND_COLOR_KEY,
   AUTO_DARK_MODE_DARK_TIME_KEY,
   AUTO_DARK_MODE_ID,
+  AUTO_DARK_MODE_LIGHT_BACKGROUND_COLOR_KEY,
   AUTO_DARK_MODE_LIGHT_TIME_KEY,
+  AUTO_DARK_MODE_MANAGE_WINDOWS_BACKGROUND_KEY,
   AUTO_DARK_MODE_MODE_KEY,
+  isHexColor,
   readAutoDarkModeConfig,
   type AutoDarkModeMode
 } from '@shared/auto-dark-mode'
+import type { ModuleConfigValue } from '@shared/types'
 import { AlertTriangle } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
+import { Toggle } from '@/components/ui/Toggle'
 
 const MODES: Array<{
   value: AutoDarkModeMode
@@ -29,22 +35,28 @@ const MODES: Array<{
 ]
 
 /**
- * Purpose-built three-control surface for Auto Dark Mode. The generic module
- * schema intentionally remains simple; this view gives its two HH:mm values
- * native time pickers and can validate the cross-field "times differ" rule.
+ * Purpose-built surface for Auto Dark Mode. The generic module schema
+ * intentionally remains simple; this view gives its two HH:mm values native
+ * time pickers and, on Windows, native color controls for the desktop.
  */
 export function AutoDarkModeSection() {
   const storedConfig = useSettingsStore(
     (s) => s.settings?.modules[AUTO_DARK_MODE_ID]?.config
   )
   const setConfig = useSettingsStore((s) => s.setModuleConfig)
-  const { config, error } = readAutoDarkModeConfig(storedConfig)
+  const { config, error, backgroundColorError } = readAutoDarkModeConfig(
+    storedConfig,
+    { validateWindowsBackground: CURRENT_OS === 'windows' }
+  )
   const supported = CURRENT_OS === 'windows' || CURRENT_OS === 'macos'
-  const errorId = error ? 'auto-dark-mode-config-error' : undefined
+  const scheduleErrorId = error ? 'auto-dark-mode-config-error' : undefined
+  const backgroundErrorId = backgroundColorError
+    ? 'auto-dark-mode-background-error'
+    : undefined
   const modeError = error === 'Mode must be Scheduled or Manual.'
   const timeError = Boolean(error && !modeError)
 
-  const patch = (values: Record<string, string>): void => {
+  const patch = (values: Record<string, ModuleConfigValue>): void => {
     if (!supported) return
     void setConfig(AUTO_DARK_MODE_ID, values)
   }
@@ -81,7 +93,7 @@ export function AutoDarkModeSection() {
           aria-labelledby="auto-dark-mode-mode-label"
           aria-describedby={[
             'auto-dark-mode-mode-description',
-            modeError ? errorId : undefined
+            modeError ? scheduleErrorId : undefined
           ]
             .filter(Boolean)
             .join(' ')}
@@ -153,7 +165,7 @@ export function AutoDarkModeSection() {
           value={config.lightTime}
           disabled={!supported}
           invalid={timeError}
-          describedBy={timeError ? errorId : undefined}
+          describedBy={timeError ? scheduleErrorId : undefined}
           onChange={(value) =>
             patch({ [AUTO_DARK_MODE_LIGHT_TIME_KEY]: value })
           }
@@ -163,14 +175,14 @@ export function AutoDarkModeSection() {
           value={config.darkTime}
           disabled={!supported}
           invalid={timeError}
-          describedBy={timeError ? errorId : undefined}
+          describedBy={timeError ? scheduleErrorId : undefined}
           onChange={(value) =>
             patch({ [AUTO_DARK_MODE_DARK_TIME_KEY]: value })
           }
         />
         {error && (
           <div
-            id={errorId}
+            id={scheduleErrorId}
             role="alert"
             className="flex items-center gap-2 border-t border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
           >
@@ -179,6 +191,64 @@ export function AutoDarkModeSection() {
           </div>
         )}
       </section>
+
+      {CURRENT_OS === 'windows' && (
+        <section className="overflow-hidden rounded-lg border border-input bg-card">
+          <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                Desktop background
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Use a solid color that follows the active light or dark theme.
+              </p>
+            </div>
+            <Toggle
+              checked={config.manageWindowsBackground}
+              onChange={(checked) =>
+                patch({
+                  [AUTO_DARK_MODE_MANAGE_WINDOWS_BACKGROUND_KEY]: checked
+                })
+              }
+              ariaLabel="Change the Windows desktop background with the theme"
+              size="sm"
+            />
+          </div>
+          <ColorRow
+            label="Light theme background"
+            value={config.lightBackgroundColor}
+            invalid={Boolean(backgroundColorError)}
+            describedBy={backgroundErrorId}
+            onChange={(value) =>
+              patch({ [AUTO_DARK_MODE_LIGHT_BACKGROUND_COLOR_KEY]: value })
+            }
+          />
+          <ColorRow
+            label="Dark theme background"
+            value={config.darkBackgroundColor}
+            invalid={Boolean(backgroundColorError)}
+            describedBy={backgroundErrorId}
+            onChange={(value) =>
+              patch({ [AUTO_DARK_MODE_DARK_BACKGROUND_COLOR_KEY]: value })
+            }
+          />
+          <p className="border-t border-border px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            Turning this on hides the current picture or slideshow. Turning it
+            off stops future changes but does not restore the previous
+            wallpaper.
+          </p>
+          {backgroundColorError && (
+            <div
+              id={backgroundErrorId}
+              role="alert"
+              className="flex items-center gap-2 border-t border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+            >
+              <AlertTriangle size={13} className="shrink-0" />
+              {backgroundColorError}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }
@@ -217,6 +287,46 @@ function TimeRow({
           disabled && 'cursor-not-allowed'
         )}
       />
+    </label>
+  )
+}
+
+function ColorRow({
+  label,
+  value,
+  invalid,
+  describedBy,
+  onChange
+}: {
+  label: string
+  value: string
+  invalid: boolean
+  describedBy?: string
+  onChange: (value: string) => void
+}) {
+  const pickerValue = isHexColor(value) ? value : '#000000'
+
+  return (
+    <label className="flex min-h-14 items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="w-[4.5rem] font-mono text-xs uppercase text-muted-foreground">
+          {value}
+        </span>
+        <input
+          type="color"
+          value={pickerValue}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          className={cn(
+            'h-8 w-10 cursor-pointer rounded-md border border-input bg-background p-1 outline-none transition-colors',
+            invalid
+              ? 'border-destructive focus:border-destructive focus:ring-1 focus:ring-destructive/30'
+              : 'focus:border-ring focus:ring-1 focus:ring-ring/30'
+          )}
+        />
+      </span>
     </label>
   )
 }

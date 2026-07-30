@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { app } from 'electron'
 import path from 'node:path'
+import { isHexColor } from '@shared/auto-dark-mode'
 
 export type SystemTheme = 'light' | 'dark'
 
@@ -11,6 +12,7 @@ export interface SystemThemeOperationOptions {
 interface NativeThemeAddon {
   getSystemTheme(): string
   setSystemTheme(theme: SystemTheme): void
+  setDesktopBackgroundColor(color: string): void
 }
 
 const APPLE_SCRIPT_TIMEOUT_MS = 15_000
@@ -31,9 +33,12 @@ function loadWindowsAddon(): NativeThemeAddon {
     const loaded = require(nativePath) as Partial<NativeThemeAddon>
     if (
       typeof loaded.getSystemTheme !== 'function' ||
-      typeof loaded.setSystemTheme !== 'function'
+      typeof loaded.setSystemTheme !== 'function' ||
+      typeof loaded.setDesktopBackgroundColor !== 'function'
     ) {
-      throw new Error('native addon is missing getSystemTheme / setSystemTheme')
+      throw new Error(
+        'native addon is missing getSystemTheme / setSystemTheme / setDesktopBackgroundColor'
+      )
     }
     addon = loaded as NativeThemeAddon
     return addon
@@ -165,4 +170,25 @@ export async function setSystemTheme(
   }
 
   throw new Error(`System theme control is unsupported on ${process.platform}`)
+}
+
+export async function setWindowsDesktopBackgroundColor(
+  color: string,
+  options: SystemThemeOperationOptions = {}
+): Promise<void> {
+  if (process.platform !== 'win32') {
+    throw new Error(
+      `Desktop background color control is unsupported on ${process.platform}`
+    )
+  }
+  if (!isHexColor(color)) {
+    throw new Error(
+      `Invalid desktop background color: ${JSON.stringify(color)}`
+    )
+  }
+  if (options.signal?.aborted) {
+    throw new Error('Desktop background color change was cancelled.')
+  }
+
+  loadWindowsAddon().setDesktopBackgroundColor(color)
 }

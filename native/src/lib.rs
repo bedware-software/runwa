@@ -398,3 +398,21 @@ pub fn set_system_theme(theme: String) -> napi::Result<()> {
         ))
     }
 }
+
+/// Windows-only: reveal a solid desktop color in `#RRGGBB` format. The
+/// configured picture path is left intact, but Windows picture/slideshow mode
+/// is disabled until another wallpaper is applied.
+#[napi]
+pub fn set_desktop_background_color(color: String) -> napi::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::set_desktop_background_color(&color)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = color;
+        Err(napi::Error::from_reason(
+            "Native desktop background color control is only available on Windows",
+        ))
+    }
+}

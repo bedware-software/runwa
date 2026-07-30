@@ -1,8 +1,11 @@
 import type { ModuleManifest } from '@shared/types'
 import {
+  AUTO_DARK_MODE_DARK_BACKGROUND_COLOR_KEY,
   AUTO_DARK_MODE_DARK_TIME_KEY,
   AUTO_DARK_MODE_ID,
+  AUTO_DARK_MODE_LIGHT_BACKGROUND_COLOR_KEY,
   AUTO_DARK_MODE_LIGHT_TIME_KEY,
+  AUTO_DARK_MODE_MANAGE_WINDOWS_BACKGROUND_KEY,
   AUTO_DARK_MODE_MODE_KEY,
   DEFAULT_AUTO_DARK_MODE_CONFIG
 } from '@shared/auto-dark-mode'
@@ -17,10 +20,9 @@ const MANIFEST: ModuleManifest = {
     'Switches the Windows or macOS system appearance between light and dark, either manually or at two local times each day.',
   defaultEnabled: true,
   supportsDirectLaunch: false,
-  // AutoDarkModeSection renders these three values as a compact segmented
-  // mode control plus native time inputs. Keeping them in the manifest still
-  // lets the registry seed/backfill defaults through the normal module
-  // persistence path.
+  // AutoDarkModeSection renders these values with purpose-built time/color
+  // controls. Keeping them in the manifest still lets the registry
+  // seed/backfill defaults through the normal module persistence path.
   configFields: [
     {
       type: 'radio',
@@ -45,6 +47,29 @@ const MANIFEST: ModuleManifest = {
       key: AUTO_DARK_MODE_DARK_TIME_KEY,
       label: 'Dark theme starts',
       defaultValue: DEFAULT_AUTO_DARK_MODE_CONFIG.darkTime
+    },
+    {
+      type: 'checkbox',
+      key: AUTO_DARK_MODE_MANAGE_WINDOWS_BACKGROUND_KEY,
+      label: 'Change desktop background with theme',
+      description:
+        'Use a separate solid desktop color for the light and dark themes.',
+      defaultValue: DEFAULT_AUTO_DARK_MODE_CONFIG.manageWindowsBackground,
+      os: 'windows'
+    },
+    {
+      type: 'text',
+      key: AUTO_DARK_MODE_LIGHT_BACKGROUND_COLOR_KEY,
+      label: 'Light theme background',
+      defaultValue: DEFAULT_AUTO_DARK_MODE_CONFIG.lightBackgroundColor,
+      os: 'windows'
+    },
+    {
+      type: 'text',
+      key: AUTO_DARK_MODE_DARK_BACKGROUND_COLOR_KEY,
+      label: 'Dark theme background',
+      defaultValue: DEFAULT_AUTO_DARK_MODE_CONFIG.darkBackgroundColor,
+      os: 'windows'
     }
   ]
 }

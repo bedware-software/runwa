@@ -3,6 +3,7 @@ import type { Settings } from '@shared/types'
 import {
   AUTO_DARK_MODE_ID,
   AUTO_DARK_MODE_MODE_KEY,
+  isHexColor,
   readAutoDarkModeConfig,
   type AutoDarkModeConfig
 } from '@shared/auto-dark-mode'
@@ -10,6 +11,7 @@ import { desktopHintWindow } from '../../desktop-hint-window'
 import { settingsStore } from '../../settings-store'
 import {
   getSystemTheme,
+  setWindowsDesktopBackgroundColor,
   setSystemTheme,
   type SystemTheme
 } from './system-theme'
@@ -26,6 +28,11 @@ const WAKE_RECONCILE_DELAY_MS = 750
 
 type ReconcileAnnouncement = 'none' | 'mode' | 'theme'
 
+interface ScheduledReconcileResult {
+  theme: SystemTheme
+  backgroundApplied: boolean
+}
+
 /**
  * Lifecycle owner for the two-state Auto Dark Mode machine.
  *
@@ -39,6 +46,7 @@ class AutoDarkModeService {
   private enabled = false
   private config: AutoDarkModeConfig | null = null
   private configError: string | null = null
+  private backgroundColorError: string | null = null
   private revision = 0
   private boundaryTimer: NodeJS.Timeout | null = null
   private clockCheckTimer: NodeJS.Timeout | null = null
@@ -47,7 +55,8 @@ class AutoDarkModeService {
   private lastScheduleSegment: ScheduledTheme | null = null
   private hasConfiguredOnce = false
   private suppressNextModeHint = false
-  private pendingReconcile: Promise<SystemTheme | null> = Promise.resolve(null)
+  private pendingReconcile: Promise<ScheduledReconcileResult | null> =
+    Promise.resolve(null)
   private operationQueue: Promise<void> = Promise.resolve()
 
   private readonly onSettingsChange = (settings: Settings): void => {
@@ -85,6 +94,7 @@ class AutoDarkModeService {
     this.enabled = false
     this.config = null
     this.configError = null
+    this.backgroundColorError = null
     this.lastScheduleSegment = null
     desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
   }
@@ -114,8 +124,13 @@ class AutoDarkModeService {
       if (!applied) {
         throw new Error(this.configError ?? 'The schedule could not be applied.')
       }
-      this.showHint('Themes on schedule')
-      return applied
+      this.showHint(
+        applied.backgroundApplied
+          ? 'Themes on schedule'
+          : 'Background update failed',
+        applied.backgroundApplied ? HINT_DURATION_MS : 3000
+      )
+      return applied.theme
     } catch (error) {
       console.warn('[auto-dark-mode] failed to enable schedule:', error)
       if (this.enabled && this.config?.mode === 'scheduled') {
@@ -139,7 +154,7 @@ class AutoDarkModeService {
     const revision = this.revision
 
     try {
-      const next = await this.enqueueThemeOperation(async () => {
+      const result = await this.enqueueThemeOperation(async () => {
         if (!this.isCurrentManualRevision(revision)) {
           throw new ThemeOperationCancelledError()
         }
@@ -163,13 +178,29 @@ class AutoDarkModeService {
               `System reported ${verified} after switching to ${target}.`
             )
           }
-          return target
+          const backgroundApplied = await this.tryApplyWindowsBackground(
+            target,
+            this.config,
+            controller.signal
+          )
+          if (!this.isCurrentManualRevision(revision)) {
+            throw new ThemeOperationCancelledError()
+          }
+
+          return { theme: target, backgroundApplied }
         } finally {
           this.finishThemeOperation(controller)
         }
       })
-      this.showHint(next === 'dark' ? 'Dark theme' : 'Light theme')
-      return next
+      this.showHint(
+        result.backgroundApplied
+          ? result.theme === 'dark'
+            ? 'Dark theme'
+            : 'Light theme'
+          : 'Background update failed',
+        result.backgroundApplied ? HINT_DURATION_MS : 3000
+      )
+      return result.theme
     } catch (error) {
       if (
         error instanceof ThemeOperationCancelledError ||
@@ -201,13 +232,26 @@ class AutoDarkModeService {
   private reconfigure(settings: Settings): void {
     const moduleSettings = settings.modules[AUTO_DARK_MODE_ID]
     const nextEnabled = moduleSettings?.enabled ?? true
-    const result = readAutoDarkModeConfig(moduleSettings?.config)
+    const result = readAutoDarkModeConfig(moduleSettings?.config, {
+      validateWindowsBackground: process.platform === 'win32'
+    })
     const previousEnabled = this.enabled
-    const previousMode = this.config?.mode
+    const previousConfig = this.config
+    const previousMode = previousConfig?.mode
     const wasConfigured = this.hasConfiguredOnce
     const suppressModeHint = this.suppressNextModeHint
     this.suppressNextModeHint = false
     const nextError = result.error ?? null
+    const nextBackgroundColorError = result.backgroundColorError ?? null
+    const windowsBackgroundUnchanged =
+      process.platform !== 'win32' ||
+      (this.config?.manageWindowsBackground ===
+        result.config.manageWindowsBackground &&
+        this.config.lightBackgroundColor ===
+          result.config.lightBackgroundColor &&
+        this.config.darkBackgroundColor ===
+          result.config.darkBackgroundColor &&
+        this.backgroundColorError === nextBackgroundColorError)
 
     // SettingsStore emits for every module. Preserve the active boundary and
     // avoid invoking AppleScript / rebroadcasting Windows appearance when an
@@ -218,7 +262,8 @@ class AutoDarkModeService {
       this.config?.mode === result.config.mode &&
       this.config.lightTime === result.config.lightTime &&
       this.config.darkTime === result.config.darkTime &&
-      this.configError === nextError
+      this.configError === nextError &&
+      windowsBackgroundUnchanged
     ) {
       return
     }
@@ -230,6 +275,7 @@ class AutoDarkModeService {
     this.enabled = nextEnabled
     this.config = result.config
     this.configError = nextError
+    this.backgroundColorError = nextBackgroundColorError
     this.lastScheduleSegment = null
     this.hasConfiguredOnce = true
 
@@ -244,7 +290,17 @@ class AutoDarkModeService {
       (!previousEnabled || previousMode !== result.config.mode)
 
     if (result.config.mode === 'manual') {
+      const shouldSyncBackground =
+        process.platform === 'win32' &&
+        wasConfigured &&
+        previousEnabled &&
+        previousConfig !== null &&
+        result.config.manageWindowsBackground &&
+        windowsBackgroundConfigChanged(previousConfig, result.config)
       this.pendingReconcile = Promise.resolve(null)
+      if (shouldSyncBackground) {
+        void this.syncManualWindowsBackground(revision)
+      }
       if (modeChanged && !suppressModeHint) this.showHint('Manual mode')
       return
     }
@@ -292,7 +348,7 @@ class AutoDarkModeService {
   private reconcileScheduled(
     revision: number,
     announcement: ReconcileAnnouncement
-  ): Promise<SystemTheme | null> {
+  ): Promise<ScheduledReconcileResult | null> {
     const config = this.config
     if (!config || config.mode !== 'scheduled' || this.configError) {
       return Promise.resolve(null)
@@ -327,15 +383,24 @@ class AutoDarkModeService {
         }
         if (!this.isCurrentScheduledRevision(revision)) return null
 
+        const backgroundApplied = await this.tryApplyWindowsBackground(
+          desired,
+          config,
+          controller.signal
+        )
+        if (!this.isCurrentScheduledRevision(revision)) return null
+
         this.lastScheduleSegment = desired
         this.armNextBoundary(revision)
 
-        if (announcement === 'mode') {
+        if (!backgroundApplied) {
+          this.showHint('Background update failed', 3000)
+        } else if (announcement === 'mode') {
           this.showHint('Themes on schedule')
         } else if (announcement === 'theme' && changed) {
           this.showHint(desired === 'dark' ? 'Dark theme' : 'Light theme')
         }
-        return desired
+        return { theme: desired, backgroundApplied }
       } catch (error) {
         console.warn('[auto-dark-mode] scheduled reconciliation failed:', error)
         if (
@@ -349,6 +414,79 @@ class AutoDarkModeService {
         this.finishThemeOperation(controller)
       }
     })
+  }
+
+  private syncManualWindowsBackground(
+    revision: number
+  ): Promise<SystemTheme | null> {
+    const config = this.config
+    if (!config || config.mode !== 'manual') return Promise.resolve(null)
+
+    return this.enqueueThemeOperation(async () => {
+      if (!this.isCurrentManualRevision(revision)) return null
+
+      const controller = this.beginThemeOperation()
+      try {
+        const theme = await getSystemTheme({ signal: controller.signal })
+        if (!this.isCurrentManualRevision(revision)) return null
+
+        const applied = await this.tryApplyWindowsBackground(
+          theme,
+          config,
+          controller.signal
+        )
+        if (!this.isCurrentManualRevision(revision)) return null
+        if (!applied) this.showHint('Background update failed', 3000)
+        return theme
+      } catch (error) {
+        if (this.isCurrentManualRevision(revision)) {
+          console.warn(
+            '[auto-dark-mode] manual background update failed:',
+            error
+          )
+          this.showHint('Background update failed', 3000)
+        }
+        return null
+      } finally {
+        this.finishThemeOperation(controller)
+      }
+    })
+  }
+
+  private async tryApplyWindowsBackground(
+    theme: SystemTheme,
+    config: AutoDarkModeConfig | null,
+    signal: AbortSignal
+  ): Promise<boolean> {
+    if (
+      process.platform !== 'win32' ||
+      !config?.manageWindowsBackground
+    ) {
+      return true
+    }
+
+    const color =
+      theme === 'light'
+        ? config.lightBackgroundColor
+        : config.darkBackgroundColor
+    if (!isHexColor(color)) {
+      console.warn(
+        `[auto-dark-mode] skipped invalid ${theme} desktop background color:`,
+        color
+      )
+      return false
+    }
+
+    try {
+      await setWindowsDesktopBackgroundColor(color, { signal })
+      return true
+    } catch (error) {
+      console.warn(
+        `[auto-dark-mode] failed to apply the ${theme} desktop background:`,
+        error
+      )
+      return false
+    }
   }
 
   private armNextBoundary(revision: number): void {
@@ -417,7 +555,9 @@ class AutoDarkModeService {
    * promise instead of falsely reporting that the explicit Schedule command
    * failed while its replacement succeeds.
    */
-  private async waitForLatestReconcile(): Promise<SystemTheme | null> {
+  private async waitForLatestReconcile(): Promise<
+    ScheduledReconcileResult | null
+  > {
     for (;;) {
       const pending = this.pendingReconcile
       const applied = await pending
@@ -485,6 +625,17 @@ class ThemeOperationCancelledError extends Error {
     super('The theme operation was superseded by a settings change.')
     this.name = 'ThemeOperationCancelledError'
   }
+}
+
+function windowsBackgroundConfigChanged(
+  previous: AutoDarkModeConfig,
+  next: AutoDarkModeConfig
+): boolean {
+  return (
+    previous.manageWindowsBackground !== next.manageWindowsBackground ||
+    previous.lightBackgroundColor !== next.lightBackgroundColor ||
+    previous.darkBackgroundColor !== next.darkBackgroundColor
+  )
 }
 
 export const autoDarkModeService = new AutoDarkModeService()
