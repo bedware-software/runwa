@@ -1,14 +1,20 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
+import type { UserCommand } from '@shared/types'
+import { sendKeystrokeAction } from './keystroke'
 import { userCommandsStore } from './store'
 
 const EARLY_FAILURE_WINDOW_MS = 150
 const launchesInFlight = new Map<string, Promise<boolean>>()
 
 /**
- * Resolve and launch a saved command by id. The palette item only carries the
+ * Resolve and run a saved command by id. The palette item only carries the
  * id, never action text, so a renderer-tampered or stale item cannot execute
  * anything that is not currently present in the main-process store.
+ *
+ * Shell commands only — keystroke commands go through
+ * `sendUserCommandKeystroke` after the caller has handed focus back to the
+ * app the keys are meant for.
  */
 export function executeUserCommand(commandId: string): Promise<boolean> {
   const existing = launchesInFlight.get(commandId)
@@ -27,9 +33,27 @@ export function executeUserCommand(commandId: string): Promise<boolean> {
   return launch
 }
 
+/**
+ * Synthesise a keystroke command's chord sequence into the focused window.
+ * Takes the command itself rather than an id because the caller has already
+ * re-resolved it against the store (and re-checked its app scope) to decide
+ * that a keystroke, not a shell launch, is what should happen.
+ *
+ * The caller must also have restored focus to the target app first — see the
+ * user-command branch of the Command Palette's execute().
+ */
+export function sendUserCommandKeystroke(command: UserCommand): boolean {
+  if (command.kind !== 'keystroke') return false
+  const ok = sendKeystrokeAction(command.action)
+  if (!ok) {
+    console.warn(`[user-commands] command ${command.id} could not be sent`)
+  }
+  return ok
+}
+
 async function launchUserCommand(commandId: string): Promise<boolean> {
   const command = userCommandsStore.find(commandId)
-  if (!command) return false
+  if (!command || command.kind !== 'shell') return false
 
   try {
     // A raw action field intentionally means shell syntax in v1. Do not split

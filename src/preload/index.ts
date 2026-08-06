@@ -13,17 +13,20 @@ import type {
   ModuleId,
   ModuleSettings,
   ModuleConfigValue,
+  NewFocusedAppCommand,
   NewUserCommand,
   NewWindowIgnoreRule,
   PaletteItem,
   PaletteShowPayload,
   PermissionName,
   PermissionStatus,
+  RunningAppSummary,
   SearchRequest,
   SearchResult,
   Settings,
   SettingsTabId,
   UserCommand,
+  UserCommandDraftPayload,
   ExecuteResult,
   UpdateStatus,
   WindowIgnoreRule,
@@ -71,8 +74,19 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('user-commands:list'),
   userCommandsAdd: (command: NewUserCommand): Promise<UserCommand[]> =>
     ipcRenderer.invoke('user-commands:add', command),
+  userCommandsUpdate: (
+    commandId: string,
+    command: NewUserCommand
+  ): Promise<UserCommand[]> =>
+    ipcRenderer.invoke('user-commands:update', commandId, command),
   userCommandsRemove: (commandId: string): Promise<UserCommand[]> =>
     ipcRenderer.invoke('user-commands:remove', commandId),
+  userCommandsListRunningApps: (): Promise<RunningAppSummary[]> =>
+    ipcRenderer.invoke('user-commands:running-apps'),
+  userCommandsCreateForFocusedApp: (
+    command: NewFocusedAppCommand
+  ): Promise<string> =>
+    ipcRenderer.invoke('user-commands:create-for-focused-app', command),
 
   // Palette / settings window control
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),
@@ -228,6 +242,19 @@ const api: ElectronAPI = {
     ipcRenderer.on('flashcards:start-quiz', listener)
     return () => {
       ipcRenderer.removeListener('flashcards:start-quiz', listener)
+    }
+  },
+
+  onUserCommandsDraft: (cb: (payload: UserCommandDraftPayload) => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      payload: UserCommandDraftPayload
+    ): void => {
+      cb(payload)
+    }
+    ipcRenderer.on('user-commands:draft', listener)
+    return () => {
+      ipcRenderer.removeListener('user-commands:draft', listener)
     }
   }
 }

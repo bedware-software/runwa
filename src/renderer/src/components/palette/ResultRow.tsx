@@ -140,6 +140,24 @@ export function ResultRow({
           </div>
         )}
       </div>
+      {item.badge && (
+        // Trailing qualifier — the app a User Command is scoped to, today.
+        // Outlined and unfilled so it reads as a hint about the row rather
+        // than as an interactive chip: the alias keycap next to the title is
+        // something you type, this is something you're being told. Sits
+        // outside the `flex-1` block so it hugs the right edge and the title
+        // truncates before the badge is squeezed.
+        <span
+          className={cn(
+            'shrink-0 max-w-[40%] truncate px-2 py-0.5 rounded-md border text-[11px] leading-none',
+            isSelected
+              ? 'border-accent-foreground/30 text-accent-foreground/80'
+              : 'border-border text-muted-foreground'
+          )}
+        >
+          {item.badge}
+        </span>
+      )}
     </div>
   )
 }

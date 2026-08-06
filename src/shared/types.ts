@@ -199,6 +199,15 @@ export interface PaletteItem {
    */
   alias?: string
   /**
+   * Short label rendered as an outlined chip at the row's right edge.
+   * For context that *qualifies* a row rather than describing it, so it
+   * reads as a hint rather than competing with the title: User Commands
+   * puts the application a command is scoped to here, which is what lets
+   * those commands sit in the ordinary list instead of a section of their
+   * own. Keep it to a couple of words — the chip never wraps.
+   */
+  badge?: string
+  /**
    * Optional grouping label rendered as a sticky-style header before the
    * first item with this group value, and again whenever the group
    * changes between adjacent items in the result list. Items without a
@@ -274,23 +283,78 @@ export interface ModuleSettings {
 }
 
 /**
+ * What a user command does when it runs.
+ *  - 'shell'     — `action` is an OS-shell command line, spawned detached.
+ *  - 'keystroke' — `action` is a comma-separated accelerator sequence
+ *    ("Ctrl+Shift+A", "Alt+Space, R") synthesised into whichever window had
+ *    focus before the palette opened.
+ */
+export type UserCommandKind = 'shell' | 'keystroke'
+
+/**
  * A user-authored entry surfaced by the built-in Command Palette.
  *
- * `action` is intentionally an opaque OS-shell command here. It is only
- * executed after main re-resolves `id` against its authoritative store; the
- * renderer never sends command text across the execute boundary.
+ * `action` is intentionally opaque here — shell text for 'shell' commands,
+ * an accelerator sequence for 'keystroke' ones. It is only executed after
+ * main re-resolves `id` against its authoritative store; the renderer never
+ * sends command text across the execute boundary.
  */
 export interface UserCommand {
   id: string
   name: string
+  kind: UserCommandKind
   action: string
+  /**
+   * Application scope. Empty string = global: the command is always listed.
+   * Otherwise a case-insensitive pattern (with `*` wildcards, same syntax as
+   * the Window Switcher ignore list) matched against the app that was focused
+   * when the palette opened — its process name ('idea64.exe' on Windows,
+   * 'IntelliJ IDEA' on macOS), executable path, or bundle id. Scoped commands
+   * are hidden from the palette while any other app is in front.
+   */
+  appScope: string
 }
 
-/** Renderer → main payload for creating a command. Main trims, validates,
- * and assigns the stable id. */
+/** Renderer → main payload for creating or editing a command. Main trims,
+ * validates, and owns the stable id. Omitted fields fall back to a global
+ * shell command.
+ *
+ * Aliases are deliberately absent: a user command's alias is an ordinary
+ * Command Palette item alias (keyed `user-command:<id>`), set from the
+ * palette's Ctrl+K menu like any other row's. */
 export interface NewUserCommand {
   name: string
   action: string
+  kind?: UserCommandKind
+  appScope?: string
+}
+
+/**
+ * Palette → main payload for the "Create user command for <app>" entry.
+ *
+ * Deliberately carries no app scope: main derives that from the app the
+ * palette is standing over, so the palette renderer can't scope a command to
+ * an app the user isn't actually in.
+ */
+export type NewFocusedAppCommand = Pick<NewUserCommand, 'name' | 'action' | 'kind'>
+
+/** Main → palette: open the inline "new user command" form, scoped to the
+ * app the palette was opened over. */
+export interface UserCommandDraftPayload {
+  /** Display name of that app, e.g. "IntelliJ IDEA" — shown in the form. */
+  appLabel: string
+}
+
+/**
+ * One entry in the "which app?" picker offered when scoping a user command.
+ * Derived from the currently-open windows, so the user can point at a running
+ * app instead of guessing what its process is called on this OS.
+ */
+export interface RunningAppSummary {
+  /** 'idea64.exe' on Windows, 'IntelliJ IDEA' on macOS. */
+  name: string
+  /** Executable path (Windows) or `.app` bundle path (macOS), when known. */
+  path?: string
 }
 
 /**
@@ -628,7 +692,27 @@ export interface ElectronAPI {
   // generic settings patch surface. Main validates every write.
   userCommandsList: () => Promise<UserCommand[]>
   userCommandsAdd: (command: NewUserCommand) => Promise<UserCommand[]>
+  /** Replace every editable field of an existing command. The id — and with
+   * it any alias attached to the palette row — is preserved. */
+  userCommandsUpdate: (
+    commandId: string,
+    command: NewUserCommand
+  ) => Promise<UserCommand[]>
   userCommandsRemove: (commandId: string) => Promise<UserCommand[]>
+  /**
+   * Distinct apps behind the currently-open windows, for the app-scope
+   * picker. Enumerated on demand — the settings panel asks once when the
+   * section mounts and again when the user re-opens the picker.
+   */
+  userCommandsListRunningApps: () => Promise<RunningAppSummary[]>
+  /**
+   * Palette-side creation: save a command scoped to the app the palette was
+   * opened over, without a trip to Settings. Resolves with the new command's
+   * id so the palette can select the fresh row.
+   */
+  userCommandsCreateForFocusedApp: (
+    command: NewFocusedAppCommand
+  ) => Promise<string>
 
   // Palette window control
   paletteHide: () => Promise<void>
@@ -732,6 +816,12 @@ export interface ElectronAPI {
    * the same window (no separate BrowserWindow is opened).
    */
   onFlashcardsStartQuiz: (cb: (payload: FlashcardsStartQuizPayload) => void) => () => void
+
+  /**
+   * Fired when the "Create user command for <app>" entry is run — the
+   * palette opens its inline new-command form instead of dismissing.
+   */
+  onUserCommandsDraft: (cb: (payload: UserCommandDraftPayload) => void) => () => void
   /**
    * Ignore rules changed. Fired at the settings window whenever the list is
    * edited — including from the palette's Ctrl+K menu, which is the common

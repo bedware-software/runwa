@@ -54,6 +54,7 @@ const ICONS_BY_HINT = {
   mic: Mic,
   'minimize-2': Minimize2,
   package: Package,
+  plus: Plus,
   'refresh-cw': RefreshCw,
   replace: Replace,
   rocket: Rocket,
@@ -80,6 +81,7 @@ export function optionalLucideIconFromHint(
 
 export {
   AlertTriangle,
+  AppWindow,
   ArrowUpDown,
   Check,
   CheckCircle2,

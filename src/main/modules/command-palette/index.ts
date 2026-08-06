@@ -1,13 +1,30 @@
-import type { ModuleId, ModuleManifest, PaletteItem, SettingsTabId } from '@shared/types'
+import type {
+  ModuleId,
+  ModuleManifest,
+  PaletteItem,
+  SettingsTabId,
+  UserCommandDraftPayload
+} from '@shared/types'
 import type { PaletteModule } from '../types'
 import { paletteWindow } from '../../palette-window'
 import { settingsWindow } from '../../settings-window'
 import { settingsStore } from '../../settings-store'
 import { simulateWindowCommand, type WindowCommand } from './keystrokes'
-import { executeUserCommand } from '../user-commands/executor'
+import {
+  executeUserCommand,
+  sendUserCommandKeystroke
+} from '../user-commands/executor'
+import { formatKeystrokeAction } from '../user-commands/keystroke'
+import {
+  appScopeLabel,
+  commandMatchesFocus,
+  commandsInScope
+} from '../user-commands/scope'
 import { userCommandsStore } from '../user-commands/store'
 import { autoDarkModeService } from '../auto-dark-mode/service'
+import { appDisplayName, focusContext, type FocusedApp } from '../../focus-context'
 import { AUTO_DARK_MODE_ID } from '@shared/auto-dark-mode'
+import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
 
 /**
  * Command Palette — system and user-defined commands exposed as palette
@@ -35,6 +52,7 @@ type CommandKind =
   | { kind: 'window'; command: WindowCommand }
   | { kind: 'open-settings'; tab?: SettingsTabId }
   | { kind: 'auto-dark-mode'; command: 'schedule' | 'toggle' }
+  | { kind: 'create-user-command' }
 
 /**
  * Identity of a module the Command Palette will surface as a deep-link
@@ -49,9 +67,25 @@ export interface ModuleSettingsTarget {
   icon: string
 }
 
-const MODULE_ID = 'command-palette'
+const MODULE_ID = COMMAND_PALETTE_ID
 const MODULE_NAME = 'Command Palette'
 const MODULE_ICON = 'command'
+
+/**
+ * How long to wait after hiding the palette before acting on the window the
+ * user was in. ~120 ms is long enough on Windows for SetForegroundWindow to
+ * settle and the target window to become ready to receive a chord; macOS
+ * needs a touch more headroom because Electron's hide() is async to the OS
+ * and `osascript` queries the frontmost process at execution time — too
+ * short and we act on our own (still-hiding) window. Too long and the user
+ * notices the lag.
+ */
+const FOCUS_HANDOFF_DELAY_MS = process.platform === 'darwin' ? 200 : 120
+
+/** Id of the contextual "Create user command for <app>" entry. Named so the
+ * search builder can place it after the user's own commands rather than in
+ * the built-in block where it's declared. */
+const CREATE_USER_COMMAND_ID = 'create-user-command'
 
 interface CommandDef {
   /** Stable id used in the PaletteItem id + action payload. */
@@ -81,6 +115,16 @@ interface CommandDef {
   requiresModuleId?: ModuleId
   /** Longer description shown in the settings checkbox row. */
   configDescription: string
+  /**
+   * Title that depends on what the palette was opened over. Returning null
+   * hides the entry for the current focus — used by "Create user command
+   * for <app>", which has nothing to offer when we can't tell which app the
+   * user came from. Absent = the static `title`, always shown.
+   *
+   * `title` stays the settings-UI label either way, so the checkbox reads
+   * the same regardless of what the palette row says.
+   */
+  contextualTitle?: (focusedApp: FocusedApp | null) => string | null
 }
 
 const STATIC_COMMANDS: CommandDef[] = [
@@ -147,6 +191,21 @@ const STATIC_COMMANDS: CommandDef[] = [
       'Returns the previously-focused window to a normal size. Windows / Linux: drives Alt+Space → R. macOS: un-fullscreens or un-minimizes if applicable, otherwise resizes to 70% of the screen, centred.'
   },
   {
+    id: CREATE_USER_COMMAND_ID,
+    title: 'Create user command for the focused app',
+    icon: 'plus',
+    subtitle: 'Save a command that only shows up in this app.',
+    group: 'User Commands',
+    configKey: 'enableCreateUserCommand',
+    defaultEnabled: true,
+    action: { kind: 'create-user-command' },
+    requiresModuleId: 'user-commands',
+    contextualTitle: (focusedApp) =>
+      focusedApp ? `Create user command for ${appDisplayName(focusedApp)}` : null,
+    configDescription:
+      'Offer a "Create user command for <app>" entry naming whichever app the palette was opened over. Fills in the app scope for you, so a per-app command can be captured without a trip to Settings.'
+  },
+  {
     id: 'themes-on-schedule',
     title: 'Themes on schedule',
     icon: 'clock',
@@ -194,11 +253,16 @@ interface AutoDarkModeAction {
   command: 'schedule' | 'toggle'
 }
 
+interface CreateUserCommandAction {
+  kind: 'create-user-command'
+}
+
 type ActionPayload =
   | WindowCommandAction
   | OpenSettingsAction
   | UserCommandAction
   | AutoDarkModeAction
+  | CreateUserCommandAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
   if (typeof a !== 'object' || a === null) return false
@@ -217,6 +281,7 @@ function isActionPayload(a: unknown): a is ActionPayload {
     const command = (a as { command?: unknown }).command
     return command === 'schedule' || command === 'toggle'
   }
+  if (k === 'create-user-command') return true
   return false
 }
 
@@ -239,10 +304,14 @@ function requiredModuleEnabled(moduleId: ModuleId | undefined): boolean {
 function actionKindFor(action: CommandKind): string {
   if (action.kind === 'open-settings') return 'open-settings'
   if (action.kind === 'auto-dark-mode') return 'auto-dark-mode'
+  if (action.kind === 'create-user-command') return 'create-user-command'
   return 'window-command'
 }
 
 function actionPayloadFor(action: CommandKind): ActionPayload {
+  if (action.kind === 'create-user-command') {
+    return { kind: 'create-user-command' } satisfies CreateUserCommandAction
+  }
   if (action.kind === 'open-settings') {
     return {
       kind: 'open-settings',
@@ -311,7 +380,7 @@ export function createCommandPaletteModule(
     icon: MODULE_ICON,
     kind: 'search',
     description:
-      'System and user-defined commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. User-created entries are managed in User Commands under Other.',
+      'System and user-defined commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. User-created entries are managed in User Commands under Other; the ones scoped to an application are listed only while that application is the one behind the palette.',
     defaultEnabled: true,
     supportsDirectLaunch: true,
     defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
@@ -337,104 +406,134 @@ export function createCommandPaletteModule(
       const normalisedQuery = trimmed.toLowerCase()
       const aliases = context.aliases ?? {}
 
-      // Walk the command list once, building two parallel things:
-      //  - the visible item list (filtered by enabled + query substring)
-      //  - the alias-match check, so a typed alias short-circuits even
-      //    when its title wouldn't match the query
-      const items: Array<Omit<PaletteItem, 'moduleId'>> = []
-      let aliasMatch: { c: CommandDef; alias: string } | undefined
-      let rank = 0
+      /** One candidate row, before query filtering. Built for built-in
+       * commands and user commands alike so both take part in the alias
+       * short-circuit below on equal terms. */
+      interface Entry {
+        id: string
+        title: string
+        subtitle: string
+        iconHint: string
+        group: string
+        alias?: string
+        badge?: string
+        actionKind: string
+        action: ActionPayload
+      }
 
-      const appendUserCommands = (): void => {
-        if (!userCommandsEnabled()) return
-        for (const command of userCommandsStore.list()) {
-          if (trimmed && !command.name.toLowerCase().includes(normalisedQuery)) {
-            continue
-          }
-          items.push({
-            id: `user-command:${command.id}`,
-            title: command.name,
-            // Do not send saved shell text to the palette renderer: actions
-            // may contain tokens and Settings is the authorized detail view.
-            subtitle: 'Runs in background',
-            iconHint: 'terminal',
-            group: 'User Commands',
-            actionKind: 'user-command',
-            action: {
-              kind: 'user-command',
-              commandId: command.id
-            } satisfies UserCommandAction,
-            score: rank++ / 10000
+      const entries: Entry[] = []
+
+      const appendCommandDefs = (defs: CommandDef[]): void => {
+        for (const c of defs) {
+          if (!requiredModuleEnabled(c.requiresModuleId)) continue
+          // readOnly entries always run regardless of stored config — the
+          // settings UI hides the toggle so this guards against a
+          // hand-edited settings.json zero-ing the flag.
+          const enabled =
+            c.readOnly === true || context.config[c.configKey] !== false
+          if (!enabled) continue
+          // A contextual entry names what the palette was opened over, and
+          // opts out entirely when there's nothing to name.
+          const title = c.contextualTitle
+            ? c.contextualTitle(context.focusedApp)
+            : c.title
+          if (title === null) continue
+          const id = `cmd:${c.id}`
+          entries.push({
+            id,
+            title,
+            subtitle: c.subtitle,
+            iconHint: c.icon,
+            group: c.group,
+            alias: aliases[id],
+            actionKind: actionKindFor(c.action),
+            action: actionPayloadFor(c.action)
           })
         }
       }
 
-      for (let commandIndex = 0; commandIndex < COMMANDS.length; commandIndex++) {
-        // Keep user-authored entries above the long generated list of module
-        // settings links, while preserving the concise built-in Settings and
-        // Windows Control groups at the top.
-        if (commandIndex === STATIC_COMMANDS.length) appendUserCommands()
-        const c = COMMANDS[commandIndex]
-        if (!requiredModuleEnabled(c.requiresModuleId)) continue
-        // readOnly entries always run regardless of stored config — the
-        // settings UI hides the toggle so this guards against a hand-edited
-        // settings.json zero-ing the flag.
-        const enabled =
-          c.readOnly === true || context.config[c.configKey] !== false
-        if (!enabled) continue
-
-        const itemId = `cmd:${c.id}`
-        const alias = aliases[itemId]
-
-        // Exact alias match wins outright — see the autoExecute return
-        // below. We still build the regular item so it lands in the
-        // result list with its alias chip; the autoExecute flag on the
-        // matching row tells the renderer to fire it without an Enter.
-        if (alias && alias === normalisedQuery && aliasMatch === undefined) {
-          aliasMatch = { c, alias }
+      /**
+       * User commands, app-scoped ones first. A command scoped to an app is
+       * only listed while that app is the one behind the palette, so
+       * "Reformat code" shows up in IntelliJ and stays out of the way
+       * everywhere else — and two apps can reuse the same alias without ever
+       * competing for it, since only one of them is ever in the list.
+       *
+       * Scoped and global commands share the one "User Commands" group: from
+       * the user's side they're all just their commands, and the app a row
+       * belongs to is carried by its badge chip instead of by a section of
+       * its own.
+       *
+       * Aliases come from the module's ordinary alias map, keyed by the same
+       * `user-command:<id>` item id the palette's Ctrl+K menu writes.
+       */
+      const appendUserCommands = (): void => {
+        if (!userCommandsEnabled()) return
+        const focusedApp = context.focusedApp
+        for (const command of commandsInScope(userCommandsStore.list(), focusedApp)) {
+          const id = userCommandItemId(command.id)
+          entries.push({
+            id,
+            title: command.name,
+            // Do not send saved shell text to the palette renderer: actions
+            // may contain tokens and Settings is the authorized detail view.
+            // Keystrokes carry nothing sensitive and read better spelled out.
+            subtitle:
+              command.kind === 'keystroke'
+                ? `Sends ${formatKeystrokeAction(command.action)}`
+                : 'Runs in background',
+            iconHint: command.kind === 'keystroke' ? 'keyboard' : 'terminal',
+            group: 'User Commands',
+            alias: aliases[id],
+            badge: appScopeLabel(command, focusedApp),
+            actionKind: 'user-command',
+            action: {
+              kind: 'user-command',
+              commandId: command.id
+            } satisfies UserCommandAction
+          })
         }
-
-        if (trimmed && !c.title.toLowerCase().includes(normalisedQuery)) {
-          // The title doesn't match the query — but a typed alias will
-          // still surface this command via the autoExecute path below.
-          // Skip the regular row so the user only sees title-matches.
-          continue
-        }
-        items.push({
-          id: itemId,
-          title: c.title,
-          subtitle: c.subtitle,
-          iconHint: c.icon,
-          alias,
-          group: c.group,
-          actionKind: actionKindFor(c.action),
-          action: actionPayloadFor(c.action),
-          score: rank++ / 10000
-        })
       }
+
+      // Keep user-authored entries above the long generated list of module
+      // settings links, while preserving the concise built-in Settings and
+      // Windows Control groups at the top. "Create user command for <app>"
+      // shares the User Commands group and trails the commands themselves —
+      // it's the way to add another one, so it reads best at the end of the
+      // list it adds to.
+      appendCommandDefs(
+        STATIC_COMMANDS.filter((c) => c.id !== CREATE_USER_COMMAND_ID)
+      )
+      appendUserCommands()
+      appendCommandDefs(
+        STATIC_COMMANDS.filter((c) => c.id === CREATE_USER_COMMAND_ID)
+      )
+      appendCommandDefs(dynamicCommands)
 
       // Alias short-circuit: typing the exact alias ("," → Open Settings)
       // returns just the matching row with autoExecute, mirroring
       // app-search's launch-on-alias mode. The user never sees the rest
       // of the result list flicker past — feels like a hotkey.
+      //
+      // Ties are broken by list order, which is also specificity order for
+      // the entries that can realistically collide: a user command scoped to
+      // the focused app beats a global one spelled the same way. (The store
+      // rejects a duplicate alias within one scope outright, so the only
+      // collisions that reach here are across scopes.)
+      const aliasMatch = normalisedQuery
+        ? entries.find((entry) => entry.alias === normalisedQuery)
+        : undefined
       if (aliasMatch) {
-        const { c, alias } = aliasMatch
-        return [
-          {
-            id: `cmd:${c.id}`,
-            title: c.title,
-            subtitle: c.subtitle,
-            iconHint: c.icon,
-            alias,
-            group: c.group,
-            autoExecute: true,
-            actionKind: actionKindFor(c.action),
-            action: actionPayloadFor(c.action),
-            score: -1
-          }
-        ]
+        return [{ ...aliasMatch, autoExecute: true, score: -1 }]
       }
 
+      const items: Array<Omit<PaletteItem, 'moduleId'>> = []
+      for (const entry of entries) {
+        if (trimmed && !entry.title.toLowerCase().includes(normalisedQuery)) {
+          continue
+        }
+        items.push({ ...entry, score: items.length / 10000 })
+      }
       return items
     },
 
@@ -448,9 +547,51 @@ export function createCommandPaletteModule(
         if (item.actionKind !== 'user-command' || !userCommandsEnabled()) {
           return { dismissPalette: false }
         }
-        return {
-          dismissPalette: await executeUserCommand(item.action.commandId)
+        // Re-resolve against the store and re-check the app scope: the item
+        // crossed the IPC boundary, and an app-scoped command must not run
+        // from a stale row belonging to a different app's session.
+        const command = userCommandsStore.find(item.action.commandId)
+        if (!command || !commandMatchesFocus(command, focusContext.get())) {
+          return { dismissPalette: false }
         }
+
+        if (command.kind === 'keystroke') {
+          // Same handoff as the window commands below: hide with
+          // restoreFocus=true so the keys land in the app the user came
+          // from, then synthesise once the OS has honoured the switch.
+          paletteWindow.hide(true)
+          setTimeout(
+            () => sendUserCommandKeystroke(command),
+            FOCUS_HANDOFF_DELAY_MS
+          )
+          return { dismissPalette: false }
+        }
+
+        return {
+          dismissPalette: await executeUserCommand(command.id)
+        }
+      }
+
+      if (item.action.kind === 'create-user-command') {
+        // Hand the palette its own new-command form rather than opening
+        // Settings: the point of the entry is capturing a command in the
+        // moment, without leaving the app the command is for. The palette
+        // stays up (dismissPalette: false) with the form over it, and main
+        // — not the renderer — decides which app the result is scoped to.
+        const focusedApp = focusContext.get()
+        const win = paletteWindow.getBrowserWindow()
+        if (
+          item.actionKind !== 'create-user-command' ||
+          !userCommandsEnabled() ||
+          !focusedApp ||
+          !win
+        ) {
+          return { dismissPalette: false }
+        }
+        win.webContents.send('user-commands:draft', {
+          appLabel: appDisplayName(focusedApp)
+        } satisfies UserCommandDraftPayload)
+        return { dismissPalette: false }
       }
 
       if (item.action.kind === 'open-settings') {
@@ -503,15 +644,7 @@ export function createCommandPaletteModule(
       // so the handoff has to settle before we run.
       paletteWindow.hide(true)
 
-      // A short delay covers the focus handoff. ~120 ms is long enough
-      // on Windows for SetForegroundWindow to settle and the target
-      // window to become ready to receive a Win+Up / Win+Down chord;
-      // macOS needs a touch more headroom because Electron's hide() is
-      // async to the OS and `osascript` queries the frontmost process
-      // at execution time — too short and we tell System Events to act
-      // on our own (still-hiding) window. Too long and the user
-      // notices the lag.
-      const delay = process.platform === 'darwin' ? 200 : 120
+      // A short delay covers the focus handoff — see FOCUS_HANDOFF_DELAY_MS.
       const command = item.action.command
       setTimeout(() => {
         const ok = simulateWindowCommand(command)
@@ -520,7 +653,7 @@ export function createCommandPaletteModule(
             `[command-palette] ${command} failed — driver unavailable?`
           )
         }
-      }, delay)
+      }, FOCUS_HANDOFF_DELAY_MS)
 
       // We've handled the hide ourselves. Returning false short-circuits
       // the IPC handler's redundant `paletteWindow.hide()` call, which

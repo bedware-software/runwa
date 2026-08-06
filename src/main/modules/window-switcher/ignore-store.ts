@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import Store from 'electron-store'
 import type { NewWindowIgnoreRule, WindowIgnoreRule } from '@shared/types'
+import { globMatches } from '../../glob-match'
 
 interface PersistedShape {
   rules: WindowIgnoreRule[]
@@ -9,38 +10,6 @@ interface PersistedShape {
 export const MAX_IGNORE_RULES = 500
 export const MAX_IGNORE_FIELD_LENGTH = 512
 const MAX_IGNORE_RULE_ID_LENGTH = 200
-
-/**
- * Compile an ignore-rule field into an anchored, case-insensitive RegExp.
- * Everything is escaped except `*`, which becomes `.*` — window titles are
- * full of regex metacharacters (`Telegram (26011)`, `C:\dev — Code`) and a
- * user typing one must not accidentally author a pattern.
- *
- * The wildcard exists because titles aren't always stable: a chat app's
- * unread badge (`Telegram (26011)`) or a document name changes between
- * sessions, so `Telegram*` is the rule that keeps working.
- */
-const globCache = new Map<string, RegExp>()
-
-function globToRegExp(pattern: string): RegExp {
-  const cached = globCache.get(pattern)
-  if (cached) return cached
-  const source = `^${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*')}$`
-  const compiled = new RegExp(source, 'i')
-  // The cache is keyed by user-authored patterns, so it's naturally tiny.
-  // The bound is only there so a corrupted store can't grow it without end.
-  if (globCache.size > MAX_IGNORE_RULES * 2) globCache.clear()
-  globCache.set(pattern, compiled)
-  return compiled
-}
-
-function fieldMatches(pattern: string, value: string): boolean {
-  // An empty field is the "any" wildcard — that's what makes a
-  // process-only rule ({ title: '', processName: 'ktalk.exe' }) hide every
-  // window of an app.
-  if (pattern === '') return true
-  return globToRegExp(pattern).test(value.trim())
-}
 
 /**
  * True when the window should be hidden from the switcher. `title` and
@@ -57,8 +26,8 @@ export function isWindowIgnored(
     // Defensive: sanitiseRules already drops match-everything rules.
     if (rule.title === '' && rule.processName === '') continue
     if (
-      fieldMatches(rule.title, title) &&
-      fieldMatches(rule.processName, processName)
+      globMatches(rule.title, title) &&
+      globMatches(rule.processName, processName)
     ) {
       return true
     }

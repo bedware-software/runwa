@@ -7,7 +7,7 @@ const MANIFEST: ModuleManifest = {
   icon: 'terminal',
   kind: 'service',
   description:
-    'Create named shell actions that appear in the Command Palette. Actions can run scripts or launch applications with arguments.',
+    'Create named actions that appear in the Command Palette — shell commands that run scripts or launch applications with arguments, and keystroke commands that press a shortcut in the app you were just in. Each command is either global or scoped to one application, in which case it is only listed while that app is focused.',
   defaultEnabled: true,
   supportsDirectLaunch: false
 }

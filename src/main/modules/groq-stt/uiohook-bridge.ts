@@ -343,6 +343,32 @@ class UiohookBridge {
     }
   }
 
+  /**
+   * Tap a single chord (modifiers + one key) at the OS level, into whichever
+   * window currently has focus. Used by keystroke user commands. No-op when
+   * uiohook-napi isn't loaded.
+   *
+   * Note the asymmetry with `subscribeKeystrokes`: sending doesn't need the
+   * hook to be running, so this deliberately doesn't call `ensureStarted`.
+   */
+  simulateChord(binding: KeyBinding): boolean {
+    const mod = tryLoadUiohook()
+    if (!mod) return false
+    const K = mod.UiohookKey
+    const modifiers: number[] = []
+    if (binding.ctrl) modifiers.push(K.Ctrl)
+    if (binding.alt) modifiers.push(K.Alt)
+    if (binding.shift) modifiers.push(K.Shift)
+    if (binding.meta) modifiers.push(K.Meta)
+    try {
+      mod.uIOhook.keyTap(binding.key, modifiers)
+      return true
+    } catch (err) {
+      console.warn('[uiohook-bridge] simulateChord failed:', err)
+      return false
+    }
+  }
+
   private ensureStarted(mod: UiohookModule): void {
     if (this.started) return
     this.onKeyDown = (e: UiohookKeyboardEvent): void => {

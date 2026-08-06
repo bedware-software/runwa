@@ -13,13 +13,17 @@ import type {
   ModuleId,
   ModuleSettings,
   ModuleConfigValue,
+  NewFocusedAppCommand,
   NewUserCommand,
   NewWindowIgnoreRule,
   PermissionName,
   PermissionStatus,
+  RunningAppSummary,
   WindowIgnoreRule,
   WindowIgnoreScope
 } from '@shared/types'
+import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
+import { focusContext } from '../focus-context'
 import { settingsStore } from '../settings-store'
 import { moduleRegistry } from '../modules/registry'
 import { paletteWindow } from '../palette-window'
@@ -35,6 +39,7 @@ import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
   closeWindow,
   invalidateCache,
+  listWindowsCached,
   isAccessibilityTrusted,
   isScreenRecordingGranted,
   requestAccessibilityPermission,
@@ -150,6 +155,17 @@ export function registerIpcHandlers(): void {
     }
   )
   ipcMain.handle(
+    'user-commands:update',
+    async (event, commandId: string, command: NewUserCommand) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'User Commands management'
+      )
+      return userCommandsStore.update(commandId, command)
+    }
+  )
+  ipcMain.handle(
     'user-commands:remove',
     async (event, commandId: string) => {
       assertSenderWindow(
@@ -157,9 +173,76 @@ export function registerIpcHandlers(): void {
         settingsWindow.getBrowserWindow(),
         'User Commands management'
       )
-      return userCommandsStore.remove(commandId)
+      const commands = userCommandsStore.remove(commandId)
+      // Aliases live in the Command Palette module's per-item map, keyed by
+      // command id. Drop the deleted command's entry so it can't linger and
+      // silently re-attach to a future command that reuses the id.
+      if (typeof commandId === 'string' && commandId.trim()) {
+        settingsStore.patchModuleAlias(
+          COMMAND_PALETTE_ID,
+          userCommandItemId(commandId.trim()),
+          null
+        )
+      }
+      return commands
     }
   )
+
+  // Palette-side creation for the "Create user command for <app>" entry.
+  //
+  // Unlike the management calls above this one answers to the palette
+  // window, because capturing a command without leaving the app it's for is
+  // the entire point of the feature. Two things keep the surface narrow: the
+  // usual main-side validation in the store, and the app scope coming from
+  // main's own focus snapshot rather than from the payload — the renderer
+  // can name the command, not the app it belongs to.
+  ipcMain.handle(
+    'user-commands:create-for-focused-app',
+    async (event, command: NewFocusedAppCommand): Promise<string> => {
+      assertSenderWindow(
+        event,
+        paletteWindow.getBrowserWindow(),
+        'User Commands creation'
+      )
+      const focusedApp = focusContext.get()
+      if (!focusedApp?.processName) {
+        throw new Error("Runwa couldn't tell which app you were in.")
+      }
+      const before = new Set(userCommandsStore.list().map((c) => c.id))
+      const commands = userCommandsStore.add({
+        name: command?.name,
+        action: command?.action,
+        kind: command?.kind,
+        appScope: focusedApp.processName
+      })
+      const created = commands.find((c) => !before.has(c.id))
+      if (!created) throw new Error('The command could not be saved.')
+      return created.id
+    }
+  )
+
+  // Distinct apps behind the currently-open windows, so the app-scope picker
+  // can offer real, correctly-spelled targets ('idea64.exe' on Windows,
+  // 'IntelliJ IDEA' on macOS) instead of asking the user to guess.
+  ipcMain.handle('user-commands:running-apps', async (event): Promise<RunningAppSummary[]> => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'User Commands management'
+    )
+    try {
+      const byName = new Map<string, RunningAppSummary>()
+      for (const window of listWindowsCached(false, true)) {
+        const name = window.processName.trim()
+        if (!name || byName.has(name)) continue
+        byName.set(name, { name, path: window.executablePath })
+      }
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+    } catch (err) {
+      console.warn('[user-commands] running-app listing failed', err)
+      return []
+    }
+  })
 
   // Window-switcher: close the OS window behind a palette row (Ctrl/Cmd+D).
   // Validated here rather than in the renderer because `item.action` is an

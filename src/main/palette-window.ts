@@ -15,6 +15,7 @@ import {
   isWindowOnCurrentDesktop
 } from './modules/window-switcher/native'
 import { setInputLanguage } from './modules/keyboard-remap/native'
+import { focusContext } from './focus-context'
 
 /** HWND of a BrowserWindow as a decimal string, or `null` if the window is
  * gone or the handle can't be decoded (non-Windows platforms, 32-bit Electron,
@@ -337,6 +338,10 @@ class PaletteWindow {
     } catch {
       this.previousWindowId = null
     }
+    // Same snapshot, different consumer: modules that scope their entries to
+    // the app the user came from (User Commands) read it back during search.
+    // Resolution is lazy, so this costs one assignment here.
+    focusContext.capture(this.previousWindowId)
 
     // Respect the persisted size if the user has resized before.
     const saved = settingsStore.get().paletteSize
@@ -472,6 +477,11 @@ class PaletteWindow {
     }
     this.previousWindowId = null
     this.currentModuleId = null
+    // Callers that act on the previously-focused app (keystroke user
+    // commands) read the context *before* asking us to hide, so dropping it
+    // here can't race them — and it keeps a stale app from scoping the next
+    // palette session if `show()` fails to capture a new one.
+    focusContext.clear()
   }
 
   /**

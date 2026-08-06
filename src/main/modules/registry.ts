@@ -11,6 +11,7 @@ import type {
 } from '@shared/types'
 import type { PaletteModule } from './types'
 import { settingsStore } from '../settings-store'
+import { focusContext } from '../focus-context'
 
 const MAX_RESULTS = 100
 
@@ -143,7 +144,8 @@ class ModuleRegistry {
       try {
         const raw = await scopedModule.search(query, controller.signal, {
           config: this.buildConfig(scopedModule),
-          aliases: this.buildAliases(scopedModule)
+          aliases: this.buildAliases(scopedModule),
+          focusedApp: focusContext.get()
         })
         items = raw.map<PaletteItem>((it) => ({
           ...it,

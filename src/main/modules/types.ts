@@ -1,4 +1,5 @@
 import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/types'
+import type { FocusedApp } from '../focus-context'
 
 export interface SearchContext {
   /** Current config values for this module, already merged with defaults. */
@@ -10,6 +11,14 @@ export interface SearchContext {
    * match).
    */
   aliases: Record<string, string>
+  /**
+   * The app that was focused when the palette opened, or null when it
+   * couldn't be identified (nothing was focused, native lookup failed).
+   * Modules use it to surface context-specific entries — User Commands
+   * hides its app-scoped commands unless their app is the one behind the
+   * palette.
+   */
+  focusedApp: FocusedApp | null
 }
 
 /**

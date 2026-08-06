@@ -16,6 +16,7 @@ import {
 import { ConfirmDialog } from '../ConfirmDialog'
 import { Toggle } from '../ui/Toggle'
 import { AliasInputModal } from './AliasInputModal'
+import { NewUserCommandModal } from './NewUserCommandModal'
 import { FooterHint } from './FooterHint'
 import { Kbd, Hotkey } from '../ui/Kbd'
 import { QuizView } from './QuizView'
@@ -23,11 +24,10 @@ import { IS_MAC } from '@/lib/platform'
 import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
 
 /**
- * Module ids whose built-in entries the user can attach a Ctrl+K alias to.
- * Both modules expose stable per-item ids (app paths, command ids) so an alias
- * stored in settings still matches the same row across restarts. User-created
- * command rows are explicitly excluded below until their shortcut behavior is
- * designed as a follow-up feature.
+ * Module ids whose entries the user can attach a Ctrl+K alias to. Both
+ * modules expose stable per-item ids (app paths, command ids — including
+ * user-created commands, keyed `user-command:<id>`) so an alias stored in
+ * settings still matches the same row across restarts.
  */
 const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette'])
 
@@ -93,6 +93,12 @@ export function PaletteApp() {
   // deck. Lives in PaletteApp because the action is invoked from a
   // context-menu item attached to a deck row.
   const [resetDeckId, setResetDeckId] = useState<string | null>(null)
+  // "Create user command for <app>" form. `draftApp` is the label main
+  // sent with the open request (and the sign that the form is up); the app
+  // the command gets scoped to is main's business, not ours.
+  const [draftApp, setDraftApp] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const [draftSaving, setDraftSaving] = useState(false)
 
   const setModuleAlias = useSettingsStore((s) => s.setModuleAlias)
   const setModuleConfig = useSettingsStore((s) => s.setModuleConfig)
@@ -115,13 +121,7 @@ export function PaletteApp() {
 
   const selectedItem = items[selectedIndex]
   const canSetAlias =
-    !!selectedItem &&
-    ALIAS_CAPABLE_MODULES.has(selectedItem.moduleId) &&
-    // User Commands share the command-palette module's search surface, but
-    // aliases/shortcuts are intentionally deferred beyond the first CRUD
-    // iteration. Exclude them so Ctrl+K never offers a control that the
-    // dynamic user-command search does not yet consume.
-    selectedItem.actionKind !== 'user-command'
+    !!selectedItem && ALIAS_CAPABLE_MODULES.has(selectedItem.moduleId)
   const isFlashcardDeckRow =
     !!selectedItem &&
     selectedItem.moduleId === 'flashcards' &&
@@ -313,6 +313,53 @@ export function PaletteApp() {
     return unsub
   }, [startQuiz])
 
+  // user-commands:draft — the "Create user command for <app>" entry was
+  // run. The palette stays in search mode with the form over it, so the
+  // user can see the app's other commands while adding another.
+  useEffect(() => {
+    const unsub = window.electronAPI.onUserCommandsDraft((payload) => {
+      setDraftError(null)
+      setDraftSaving(false)
+      setDraftApp(payload.appLabel)
+    })
+    return unsub
+  }, [])
+
+  // Same focus-restoration pattern as the alias modal — see above.
+  useEffect(() => {
+    if (draftApp === null) return
+    return () => {
+      inputRef.current?.focus()
+    }
+  }, [draftApp])
+
+  const saveDraftCommand = (command: {
+    name: string
+    kind: 'shell' | 'keystroke'
+    action: string
+  }): void => {
+    setDraftSaving(true)
+    setDraftError(null)
+    void window.electronAPI
+      .userCommandsCreateForFocusedApp(command)
+      .then((commandId) => {
+        setDraftSaving(false)
+        setDraftApp(null)
+        // Land the cursor on the command that was just created: it proves
+        // the save landed, and Enter runs it straight away.
+        refresh({ selectItemId: `user-command:${commandId}` })
+      })
+      .catch((err: unknown) => {
+        setDraftSaving(false)
+        const message = err instanceof Error ? err.message : String(err)
+        setDraftError(
+          message
+            .replace(/^Error invoking remote method '[^']+': Error: /, '')
+            .replace(/^Error: /, '') || 'The command could not be saved.'
+        )
+      })
+  }
+
   // Keep keyboard focus aligned with the current mode. In search mode
   // the SearchInput must own focus so typing into the query works; in
   // quiz mode the root div owns focus so keystrokes hit the
@@ -355,7 +402,9 @@ export function PaletteApp() {
     // the palette's Enter handler would fire BEFORE the button's
     // native activation, executing the deck instead of confirming the
     // reset.
-    if (menuOpen || aliasModalOpen || resetDeckId !== null) return
+    if (menuOpen || aliasModalOpen || resetDeckId !== null || draftApp !== null) {
+      return
+    }
 
     // Quiz mode owns the keyboard while a session is active. We branch
     // EARLY so none of the search-mode handlers (Esc=dismiss palette,
@@ -749,6 +798,15 @@ export function PaletteApp() {
           }}
         />
       )}
+
+      <NewUserCommandModal
+        open={draftApp !== null}
+        appLabel={draftApp ?? ''}
+        error={draftError}
+        saving={draftSaving}
+        onSubmit={saveDraftCommand}
+        onClose={() => setDraftApp(null)}
+      />
 
       <ConfirmDialog
         open={resetDeckId !== null}

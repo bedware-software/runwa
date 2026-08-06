@@ -94,8 +94,12 @@ interface PaletteState {
    * `preserveSelection: true` keeps the cursor on the same item id once
    * the new results land. If the id is gone (filtered out, renamed),
    * we fall back to index 0 like a normal refresh.
+   *
+   * `selectItemId` instead lands the cursor on a specific row that the
+   * current list doesn't contain yet — a user command just created from
+   * the palette, which the refreshed search is about to surface.
    */
-  refresh: (opts?: { preserveSelection?: boolean }) => void
+  refresh: (opts?: { preserveSelection?: boolean; selectItemId?: string }) => void
 
   /* ─── Quiz mode ─────────────────────────────────────────────────── */
 
@@ -250,10 +254,14 @@ export const usePaletteStore = create<PaletteState>()(
       // path on Win), so this works even when the new search reorders
       // results — e.g. an alias change in `prioritize` mode bubbles
       // the row up but the cursor follows.
+      // `selectItemId` names a row that isn't in the current list yet — the
+      // command just created from the palette — so it wins over the
+      // preserve-the-cursor case.
       const preserveId =
-        opts?.preserveSelection
+        opts?.selectItemId ??
+        (opts?.preserveSelection
           ? get().items[get().selectedIndex]?.id
-          : undefined
+          : undefined)
       // Clear items so ResultsList flips to its loading state — without
       // this the stale results stay on screen until the refreshed search
       // lands, which hides the rescan's progress from the user. Mirrors
