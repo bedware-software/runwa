@@ -696,6 +696,13 @@ impl StateMachine {
     /// The modifier is already physically held (injected on press), so the
     /// click carries it natively — nothing to inject here. A no-op in every
     /// other state.
+    ///
+    /// Windows-only: its mouse hook is a separate callback from the keyboard
+    /// one, so clicks need their own entry point. The macOS tap sees both in
+    /// one stream and routes mouse-downs through [`StateMachine::on_key_down`]
+    /// as `LogicalKey::Other`, which already means "interruption that emits
+    /// no keystroke of its own".
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn on_pointer_down(&mut self) -> Action {
         if let State::EagerModifier { trigger, modifier } = self.state {
             self.state = State::Modifying {
