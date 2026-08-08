@@ -653,6 +653,40 @@ impl StateMachine {
         }
     }
 
+    /// Abandon whatever layer is in flight and go back to `Idle`, handing
+    /// back the events needed to undo anything we already injected: an
+    /// eagerly-pressed transparent modifier, the modifiers a hold layer is
+    /// asserting, or a live push-to-talk chord. Without the unwind those
+    /// keys stay logically stuck down.
+    ///
+    /// Platform layers call this when the event stream stops being
+    /// trustworthy — see the macOS secure-input path, where the tap keeps
+    /// receiving FlagsChanged but stops receiving KeyDown/KeyUp, so a
+    /// trigger held across real typing looks like a bare tap.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    pub fn reset(&mut self) -> SmallVec<[SyntheticEvent; 8]> {
+        let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+        // Covers `Comboing` — its release sequence lives on the machine.
+        if let Some(release) = self.combo_release.take() {
+            events.extend(release);
+        }
+        match self.state {
+            State::Modifying { held, .. } => events.extend(
+                held.modifiers()
+                    .into_iter()
+                    .rev()
+                    .map(SyntheticEvent::ModifierUp),
+            ),
+            State::EagerModifier { modifier, .. } => {
+                events.push(SyntheticEvent::ModifierUp(modifier))
+            }
+            // `Pending` suppressed the trigger-down but injected nothing.
+            State::Idle | State::Pending { .. } | State::Comboing { .. } => {}
+        }
+        self.state = State::Idle;
+        events
+    }
+
     /// A pointer (mouse) button went down. The keyboard hook can't observe
     /// mouse input, so the platform layer feeds clicks here. While a
     /// transparent-modifier trigger is an un-interrupted tap candidate
@@ -2264,5 +2298,53 @@ capslock:
             m.on_event(up_with_mods(LogicalKey::CapsLock, shift)),
             Action::Suppress
         );
+    }
+
+    // -----------------------------------------------------------------
+    // reset() — the escape hatch for an untrustworthy event stream
+    // (macOS secure input hides KeyDown/KeyUp but keeps delivering
+    // FlagsChanged).
+
+    #[test]
+    fn reset_from_idle_is_a_no_op() {
+        let mut m = sm(CAPS_CTRL_ESC);
+        assert!(m.reset().is_empty());
+        assert!(m.reset().is_empty());
+    }
+
+    // The lock-screen bug: Shift goes down, the user types a letter we
+    // can't see, Shift comes back up. Resetting on the way in must both
+    // release the eagerly-injected Shift and make the later Shift-up a
+    // plain forward — NOT the on_tap chord fired into the password field.
+    #[test]
+    fn reset_releases_eager_modifier_and_kills_the_pending_tap() {
+        let yaml = r#"
+left_shift:
+  on_tap: [ctrl, alt, cmd, a]
+"#;
+        let mut m = sm(yaml);
+        assert_eq!(
+            m.on_event(down(LogicalKey::LeftShift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::LeftShift)])
+        );
+        assert_eq!(
+            m.reset().to_vec(),
+            vec![SyntheticEvent::ModifierUp(Modifier::LeftShift)]
+        );
+        assert!(m.reset().is_empty());
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), Action::Forward);
+    }
+
+    #[test]
+    fn reset_releases_modifiers_a_hold_layer_is_asserting() {
+        let mut m = sm(CAPS_CTRL_ESC);
+        m.on_event(down(LogicalKey::CapsLock));
+        // Interruption promotes to Modifying with Ctrl held.
+        m.on_event(down(alpha('D')));
+        assert_eq!(
+            m.reset().to_vec(),
+            vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)]
+        );
+        assert_eq!(m.on_event(up(LogicalKey::CapsLock)), Action::Forward);
     }
 }

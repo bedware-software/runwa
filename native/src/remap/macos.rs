@@ -228,6 +228,33 @@ fn install_tap_on_current_thread() -> Result<CGEventTap<'static>, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Secure input
+//
+// macOS turns on secure event input while the lock screen / login window is
+// up, and apps do the same around password fields (Chrome, Safari, Terminal
+// with "Secure Keyboard Entry"). While it's on our tap stops receiving
+// KeyDown/KeyUp — but FlagsChanged still arrives. That asymmetry is what
+// makes a half-blind state machine dangerous: typing Shift+L at the login
+// window looks like a *bare* Shift press-and-release, so a `left_shift:
+// on_tap:` rule ghost-fires its chord into the password field (a
+// [ctrl, alt, cmd, a] tap lands as Select All).
+//
+// Nothing we could do with the events we can still see is correct, so we
+// unwind whatever layer was in flight and forward everything untouched
+// until secure input clears.
+
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn IsSecureEventInputEnabled() -> core_foundation_sys::base::Boolean;
+}
+
+fn secure_input_enabled() -> bool {
+    // ~4ns per call — cheap enough to ask on every event, which beats
+    // caching it: macOS offers no notification when the flag flips.
+    unsafe { IsSecureEventInputEnabled() != 0 }
+}
+
+// ---------------------------------------------------------------------------
 // Tap callback
 
 fn tap_callback(
@@ -355,11 +382,25 @@ fn tap_callback(
                         (kind, key, modifiers)
                     }
                 };
-                active.sm.on_event(RawEvent {
-                    kind,
-                    key,
-                    modifiers,
-                })
+                // Secure input: the modifier bookkeeping above still runs
+                // (FlagsChanged keeps arriving, so `active.modifiers` stays
+                // honest), but the state machine must not act on a stream
+                // that's missing every KeyDown. Reset is idempotent — only
+                // the first event after the flag flips returns anything.
+                if secure_input_enabled() {
+                    let release = active.sm.reset();
+                    if release.is_empty() {
+                        Action::Forward
+                    } else {
+                        Action::EmitThenForwardWithModifiers(release, ModifierMask::EMPTY)
+                    }
+                } else {
+                    active.sm.on_event(RawEvent {
+                        kind,
+                        key,
+                        modifiers,
+                    })
+                }
             }
             None => return CallbackResult::Keep,
         }
