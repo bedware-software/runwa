@@ -22,6 +22,8 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { removeGeneratedBindings } from './clean-native-bindings.mjs'
+
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const projectDir = join(scriptDir, '..')
 const nativeDir = join(projectDir, 'native')
@@ -103,20 +105,6 @@ function rustupWhich(tool) {
   const toolPath = result.stdout.trim()
   assertFile(toolPath)
   return toolPath
-}
-
-function removeGeneratedBindings() {
-  for (const name of readdirSync(nativeDir)) {
-    if (
-      /^runwa-native\..+\.node$/.test(name) ||
-      name === 'index.js' ||
-      name === 'index.d.ts'
-    ) {
-      const generatedPath = join(nativeDir, name)
-      rmSync(generatedPath)
-      console.log(`[native-release] removed stale ${generatedPath}`)
-    }
-  }
 }
 
 function assertFile(filePath) {
@@ -239,7 +227,7 @@ function validateGeneratedPackage() {
   )
 }
 
-removeGeneratedBindings()
+removeGeneratedBindings(nativeDir, 'native-release')
 if (process.platform === 'darwin') {
   buildUniversalMacAddon()
 } else {

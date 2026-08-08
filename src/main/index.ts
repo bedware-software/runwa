@@ -19,6 +19,7 @@ import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
 import { windowIgnoreStore } from './modules/window-switcher/ignore-store'
 import { initAutoUpdater } from './auto-update'
+import { initLogging } from './logging'
 import { forceKillSelf, logProcessSnapshot } from './process-utils'
 import {
   reconcileStartupOnLaunch,
@@ -41,6 +42,12 @@ if (!app.isPackaged) {
   app.setName('Runwa Dev')
   app.setPath('userData', path.join(app.getPath('appData'), 'Runwa Dev'))
 }
+
+// Tee console output to a file before anything else can log. A packaged app
+// has stdout/stderr on /dev/null, so without this every diagnostic below is
+// written into the void. Must come after `app.setName` — the logs directory
+// is derived from the app name.
+initLogging()
 
 // Single-instance lock — a second `runwa` launch just shows the palette.
 const gotLock = app.requestSingleInstanceLock()

@@ -1,6 +1,6 @@
 {
   "name": "Runwa",
-  "version": "0.1.98",
+  "version": "0.1.99",
   "description": "A cross-platform command palette launcher",
   "main": "./out/main/index.js",
   "author": "dmitr",
@@ -9,7 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "build:native": "cd native && napi build --platform --release",
+    "build:native": "node scripts/clean-native-bindings.mjs && cd native && napi build --platform --release",
     "prepare:native:release": "node scripts/prepare-native-release.mjs",
     "typecheck": "tsc --noEmit",
     "dist": "npm run prepare:native:release && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js",

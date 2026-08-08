@@ -895,6 +895,56 @@ fn pid_has_onscreen_window(pid: u32) -> bool {
     }
 }
 
+/// True when `id` names a window that lives on the currently-visible Space.
+///
+/// macOS exposes no public Spaces API, but it doesn't need one here:
+/// `kCGWindowListOptionOnScreenOnly` reports *exactly* the windows on the
+/// active Space, so membership is a lookup by CGWindowID. Callers use this
+/// before handing focus to a remembered window — `focus_window` activates the
+/// owning process, and activating a process with no window on this Space
+/// makes macOS swoosh the user to a different desktop.
+///
+/// Conservative on every unknown: an id we can't parse, an AX-sourced id
+/// (`ax:…`, which carries no CGWindowID), or a CGWindowList call that fails
+/// all answer `true`, preserving the previous always-restore behavior rather
+/// than silently dropping focus restoration.
+pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
+    if id.starts_with("ax:") {
+        return Ok(true);
+    }
+    let mut parts = id.splitn(2, ':');
+    let Some(pid) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+        return Ok(true);
+    };
+    let Some(wid) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+        // No window number in the id — fall back to the app-level answer.
+        return Ok(pid_has_onscreen_window(pid));
+    };
+
+    unsafe {
+        let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+        let arr = CGWindowListCopyWindowInfo(options, kCGNullWindowID);
+        if arr.is_null() {
+            return Ok(true);
+        }
+        let count = CFArrayGetCount(arr);
+        let key_number = CFString::from_static_string("kCGWindowNumber");
+        let mut found = false;
+        for i in 0..count {
+            let dict = CFArrayGetValueAtIndex(arr, i) as CFDictionaryRef;
+            if dict.is_null() {
+                continue;
+            }
+            if cf_dict_get_i64(dict, key_number.as_concrete_TypeRef()) == Some(wid as i64) {
+                found = true;
+                break;
+            }
+        }
+        CFRelease(arr as CFTypeRef);
+        Ok(found)
+    }
+}
+
 /// Activate a process by PID via osascript — the same "set frontmost of
 /// process X to true" logic the focus path has always used. Extracted so
 /// both the old coarse-activate behavior and the new precise-raise path

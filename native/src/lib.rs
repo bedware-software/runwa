@@ -207,11 +207,14 @@ pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
     {
         windows_impl::is_window_on_current_desktop(&id)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        // macOS Spaces membership check would need private CGS APIs; we don't
-        // have a cross-desktop restore issue today because macOS handles Space
-        // switching for us when focusing a process by PID.
+        macos::is_window_on_current_desktop(&id)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // No virtual-desktop concept to consult — every window counts as
+        // being on the current one.
         let _ = id;
         Ok(true)
     }

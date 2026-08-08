@@ -134,6 +134,13 @@ export function forceForegroundWindow(id: string): boolean {
   return loadAddon().forceForegroundWindow(id)
 }
 
+/**
+ * True when `id`'s window sits on the virtual desktop / Space the user is
+ * looking at right now. Windows reads real virtual-desktop membership;
+ * macOS derives it from the on-screen CGWindowList, which is scoped to the
+ * active Space. Answers `true` for anything it can't determine, so callers
+ * treat it as "safe to touch this window" rather than a hard guarantee.
+ */
 export function isWindowOnCurrentDesktop(id: string): boolean {
   return loadAddon().isWindowOnCurrentDesktop(id)
 }

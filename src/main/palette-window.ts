@@ -184,6 +184,26 @@ class PaletteWindow {
       transparent: false,
       fullscreenable: false,
       backgroundColor: '#00000000',
+      // macOS: build the palette as an NSPanel with
+      // NSWindowStyleMaskNonactivatingPanel — the same window class Spotlight,
+      // Alfred and Raycast use. A panel can become *key* (it receives the
+      // keystrokes the user types into the search box) without the owning
+      // *application* becoming active, and that distinction is what keeps the
+      // palette from moving the user between Spaces:
+      //
+      //   For a normal window, `show()`/`focus()` bottom out in
+      //   `[NSApp activateIgnoringOtherApps:]`. macOS's "When switching to an
+      //   application, switch to a Space with open windows for the
+      //   application" preference (on by default) then hunts for a Space
+      //   holding one of our windows and swooshes the user there. Runwa's
+      //   other windows — the 1×1 recorder, the desktop hint — were created at
+      //   launch, which for a login-item launcher means Desktop 1, so the user
+      //   gets yanked to Desktop 1 every time the palette opens.
+      //
+      // Electron skips the activation call entirely for panels, so the
+      // question never gets asked. See the matching `showInactive()` in
+      // `show()` — `show()` activates too, and both halves are needed.
+      ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,
@@ -199,6 +219,11 @@ class PaletteWindow {
     // Spaces makes the window follow the active Space instead, matching
     // Raycast / Alfred / Spotlight behavior. `visibleOnFullScreen` also
     // lets the palette overlay fullscreen apps, which a launcher needs.
+    //
+    // This first call is the one that may transform the process type, so it
+    // deliberately doesn't pass `skipTransformProcessType`. `show()`
+    // re-asserts the behavior on every open (see there) with the transform
+    // skipped.
     if (process.platform === 'darwin') {
       this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     }
@@ -234,6 +259,11 @@ class PaletteWindow {
     this.window.on('blur', () => {
       if (!this.window || this.window.isDestroyed()) return
       const ownHwnd = hwndOf(this.window)
+      // Cross-platform breadcrumb. A blur a few ms after show() means
+      // something reclaimed key status before the user could type — on macOS
+      // that would mean the non-activating panel isn't holding key, which is
+      // otherwise invisible without a debugger.
+      console.log(`[palette] blur: ${Date.now() - this.lastShownAt}ms since show`)
 
       // Early-blur grace: when the activation hotkey was triggered by an
       // injected chord (AutoHotkey `*w::^!s` with Space still physically
@@ -343,6 +373,21 @@ class PaletteWindow {
     // Resolution is lazy, so this costs one assignment here.
     focusContext.capture(this.previousWindowId)
 
+    if (process.platform === 'darwin') {
+      // The Spaces-yank report ("opening the palette drops me on Desktop 1")
+      // is only diagnosable from the outside if we record what we were
+      // handed. `onCurrentSpace: false` here means the window we'd restore
+      // focus to on Escape lives on another Space — the case hide() now
+      // refuses to act on.
+      const onCurrentSpace = this.previousWindowId
+        ? isWindowOnCurrentDesktop(this.previousWindowId)
+        : null
+      console.log(
+        `[palette] show(${moduleId}): previousWindow=${this.previousWindowId ?? 'none'} ` +
+          `onCurrentSpace=${onCurrentSpace}`
+      )
+    }
+
     // Respect the persisted size if the user has resized before.
     const saved = settingsStore.get().paletteSize
     const width = Math.max(saved?.width ?? DEFAULT_WIDTH, MIN_WIDTH)
@@ -364,7 +409,30 @@ class PaletteWindow {
     this.lastShownAt = Date.now()
     this.currentModuleId = moduleId
     win.setOpacity(0)
-    win.show()
+    if (process.platform === 'darwin') {
+      // Re-assert all-Spaces membership on every open. The collection
+      // behavior is set once at create() time, but WindowServer drops it on
+      // some display-topology changes (sleep/wake, plugging or unplugging an
+      // external monitor). Once it's gone the palette is pinned to the Space
+      // it was created on, which is the sticky "always lands on Desktop 1"
+      // state. `skipTransformProcessType` keeps this from re-running
+      // TransformProcessType — that briefly hides the window and is only
+      // needed the first time.
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      })
+      // `orderFrontRegardless` — order the panel in without asking AppKit to
+      // activate the app. `show()` would call
+      // `[NSApp activateIgnoringOtherApps:NO]` first, and that is enough to
+      // trigger macOS's switch-to-a-Space-with-this-app's-windows behavior
+      // before the panel is even on screen. The `focus()` below is what makes
+      // the panel key, and for a non-activating panel that costs no
+      // activation. See the `type: 'panel'` note in create().
+      win.showInactive()
+    } else {
+      win.show()
+    }
     win.focus()
 
     // Windows foreground-lock: plain SetForegroundWindow from a background
@@ -447,10 +515,14 @@ class PaletteWindow {
       this.window.hide()
       if (restoreFocus && this.previousWindowId) {
         try {
-          if (
-            process.platform !== 'win32' ||
-            isWindowOnCurrentDesktop(this.previousWindowId)
-          ) {
+          // The desktop check is not Windows-only any more. On macOS
+          // `focusWindow` activates the owning process, and activating a
+          // process whose windows live on another Space swooshes the user
+          // there — the exact yank this class is trying to avoid. The
+          // remembered window can end up off-Space while the palette is open
+          // (the user switched desktops, or the app closed/moved the window),
+          // so ask before restoring instead of assuming.
+          if (isWindowOnCurrentDesktop(this.previousWindowId)) {
             // Remembered window still lives on the current desktop — restore
             // focus to it directly, which preserves exact "Esc goes back to
             // what I had" semantics.
