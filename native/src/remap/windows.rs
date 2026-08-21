@@ -22,17 +22,19 @@ use std::thread;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CAPITAL, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
-    VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
+    GetAsyncKeyState, GetKeyboardLayout, GetKeyboardLayoutList, SendInput, HKL, INPUT, INPUT_0,
+    INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CAPITAL, VK_CONTROL, VK_ESCAPE,
+    VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+    VK_RWIN, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, PostMessageW,
-    PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
-    LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT,
-    WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
+    PostMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
 };
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
@@ -717,54 +719,29 @@ fn vd_move_active_and_follow(n: u32) {
 }
 
 /// Switch the foreground window's input language by ISO 639-1 code (`en`,
-/// `ru`, …). Looks for a matching layout among the loaded keyboard
-/// layouts (the user must have already added the language in
-/// Settings → Time & Language → Language) and posts
-/// `WM_INPUTLANGCHANGEREQUEST` to the focused window. Quietly logs and
-/// returns if no matching layout is loaded.
+/// `ru`, …). Fire-and-forget: the real work is queued onto a worker
+/// thread, because it drives the shell's own input-switch hotkey and then
+/// polls for the result — tens of milliseconds, far past what
+/// `LowLevelHooksTimeout` tolerates inside the hook callback.
 pub(super) fn change_language(code: LanguageCode) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayoutList, HKL};
+    queue_language_job(code);
+}
 
-    let Some(primary_lang) = primary_lang_id(code.as_str()) else {
-        eprintln!(
-            "[keyboard-remap] change_language: unsupported code '{}'",
-            code.as_str()
-        );
-        return;
-    };
-
-    // First call with None returns the count; second call fills the buffer.
-    let count = unsafe { GetKeyboardLayoutList(None) };
-    if count <= 0 {
-        return;
-    }
-    let mut layouts: Vec<HKL> = vec![HKL(std::ptr::null_mut()); count as usize];
-    let written = unsafe { GetKeyboardLayoutList(Some(layouts.as_mut_slice())) };
-    if written <= 0 {
-        return;
-    }
-    layouts.truncate(written as usize);
-
-    // The HKL low word is the Locale ID; its low 10 bits are the primary
-    // language ID we match against (e.g. 0x09 = English, 0x19 = Russian).
-    let target = layouts.into_iter().find(|hkl| {
-        let lcid = (hkl.0 as usize) as u16;
-        (lcid & 0x03FF) == primary_lang
-    });
-
-    let Some(hkl) = target else {
-        eprintln!(
-            "[keyboard-remap] change_language: no loaded layout for '{}' \
-             (primary lang 0x{primary_lang:X}); add it in Windows language settings",
-            code.as_str()
-        );
-        return;
-    };
-
+/// Entry point for the JS-side `setInputLanguage` (the palette's "switch
+/// to English on open"). The palette grabs focus before calling, so the
+/// window we're switching for is one of ours — and against our own window
+/// the legacy path is both safe and invisible, so keep using it there.
+/// Anything else means the focus grab didn't land and we're aimed at a
+/// foreign app, which takes the same queued path as a remap rule.
+pub(super) fn set_input_language(code: LanguageCode) {
     let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
+    if hwnd.0.is_null() || !owned_by_this_process(hwnd) {
+        queue_language_job(code);
         return;
     }
+    let Some(hkl) = resolve_layout(code) else {
+        return;
+    };
     unsafe {
         if let Err(e) = PostMessageW(
             hwnd,
@@ -772,8 +749,199 @@ pub(super) fn change_language(code: LanguageCode) {
             WPARAM(0),
             LPARAM(hkl.0 as isize),
         ) {
-            eprintln!("[keyboard-remap] change_language: PostMessage failed: {e:?}");
+            eprintln!("[keyboard-remap] set_input_language: PostMessage failed: {e:?}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Input-language switching.
+//
+// We drive the shell's own Win+Space switcher rather than activating the
+// layout ourselves. The obvious API — posting `WM_INPUTLANGCHANGEREQUEST`
+// to the foreground window, which `DefWindowProc` turns into
+// `ActivateKeyboardLayout` — permanently wedges TSF-based apps: Warp hangs
+// the instant it receives one, with or without `INPUTLANGCHANGE_SYSCHARSET`
+// in `wParam`, while Win+Space switches it fine. Confirmed by posting the
+// message from a plain PowerShell script, outside our hook, so it isn't a
+// hook-context problem — the legacy path itself is what those apps can't
+// survive.
+//
+// Win+Space only *cycles*, so "switch to Russian" becomes press-and-verify:
+// read the target thread's layout after each press and stop the moment it
+// matches. That bounds us at one press per loaded layout, lands exactly on
+// the requested language however many are installed, and makes a repeat of
+// the same chord a no-op — no switcher overlay, no cycling past the
+// language you asked for.
+
+/// How long to give one Win+Space press to land before pressing again.
+const LANG_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Polling interval while waiting for a press to take effect.
+const LANG_POLL: std::time::Duration = std::time::Duration::from_millis(15);
+
+static LANG_TX: once_cell::sync::Lazy<Option<std::sync::mpsc::Sender<LanguageCode>>> =
+    once_cell::sync::Lazy::new(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<LanguageCode>();
+        thread::Builder::new()
+            .name("runwa-lang-switch".into())
+            .spawn(move || {
+                while let Ok(first) = rx.recv() {
+                    // Coalesce a burst — only the last language asked for
+                    // matters, and cycling toward a superseded one just
+                    // flashes the overlay for nothing.
+                    let mut code = first;
+                    while let Ok(next) = rx.try_recv() {
+                        code = next;
+                    }
+                    apply_language(code);
+                }
+            })
+            .ok()
+            .map(|_join| tx)
+    });
+
+/// Enqueue a language switch. Drops it silently if the worker failed to
+/// spawn (OOM-class failure) — switching is best-effort.
+fn queue_language_job(code: LanguageCode) {
+    if let Some(tx) = LANG_TX.as_ref() {
+        let _ = tx.send(code);
+    }
+}
+
+fn apply_language(code: LanguageCode) {
+    let Some(target) = resolve_layout(code) else {
+        return;
+    };
+    let target_lang = hkl_primary(target);
+
+    // Capture the window the user was in up front: the switcher overlay
+    // comes and goes while we cycle, and the layout we care about is the
+    // one on the thread that asked for the change.
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return;
+    }
+    let tid = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if tid == 0 {
+        return;
+    }
+
+    // One full cycle visits every loaded entry, so that many presses is
+    // always enough to reach any one of them.
+    let presses = loaded_layouts().len().max(1);
+    for _ in 0..presses {
+        if thread_primary_lang(tid) == Some(target_lang) {
+            return;
+        }
+        press_switch_hotkey();
+        if wait_for_lang(tid, target_lang) {
+            return;
+        }
+    }
+
+    eprintln!(
+        "[keyboard-remap] change_language: cycled {presses}x without reaching '{}' \
+         — is the Win+Space input-switch hotkey disabled?",
+        code.as_str()
+    );
+}
+
+/// Inject the shell's input-switch chord. The remap layer's physical
+/// trigger (Space) is held at this point but was suppressed by the hook,
+/// so the OS never saw it go down and the injected Space is a clean,
+/// self-contained press. Both events carry `INJECT_TAG`, so our own hook
+/// skips them on the way back in.
+fn press_switch_hotkey() {
+    let inputs = [
+        build_input(VK_LWIN, 0),
+        build_input(VK_SPACE, 0),
+        build_input(VK_SPACE, KEYEVENTF_KEYUP.0),
+        build_input(VK_LWIN, KEYEVENTF_KEYUP.0),
+    ];
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+fn wait_for_lang(tid: u32, target_lang: u16) -> bool {
+    let deadline = std::time::Instant::now() + LANG_SETTLE;
+    loop {
+        if thread_primary_lang(tid) == Some(target_lang) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(LANG_POLL);
+    }
+}
+
+/// Active input locale of another thread — works cross-process for any
+/// thread on our desktop, which is how we verify a press landed.
+fn thread_primary_lang(tid: u32) -> Option<u16> {
+    let hkl = unsafe { GetKeyboardLayout(tid) };
+    if hkl.0.is_null() {
+        return None;
+    }
+    Some(hkl_primary(hkl))
+}
+
+/// The loaded keyboard layouts, in the order the shell cycles them.
+fn loaded_layouts() -> Vec<HKL> {
+    // First call with None returns the count; second fills the buffer.
+    let count = unsafe { GetKeyboardLayoutList(None) };
+    if count <= 0 {
+        return Vec::new();
+    }
+    let mut layouts: Vec<HKL> = vec![HKL(std::ptr::null_mut()); count as usize];
+    let written = unsafe { GetKeyboardLayoutList(Some(layouts.as_mut_slice())) };
+    if written <= 0 {
+        return Vec::new();
+    }
+    layouts.truncate(written as usize);
+    layouts
+}
+
+/// The HKL low word is the Locale ID; its low 10 bits are the primary
+/// language ID (e.g. 0x09 = English, 0x19 = Russian). Matching on that
+/// rather than the full LCID keeps `ru` matching whatever Russian variant
+/// the user actually has installed.
+fn hkl_primary(hkl: HKL) -> u16 {
+    ((hkl.0 as usize) as u16) & 0x03FF
+}
+
+/// Resolve an ISO 639-1 code to a loaded layout, logging the two ways this
+/// legitimately fails: a code we don't map, or a language the user hasn't
+/// added in Windows language settings.
+fn resolve_layout(code: LanguageCode) -> Option<HKL> {
+    let Some(primary_lang) = primary_lang_id(code.as_str()) else {
+        eprintln!(
+            "[keyboard-remap] change_language: unsupported code '{}'",
+            code.as_str()
+        );
+        return None;
+    };
+
+    let found = loaded_layouts()
+        .into_iter()
+        .find(|hkl| hkl_primary(*hkl) == primary_lang);
+
+    if found.is_none() {
+        eprintln!(
+            "[keyboard-remap] change_language: no loaded layout for '{}' \
+             (primary lang 0x{primary_lang:X}); add it in Windows language settings",
+            code.as_str()
+        );
+    }
+    found
+}
+
+fn owned_by_this_process(hwnd: HWND) -> bool {
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        pid != 0 && pid == GetCurrentProcessId()
     }
 }
 

@@ -360,9 +360,11 @@ pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
 /// Switch the system input language to the one matching `code` (ISO 639-1,
 /// e.g. `en`, `ru`). Reuses the keyboard-remap `change_language` plumbing —
 /// macOS dispatches via `TISSelectInputSource` on the main queue; Windows
-/// posts `WM_INPUTLANGCHANGEREQUEST` to the foreground window. The
-/// language must already be installed as a system input source; we only
-/// activate, never add. Returns an error only if `code` fails to parse.
+/// posts `WM_INPUTLANGCHANGEREQUEST` when the foreground window is ours
+/// and otherwise cycles the shell's Win+Space switcher, which is the only
+/// path some TSF-based apps survive. The language must already be
+/// installed as a system input source; we only activate, never add.
+/// Returns an error only if `code` fails to parse.
 #[napi]
 pub fn set_input_language(code: String) -> napi::Result<()> {
     remap::set_input_language(&code).map_err(napi::Error::from_reason)

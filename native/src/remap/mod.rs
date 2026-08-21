@@ -118,7 +118,7 @@ pub fn set_input_language(code: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        windows::change_language(parsed);
+        windows::set_input_language(parsed);
         Ok(())
     }
 

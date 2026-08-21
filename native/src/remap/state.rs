@@ -545,7 +545,12 @@ impl StateMachine {
                 if held.is_empty() {
                     Action::Suppress
                 } else {
-                    Action::emit(held.modifiers().into_iter().rev().map(SyntheticEvent::ModifierUp))
+                    Action::emit(
+                        held.modifiers()
+                            .into_iter()
+                            .rev()
+                            .map(SyntheticEvent::ModifierUp),
+                    )
                 }
             }
 
@@ -621,12 +626,7 @@ impl StateMachine {
             // key should re-fire the override. Chord-style bindings
             // never come back here — they enter Comboing on press
             // and are torn down via the Comboing block above.
-            (
-                State::Modifying { trigger, held },
-                EventKind::KeyDown,
-                _,
-                _,
-            ) if held.is_empty() => {
+            (State::Modifying { trigger, held }, EventKind::KeyDown, _, _) if held.is_empty() => {
                 let Some(binding) = self.binding_for(trigger) else {
                     return Action::Forward;
                 };
