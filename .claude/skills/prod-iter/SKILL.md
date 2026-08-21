@@ -1,102 +1,149 @@
 ---
 name: prod-iter
-description: Fast local install of Runwa for manual iteration — commit/push, build native (host arch, release), build the Electron bundle, package an unpacked .app, and reinstall it into /Applications. Skips all tests (unit and UI) by design. Trigger on "prod iter", "PROD ITER", or a request to get the current changes installed/running as fast as possible.
+description: Fast local install of Runwa on Windows for manual iteration — commit first (the pre-commit hook bumps the version), run dist:win while the app keeps running, then kill / silent-install / relaunch. Skips all tests by design. Trigger on "prod iter", "PROD ITER", or a request to get the current changes installed and running as fast as possible.
 user-invocable: true
 allowed-tools:
   - Bash
+  - PowerShell
 ---
 
 # PROD ITER
 
 Fastest path from a dirty working tree to a running, locally-installed
-build of Runwa. Optimized for speed, not confidence: **never run
-`cargo test`, never run any UI/E2E test** as part of this skill, even if
-asked to "verify" — that's a separate, slower pass the user does
-deliberately, not something this skill does implicitly.
+build of Runwa on Windows. This is the "promote to prod and dogfood" loop:
+ship a real packaged build to this machine and exercise it, rather than
+trusting dev mode.
 
-Host-arch only (no universal binary, no dmg/zip/blockmap, no
-notarization) — that's what `npm run dist:mac` is for, not this.
+Optimized for speed, not confidence: **never run `cargo test`, never run a
+UI/E2E pass** as part of this skill, even when asked to "verify" — that's a
+separate, slower pass the user runs deliberately.
 
-Run every step from the repo root. Stop and report if any step fails —
-don't skip ahead.
+Run every step from the repo root. Stop and report if a step fails; don't
+skip ahead.
+
+## Two things that are load-bearing
+
+**Commit before building.** The husky pre-commit hook runs
+`npm version patch --no-git-tag-version`, so the commit lands a *new*
+version that the build then ships. Build first and you package the version
+that is already installed — the relaunched app reads identical and there's
+no way to tell whether the new bits took. Committing also turns every
+iteration into a restorable checkpoint, which is why work-in-progress or
+possibly-broken code should still be committed: `git checkout` makes
+rollback trivial, while an unversioned build is genuinely confusing.
+
+**Kill the app as late as possible.** The user is actively using Runwa
+while this runs, and dislikes it sitting dead through a long build. The
+build only writes to `release\` and `out\`; the installed app lives under
+`%LOCALAPPDATA%\Programs\Runwa` and holds no lock on either. So it stays up
+for the whole slow build and only dies for the fast install.
 
 ## Steps
 
-0. **Commit and push whatever's dirty.** Check `git status --short`. If
-   it's non-empty:
-   - `git add -A`
-   - Write a real commit message describing the actual diff (read it
-     first) — don't use a placeholder.
-   - `git commit -m "<message>"`
-   - `git push origin "$(git rev-parse --abbrev-ref HEAD)"`
+### 1. Commit everything
 
-   Note: this repo's pre-commit hook auto-bumps the patch version in
-   `package.json`/`package-lock.json` and stages both — that's expected,
-   not something to undo or re-stage yourself.
+```bash
+git status --short
+```
 
-   If `git status --short` is empty, skip straight to step 1.
+If non-empty: read the diff, `git add -A`, and commit with a real message
+describing the actual change — no placeholders. The hook's version bump and
+its `git add package.json package-lock.json` are expected; don't undo them
+or re-stage them yourself.
 
-1. **Stop any running dev instance.** A `electron-vite dev` /
-   `electron-vite preview` process installs the same global keyboard
-   hook and hotkeys as the installed app. Leaving it up causes
-   duplicate remaps and "hotkey already registered" failures once the
-   installed app launches.
+If the tree is already clean, there's still an installed version to refresh
+— go straight to step 2.
 
-   ```bash
-   pkill -f "electron-vite preview"
-   pkill -f "node_modules/electron/dist/Electron.app"
-   ```
+Pushing is **not** part of this loop. Push only if the user asks.
 
-2. **Build the native addon, release profile, host arch only.**
+### 2. Build and package — app still running
 
-   ```bash
-   npm run build:native
-   ```
+```bash
+npm run dist:win
+```
 
-   Not `npm run prepare:native:release` — that cross-builds x64 *and*
-   arm64 and lipo's them into a universal binary, which the packaged
-   release needs but a local loop doesn't.
+Long-running (minutes). Wait it out; do not kill Runwa first.
 
-3. **Build the Electron/Vite bundle.**
+This expands to
+`prepare:native:release -- win32 && electron-vite build && electron-builder --win --x64`.
+The prep script removes the generated bindings, rebuilds the Rust addon
+with `napi build --platform --release`, and validates that the packaged
+`.node` exports what the app needs. **So there is no separate
+`npm run build:native` step** — running one beforehand is wasted work, the
+prep script deletes that output and rebuilds it. This holds whether or not
+anything under `native/src` changed.
 
-   ```bash
-   npm run build
-   ```
+### 3. Find the installer
 
-4. **Package an unpacked `.app` for the host architecture** — skips
-   dmg/zip creation, blockmap generation, and notarization, so it's
-   seconds instead of minutes. Still goes through electron-builder's
-   ad-hoc sign + the `afterSign` re-stamp, so Gatekeeper/entitlements
-   behave like a real build.
+`electron-builder.yml` sets
+`artifactName: ${productName}-${version}-setup.${ext}`, so the file is
+`release\Runwa-<version>-setup.exe` — *not* "Runwa Setup <ver>.exe".
 
-   ```bash
-   ARCH=$(test "$(uname -m)" = arm64 && echo arm64 || echo x64)
-   node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --mac --$ARCH --dir
-   ```
+```powershell
+$installer = Get-ChildItem release\Runwa-*-setup.exe |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1 -ExpandProperty FullName
+$installer
+```
 
-   Output: `release/mac-$ARCH/Runwa.app`
+Cross-check against `node -p "require('./package.json').version"` — they
+should agree. If they don't, the build ran against a stale version and step
+1 was skipped or the hook didn't fire.
 
-5. **Install it** — quit the currently-installed app, replace it,
-   relaunch.
+### 4. Capture the exe path, then kill it — now, not earlier
 
-   ```bash
-   osascript -e 'tell application "Runwa" to quit' 2>/dev/null
-   pkill -f "/Applications/Runwa.app" 2>/dev/null
-   rm -rf /Applications/Runwa.app
-   cp -R "release/mac-$ARCH/Runwa.app" /Applications/Runwa.app
-   open /Applications/Runwa.app
-   ```
+```powershell
+$exe = Get-Process Runwa -ErrorAction SilentlyContinue |
+  Select-Object -First 1 -ExpandProperty Path
+Stop-Process -Name Runwa -Force -ErrorAction SilentlyContinue
+```
 
-6. Report the installed version (`plutil -p /Applications/Runwa.app/Contents/Info.plist | grep CFBundleShortVersion`) and confirm it launched (process visible via `ps aux | grep "/Applications/Runwa.app"`).
+It may not be running — that's fine, continue. Keep `$exe` for step 6; the
+install overwrites that binary in place. If nothing was running, fall back
+to `"$env:LOCALAPPDATA\Programs\Runwa\Runwa.exe"`.
+
+### 5. Install silently
+
+```powershell
+Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+```
+
+NSIS is configured `oneClick: false`, `perMachine: false`, so `/S` performs
+an unattended per-user install into `%LOCALAPPDATA%\Programs\Runwa`. A
+silent install does **not** auto-launch the app.
+
+### 6. Relaunch and report
+
+```powershell
+Start-Process $exe
+```
+
+Report the version just shipped and confirm the process came up. The
+version readout in the app is the user's signal that the new build actually
+installed, so state it explicitly.
 
 ## Explicitly out of scope
 
-- `cargo test` (native/Rust unit tests)
-- Any UI/E2E test run
-- Windows/Linux builds
-- The other host architecture (no universal binary)
-- dmg/zip/blockmap artifacts, code-signing for distribution,
-  notarization, auto-update manifest (`latest-mac.yml`)
+- `cargo test`, `npm run typecheck`, any UI/E2E run
+- `git push`
+- macOS / Linux builds — `npm run dist:mac` and `dist:linux` are separate,
+  must run on that OS, and macOS additionally cross-builds both Rust
+  targets into a universal addon
+- Code signing for distribution, notarization, auto-update manifests
 
-If a change needs verifying beyond "does it run," that's a separate,
-slower pass — not this one.
+If a change needs verifying beyond "does it launch and behave", that's a
+separate, slower pass — not this one.
+
+## When it fails
+
+Report the failing step with its output rather than silently retrying. The
+common ones:
+
+- **`cargo`/`rustc` errors from the prep script** — the addon didn't
+  compile. Fix the Rust, then rerun `npm run dist:win`; there's nothing to
+  salvage from a partial run.
+- **"Native addon is missing release exports"** — a new `#[napi]` export
+  exists in `native/src` but `validateGeneratedPackage`'s required-export
+  list or the generated wrapper disagrees. Real failure, not flake.
+- **Installer not found in `release\`** — electron-builder failed after the
+  bundle step; scroll back for its error rather than globbing harder.
