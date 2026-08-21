@@ -176,6 +176,15 @@ export interface PaletteItem {
    */
   iconTooltip?: string
   /**
+   * Lucide icon name rendered as a small corner marker over the leading
+   * icon — for a persistent *property* of the row that the icon itself
+   * can't carry, since the leading icon is usually the app's own artwork
+   * and must stay recognisable. Window Switcher marks apps opted out of
+   * key remapping while fullscreen. Pair it with `iconTooltip`, which
+   * already covers the same hover target, so the marker is explainable.
+   */
+  iconBadge?: string
+  /**
    * Absolute filesystem path the context menu's "Show in file explorer"
    * action targets. When set, the palette surfaces a Ctrl+K context menu
    * for this item; when undefined, the hotkey is a no-op for this row.

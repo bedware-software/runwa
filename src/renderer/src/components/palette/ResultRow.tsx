@@ -44,6 +44,7 @@ export function ResultRow({
   const hint = item.iconHint
   const showImage = isImageUrl(hint)
   const Icon = showImage ? null : iconFromHint(hint)
+  const BadgeIcon = item.iconBadge ? iconFromHint(item.iconBadge) : null
   return (
     <div
       ref={ref}
@@ -85,7 +86,7 @@ export function ResultRow({
       <Tooltip content={item.iconTooltip} className="shrink-0">
         <div
           className={cn(
-            'h-8 w-8 rounded-md flex items-center justify-center',
+            'relative h-8 w-8 rounded-md flex items-center justify-center',
             // Real app icons (PNGs with their own artwork) render on a
             // transparent tile so the extracted icon isn't boxed into a
             // coloured square. Lucide glyphs keep the tinted tile so they
@@ -106,6 +107,23 @@ export function ResultRow({
               className="h-8 w-8 object-contain"
               draggable={false}
             />
+          )}
+          {BadgeIcon && (
+            // Sits on the icon's corner rather than in the row's trailing
+            // chip lane: this qualifies the app, not the result, and the
+            // lane is already spoken for by `badge` and the alias keycap.
+            <span
+              aria-hidden
+              className={cn(
+                'absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border',
+                'flex items-center justify-center',
+                isSelected
+                  ? 'bg-accent text-accent-foreground border-accent-foreground/30'
+                  : 'bg-popover text-muted-foreground border-border'
+              )}
+            >
+              <BadgeIcon size={9} />
+            </span>
           )}
         </div>
       </Tooltip>

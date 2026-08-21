@@ -13,6 +13,10 @@ import {
   warmIconCache
 } from '../../icon-cache'
 import { isWindowIgnored, windowIgnoreStore } from './ignore-store'
+import { fullscreenBypassStore } from '../keyboard-remap/fullscreen-bypass-store'
+
+/** The fullscreen remap bypass is implemented in the Windows hook only. */
+const SUPPORTS_FULLSCREEN_BYPASS = process.platform === 'win32'
 
 const MANIFEST: ModuleManifest = {
   id: 'window-switcher',
@@ -112,6 +116,15 @@ export function createWindowSwitcherModule(): PaletteModule {
     // (e.g. some macOS UI-element windows) leave this undefined, so the
     // menu hides the reveal row rather than pointing at nothing.
     revealPath: w.executablePath,
+    // Marker for apps opted out of key remapping while fullscreen. Only
+    // meaningful on Windows, where the hook implements the bypass.
+    ...(SUPPORTS_FULLSCREEN_BYPASS && fullscreenBypassStore.has(w.processName)
+      ? {
+          iconBadge: 'keyboard-off',
+          iconTooltip:
+            'Key remapping is disabled while this app is fullscreen'
+        }
+      : {}),
     actionKind: 'focus-window',
     action: { nativeId: w.id } satisfies FocusAction,
     score

@@ -179,7 +179,11 @@ export function PaletteApp() {
     void window.electronAPI
       .keyboardRemapFullscreenBypassToggleItem(selectedItem)
       .then((enabled) => {
-        if (enabled !== null) setFullscreenBypass(enabled)
+        if (enabled === null) return
+        setFullscreenBypass(enabled)
+        // Re-run the search so the row's corner marker reflects the flip
+        // without the user reopening the palette.
+        refresh()
       })
       .catch((err) =>
         console.warn('[keyboard-remap] fullscreen bypass toggle failed', err)
