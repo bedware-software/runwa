@@ -21,7 +21,10 @@ use std::thread;
 
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyboardLayout, GetKeyboardLayoutList, SendInput, HKL, INPUT, INPUT_0,
@@ -30,11 +33,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_RWIN, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
-    PostMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
-    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
-    WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowRect,
+    GetWindowThreadProcessId, PostMessageW, PostThreadMessageW, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG,
+    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_XBUTTONDOWN,
 };
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
@@ -210,6 +214,26 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         WM_KEYUP | WM_SYSKEYUP => EventKind::KeyUp,
         _ => return CallNextHookEx(None, code, wparam, lparam),
     };
+
+    // Fullscreen bypass: a marked app owning the whole screen gets the raw
+    // keyboard. Checked before the modifier snapshot so a game's hot path is
+    // just "same foreground HWND, still fullscreen".
+    if remap_bypassed() {
+        let release = {
+            let mut slot = HOOK_SLOT.lock();
+            match slot.as_mut() {
+                // Idempotent — only the first event after the flip unwinds
+                // anything. Without it a layer that was mid-chord when the
+                // user alt-tabbed into the game stays logically held.
+                Some(active) => active.sm.reset(),
+                None => return CallNextHookEx(None, code, wparam, lparam),
+            }
+        };
+        if !release.is_empty() {
+            inject(release.as_slice());
+        }
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
 
     let key = vk_to_logical(info.vkCode);
     let ev = RawEvent {
@@ -509,6 +533,115 @@ fn current_modifier_mask() -> ModifierMask {
 
 unsafe fn is_down(vk: VIRTUAL_KEY) -> bool {
     (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0
+}
+
+// ---------------------------------------------------------------------------
+// Fullscreen bypass ("Disable remapping in fullscreen").
+//
+// A game wants the raw keyboard: Space is jump, not a hyper layer. The user
+// marks an app from the Window Switcher's Ctrl+K menu, and while a window of
+// that process is foreground *and* covering its monitor, the hook forwards
+// everything untouched.
+//
+// Gating on fullscreen rather than on focus alone is deliberate: the same exe
+// in a window — a launcher, a browser game, the settings screen — is an
+// ordinary app where the layers are still wanted.
+//
+// The verdict is recomputed per key event rather than driven off a WinEvent
+// hook because going fullscreen is not a foreground change: alt-enter never
+// moves focus, so a hook on `EVENT_SYSTEM_FOREGROUND` would miss it. Cost on
+// the hot path is one lock plus two local win32k calls; the one expensive
+// step — resolving a HWND to an executable name — is cached per HWND, and an
+// empty list short-circuits before any of it.
+
+/// Executable names, lowercased, that opt into the bypass.
+static BYPASS_PROCESSES: once_cell::sync::Lazy<Mutex<Vec<String>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Memoised `(foreground HWND, is it a marked process)`. Saves an
+/// `OpenProcess` + `QueryFullProcessImageNameW` round trip on every
+/// keystroke; invalidated whenever the list changes.
+static BYPASS_FG_CACHE: once_cell::sync::Lazy<Mutex<Option<(isize, bool)>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(None));
+
+/// Replace the marked-process list. Independent of hook lifetime — the JS
+/// side pushes the list at startup and on every edit, whether or not the
+/// keyboard-remap module happens to be running.
+pub(super) fn set_fullscreen_bypass_processes(names: Vec<String>) {
+    let normalised: Vec<String> = names
+        .into_iter()
+        .map(|name| name.trim().to_ascii_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect();
+    *BYPASS_PROCESSES.lock() = normalised;
+    // Whatever verdict is cached for the current foreground window was
+    // computed against the old list.
+    *BYPASS_FG_CACHE.lock() = None;
+}
+
+/// True while the foreground window belongs to a marked process and covers
+/// its monitor.
+fn remap_bypassed() -> bool {
+    if BYPASS_PROCESSES.lock().is_empty() {
+        return false;
+    }
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return false;
+    }
+    is_marked_process(hwnd) && covers_monitor(hwnd)
+}
+
+fn is_marked_process(hwnd: HWND) -> bool {
+    let raw = hwnd.0 as isize;
+    if let Some((cached_hwnd, marked)) = *BYPASS_FG_CACHE.lock() {
+        if cached_hwnd == raw {
+            return marked;
+        }
+    }
+
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    let marked = if pid == 0 {
+        false
+    } else {
+        let (name, _) = crate::windows_impl::get_process_info(pid);
+        let name = name.to_ascii_lowercase();
+        !name.is_empty() && BYPASS_PROCESSES.lock().iter().any(|entry| entry == &name)
+    };
+
+    *BYPASS_FG_CACHE.lock() = Some((raw, marked));
+    marked
+}
+
+/// Whether the window's bounds cover its monitor's full bounds. Catches
+/// both exclusive fullscreen and the borderless-windowed mode most modern
+/// games actually ship — the window is simply a borderless rect the size of
+/// the display. Compared with `>=`/`<=` rather than equality because some
+/// games overshoot the monitor rect by a pixel or two.
+fn covers_monitor(hwnd: HWND) -> bool {
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return false;
+        }
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_invalid() {
+            return false;
+        }
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return false;
+        }
+        let screen = info.rcMonitor;
+        rect.left <= screen.left
+            && rect.top <= screen.top
+            && rect.right >= screen.right
+            && rect.bottom >= screen.bottom
+    }
 }
 
 // ---------------------------------------------------------------------------

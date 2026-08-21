@@ -32,6 +32,7 @@ import { keyboardRemapService } from '../modules/keyboard-remap/service'
 import { flashcardsStore } from '../modules/flashcards/store'
 import { flashcardsService } from '../modules/flashcards/service'
 import { userCommandsStore } from '../modules/user-commands/store'
+import { fullscreenBypassStore } from '../modules/keyboard-remap/fullscreen-bypass-store'
 import { windowIgnoreStore } from '../modules/window-switcher/ignore-store'
 import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
@@ -351,6 +352,68 @@ export function registerIpcHandlers(): void {
       const rules = windowIgnoreStore.remove(ruleId)
       broadcastIgnoreRules(rules)
       return rules
+    }
+  )
+
+  // Keyboard-remap "Disable remapping in fullscreen" list.
+  //
+  // Same firewall as the ignore list above: the palette may only read and
+  // flip the row it's standing on, and only the Settings pane may read the
+  // whole list or prune it.
+  ipcMain.handle(
+    'keyboard-remap:fullscreen-bypass:item-state',
+    async (event, item: PaletteItem): Promise<boolean> => {
+      assertSenderWindow(
+        event,
+        paletteWindow.getBrowserWindow(),
+        'Fullscreen remap bypass'
+      )
+      const processName = bypassProcessNameFor(item)
+      return processName ? fullscreenBypassStore.has(processName) : false
+    }
+  )
+
+  ipcMain.handle(
+    'keyboard-remap:fullscreen-bypass:toggle-item',
+    async (event, item: PaletteItem): Promise<boolean | null> => {
+      assertSenderWindow(
+        event,
+        paletteWindow.getBrowserWindow(),
+        'Fullscreen remap bypass'
+      )
+      const processName = bypassProcessNameFor(item)
+      if (!processName) return null
+      try {
+        const { processes, enabled } = fullscreenBypassStore.toggle(processName)
+        broadcastFullscreenBypass(processes)
+        return enabled
+      } catch (err) {
+        console.warn('[keyboard-remap] fullscreen bypass toggle failed', err)
+        return null
+      }
+    }
+  )
+
+  ipcMain.handle('keyboard-remap:fullscreen-bypass:list', async (event) => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'Fullscreen remap bypass'
+    )
+    return fullscreenBypassStore.list()
+  })
+
+  ipcMain.handle(
+    'keyboard-remap:fullscreen-bypass:remove',
+    async (event, processName: string) => {
+      assertSenderWindow(
+        event,
+        settingsWindow.getBrowserWindow(),
+        'Fullscreen remap bypass'
+      )
+      const processes = fullscreenBypassStore.remove(processName)
+      broadcastFullscreenBypass(processes)
+      return processes
     }
   )
 
@@ -712,6 +775,28 @@ function broadcastIgnoreRules(rules: WindowIgnoreRule[]): void {
   const win = settingsWindow.getBrowserWindow()
   if (win && !win.isDestroyed()) {
     win.webContents.send('window-switcher:ignore-rules-changed', rules)
+  }
+}
+
+/**
+ * The executable a palette row belongs to, or null when the row isn't a
+ * window the bypass can be keyed on. window-switcher renders the executable
+ * name as the row subtitle — the same field the ignore list matches against.
+ */
+function bypassProcessNameFor(item: PaletteItem): string | null {
+  if (item?.moduleId !== 'window-switcher' || item.actionKind !== 'focus-window') {
+    return null
+  }
+  const processName = typeof item.subtitle === 'string' ? item.subtitle.trim() : ''
+  return processName || null
+}
+
+/** Keep an open Settings pane in step with a toggle made from the palette —
+ * same reasoning as `broadcastIgnoreRules`. */
+function broadcastFullscreenBypass(processes: string[]): void {
+  const win = settingsWindow.getBrowserWindow()
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('keyboard-remap:fullscreen-bypass-changed', processes)
   }
 }
 

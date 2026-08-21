@@ -252,7 +252,7 @@ fn get_cloak_state(hwnd: HWND) -> u32 {
     cloaked
 }
 
-fn get_process_info(pid: u32) -> (String, Option<String>) {
+pub(crate) fn get_process_info(pid: u32) -> (String, Option<String>) {
     unsafe {
         let handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
             Ok(h) => h,

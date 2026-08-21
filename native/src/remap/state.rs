@@ -663,7 +663,6 @@ impl StateMachine {
     /// trustworthy — see the macOS secure-input path, where the tap keeps
     /// receiving FlagsChanged but stops receiving KeyDown/KeyUp, so a
     /// trigger held across real typing looks like a bare tap.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub fn reset(&mut self) -> SmallVec<[SyntheticEvent; 8]> {
         let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
         // Covers `Comboing` — its release sequence lives on the machine.

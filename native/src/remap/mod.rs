@@ -107,6 +107,19 @@ pub fn stop(handle: HandleId) -> Result<(), String> {
 /// e.g. when the palette opens with the "force English" setting on. The
 /// language must already be installed as a system input source; we only
 /// activate, never add. No-op on unsupported platforms.
+/// Replace the list of executables that opt out of key remapping while
+/// they own the screen ("Disable remapping in fullscreen"). Windows-only:
+/// nothing else has the borderless-fullscreen-game problem this solves.
+/// Independent of hook lifetime — safe to call before the hook starts and
+/// while it runs.
+pub fn set_fullscreen_bypass_processes(process_names: Vec<String>) {
+    #[cfg(target_os = "windows")]
+    windows::set_fullscreen_bypass_processes(process_names);
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = process_names;
+}
+
 pub fn set_input_language(code: &str) -> Result<(), String> {
     let parsed = rules::LanguageCode::parse(code)?;
 

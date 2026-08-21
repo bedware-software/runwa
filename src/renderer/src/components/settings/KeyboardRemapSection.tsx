@@ -4,6 +4,8 @@ import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/t
 import { cn } from '@/lib/utils'
 import { Hotkey } from '../ui/Kbd'
 import { PermissionSection } from './PermissionSection'
+import { FullscreenBypassSection } from './FullscreenBypassSection'
+import { CURRENT_OS } from '@/lib/platform'
 
 /**
  * Dedicated settings section for the keyboard-remap module. Renders the
@@ -87,6 +89,8 @@ export function KeyboardRemapSection() {
       </div>
 
       <RulesList view={view} />
+
+      {CURRENT_OS === 'windows' && <FullscreenBypassSection />}
 
       <PermissionSection
         heading="Permissions"

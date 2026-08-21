@@ -17,6 +17,7 @@ import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { autoDarkModeService } from './modules/auto-dark-mode/service'
 import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
+import { fullscreenBypassStore } from './modules/keyboard-remap/fullscreen-bypass-store'
 import { windowIgnoreStore } from './modules/window-switcher/ignore-store'
 import { initAutoUpdater } from './auto-update'
 import { initLogging } from './logging'
@@ -167,6 +168,7 @@ app.whenReady().then(async () => {
   flashcardsStore.init()
   userCommandsStore.init()
   windowIgnoreStore.init()
+  fullscreenBypassStore.init()
 
   // 2. Module registry (cache hydrated from settings internally)
   moduleRegistry.init()

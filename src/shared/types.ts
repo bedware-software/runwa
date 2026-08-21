@@ -743,6 +743,23 @@ export interface ElectronAPI {
   ) => Promise<WindowIgnoreRule[]>
   windowSwitcherRemoveIgnoreRule: (ruleId: string) => Promise<WindowIgnoreRule[]>
 
+  /**
+   * Keyboard-remap "Disable remapping in fullscreen" list, keyed by
+   * executable name. Same firewall shape as the ignore list above: the
+   * palette may only read and flip the row it is standing on, while
+   * list/remove are the Settings-side management surface.
+   *
+   * `…ItemState` resolves false for rows that aren't window-switcher
+   * results; `…ToggleItem` resolves to the new state, or null when the row
+   * can't be marked or the write failed.
+   */
+  keyboardRemapFullscreenBypassItemState: (item: PaletteItem) => Promise<boolean>
+  keyboardRemapFullscreenBypassToggleItem: (
+    item: PaletteItem
+  ) => Promise<boolean | null>
+  keyboardRemapListFullscreenBypass: () => Promise<string[]>
+  keyboardRemapRemoveFullscreenBypass: (processName: string) => Promise<string[]>
+
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>
 
@@ -830,6 +847,10 @@ export interface ElectronAPI {
    */
   onWindowSwitcherIgnoreRulesChanged: (
     cb: (rules: WindowIgnoreRule[]) => void
+  ) => () => void
+
+  onKeyboardRemapFullscreenBypassChanged: (
+    cb: (processes: string[]) => void
   ) => () => void
 
   onSettingsChanged: (cb: (settings: Settings) => void) => () => void

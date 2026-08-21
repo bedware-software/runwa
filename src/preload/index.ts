@@ -112,6 +112,19 @@ const api: ElectronAPI = {
   windowSwitcherRemoveIgnoreRule: (ruleId: string): Promise<WindowIgnoreRule[]> =>
     ipcRenderer.invoke('window-switcher:ignore-rules:remove', ruleId),
 
+  // Keyboard-remap "Disable remapping in fullscreen" list — palette-side
+  // read/toggle for the highlighted row, plus the Settings-side pair.
+  keyboardRemapFullscreenBypassItemState: (item: PaletteItem): Promise<boolean> =>
+    ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:item-state', item),
+  keyboardRemapFullscreenBypassToggleItem: (
+    item: PaletteItem
+  ): Promise<boolean | null> =>
+    ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:toggle-item', item),
+  keyboardRemapListFullscreenBypass: (): Promise<string[]> =>
+    ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:list'),
+  keyboardRemapRemoveFullscreenBypass: (processName: string): Promise<string[]> =>
+    ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:remove', processName),
+
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>
     ipcRenderer.invoke('app:reveal-in-folder', absolutePath),
@@ -209,6 +222,19 @@ const api: ElectronAPI = {
     ipcRenderer.on('window-switcher:ignore-rules-changed', listener)
     return () => {
       ipcRenderer.removeListener('window-switcher:ignore-rules-changed', listener)
+    }
+  },
+
+  onKeyboardRemapFullscreenBypassChanged: (cb: (processes: string[]) => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      processes: string[]
+    ): void => {
+      cb(processes)
+    }
+    ipcRenderer.on('keyboard-remap:fullscreen-bypass-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('keyboard-remap:fullscreen-bypass-changed', listener)
     }
   },
 

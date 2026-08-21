@@ -370,6 +370,15 @@ pub fn set_input_language(code: String) -> napi::Result<()> {
     remap::set_input_language(&code).map_err(napi::Error::from_reason)
 }
 
+/// Replace the set of executables (bare file names, e.g. `cs2.exe`) that
+/// suspend keyboard remapping while one of their windows is foreground and
+/// covering its monitor. Windows-only; a no-op elsewhere. Called at startup
+/// and after every edit, so the list is always a full replacement.
+#[napi]
+pub fn set_remap_fullscreen_bypass(process_names: Vec<String>) {
+    remap::set_fullscreen_bypass_processes(process_names);
+}
+
 /// Read the Windows application appearance preference. Returns `"light"` or
 /// `"dark"`. The TypeScript system-theme driver uses an AppleScript backend on
 /// macOS, so this native API intentionally reports unsupported elsewhere.

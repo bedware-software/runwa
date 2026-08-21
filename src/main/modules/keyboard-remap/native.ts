@@ -13,6 +13,7 @@ interface NativeAddon {
   validateKeyboardRemap(rulesJson: string): void
   stopKeyboardRemap(handle: number): void
   setInputLanguage(code: string): void
+  setRemapFullscreenBypass(processNames: string[]): void
 }
 
 let addon: NativeAddon | null = null
@@ -70,4 +71,25 @@ export function stopKeyboardRemap(handle: number): void {
  */
 export function setInputLanguage(code: string): void {
   loadAddon().setInputLanguage(code)
+}
+
+/**
+ * Replace the set of executables (bare file names, e.g. `cs2.exe`) that
+ * suspend key remapping while one of their windows is foreground and
+ * covering its monitor. Always a full replacement, never a delta.
+ *
+ * Windows-only behaviour; the addon no-ops elsewhere. Tolerates a binary
+ * built before this export existed — the feature is inert rather than
+ * fatal, matching how the rest of the addon degrades.
+ */
+export function setRemapFullscreenBypass(processNames: string[]): void {
+  const mod = loadAddon()
+  if (typeof mod.setRemapFullscreenBypass !== 'function') {
+    console.warn(
+      '[keyboard-remap] native addon predates setRemapFullscreenBypass — ' +
+        '"Disable remapping in fullscreen" will have no effect until it is rebuilt'
+    )
+    return
+  }
+  mod.setRemapFullscreenBypass(processNames)
 }

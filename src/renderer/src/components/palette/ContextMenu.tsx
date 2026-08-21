@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { EyeOff, FolderOpen, RotateCcw, Tag } from '@/lib/lucide-icons'
+import { EyeOff, FolderOpen, Keyboard, RotateCcw, Tag } from '@/lib/lucide-icons'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
@@ -206,6 +206,27 @@ export function ignoreProcessAction(
     id: 'ignore-process',
     label: `Ignore all ${processName} windows`,
     Icon: EyeOff,
+    onActivate
+  }
+}
+
+/**
+ * Opt an application out of key remapping while it owns the screen — the
+ * escape hatch for games, where Space is jump and the hyper layer is in the
+ * way. Keyed on the executable, so it covers every window of that app, and
+ * only takes effect while the window is actually fullscreen: the same exe in
+ * a window (launcher, settings screen) keeps its layers.
+ */
+export function fullscreenBypassAction(
+  enabled: boolean,
+  onActivate: () => void
+): ContextMenuAction {
+  return {
+    id: 'fullscreen-remap-bypass',
+    label: enabled
+      ? 'Re-enable remapping in fullscreen'
+      : 'Disable remapping in fullscreen',
+    Icon: Keyboard,
     onActivate
   }
 }

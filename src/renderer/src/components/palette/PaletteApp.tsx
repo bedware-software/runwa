@@ -7,6 +7,7 @@ import { ResultsList } from './ResultsList'
 import { ModeBadge } from './ModeBadge'
 import {
   ContextMenu,
+  fullscreenBypassAction,
   ignoreProcessAction,
   ignoreWindowAction,
   resetDeckAction,
@@ -22,6 +23,10 @@ import { Kbd, Hotkey } from '../ui/Kbd'
 import { QuizView } from './QuizView'
 import { IS_MAC } from '@/lib/platform'
 import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
+import { CURRENT_OS } from '@/lib/platform'
+
+/** The fullscreen remap bypass is implemented in the Windows hook only. */
+const SUPPORTS_FULLSCREEN_BYPASS = CURRENT_OS === 'windows'
 
 /**
  * Module ids whose entries the user can attach a Ctrl+K alias to. Both
@@ -139,6 +144,48 @@ export function PaletteApp() {
   // Add an ignore rule for the highlighted window and drop it (plus any
   // sibling the rule now covers) from the list. Main derives the rule from
   // the row itself — see `window-switcher:ignore-item`.
+  // Whether the highlighted window's app is already opted out of remapping
+  // while fullscreen. Drives the Ctrl+K row's label, so it has to be known
+  // before the menu renders — hence a fetch on highlight rather than on open.
+  const [fullscreenBypass, setFullscreenBypass] = useState(false)
+
+  useEffect(() => {
+    if (!SUPPORTS_FULLSCREEN_BYPASS || !isWindowRow || !selectedItem) {
+      setFullscreenBypass(false)
+      return
+    }
+    let cancelled = false
+    void window.electronAPI
+      .keyboardRemapFullscreenBypassItemState(selectedItem)
+      .then((enabled) => {
+        if (!cancelled) setFullscreenBypass(enabled)
+      })
+      .catch(() => {
+        if (!cancelled) setFullscreenBypass(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // Same reasoning as `contextActions` below: the row identity is what
+    // matters, and `selectedItem` itself is a fresh object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWindowRow, selectedItem?.id])
+
+  // Flip "disable remapping in fullscreen" for the highlighted window's app.
+  // Main derives the executable from the row, same as the ignore actions.
+  const toggleFullscreenBypass = (): void => {
+    if (!selectedItem) return
+    setMenuOpen(false)
+    void window.electronAPI
+      .keyboardRemapFullscreenBypassToggleItem(selectedItem)
+      .then((enabled) => {
+        if (enabled !== null) setFullscreenBypass(enabled)
+      })
+      .catch((err) =>
+        console.warn('[keyboard-remap] fullscreen bypass toggle failed', err)
+      )
+  }
+
   const ignoreSelected = (scope: WindowIgnoreScope): void => {
     if (!selectedItem) return
     void window.electronAPI
@@ -169,6 +216,14 @@ export function PaletteApp() {
         actions.push(
           ignoreProcessAction(selectedItem.subtitle, () => ignoreSelected('process'))
         )
+        // Keyed on the executable, so it needs the same subtitle the
+        // process-wide ignore rule does. Windows-only: nothing else has the
+        // borderless-fullscreen-game problem, and the addon no-ops there.
+        if (SUPPORTS_FULLSCREEN_BYPASS) {
+          actions.push(
+            fullscreenBypassAction(fullscreenBypass, toggleFullscreenBypass)
+          )
+        }
       }
     }
     if (selectedDeckId) {
@@ -190,6 +245,7 @@ export function PaletteApp() {
     selectedItem?.subtitle,
     canSetAlias,
     isWindowRow,
+    fullscreenBypass,
     selectedDeckId
   ])
   const canOpenMenu = contextActions.length > 0
