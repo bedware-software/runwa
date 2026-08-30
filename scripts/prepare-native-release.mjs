@@ -227,7 +227,7 @@ function validateGeneratedPackage() {
   )
 }
 
-removeGeneratedBindings(nativeDir, 'native-release')
+removeGeneratedBindings(nativeDir, 'native-release', { includeLoader: true })
 if (process.platform === 'darwin') {
   buildUniversalMacAddon()
 } else {

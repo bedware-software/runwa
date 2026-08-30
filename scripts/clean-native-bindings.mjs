@@ -42,18 +42,28 @@ const GENERATED_BINARY = /^runwa-native\..+\.node$/
  * Remove generated bindings from `nativeDir`. Returns the file names that
  * were deleted. `label` prefixes the log lines so callers can keep their own
  * output convention.
+ *
+ * `includeLoader` also deletes the generated `index.js` / `index.d.ts` pair.
+ * It defaults to OFF, and that default is load-bearing: `napi build` only
+ * emits the JS loader when it actually compiles something, so on a cargo
+ * cache hit (`Finished in 0.05s`) a deleted loader is never regenerated. The
+ * addon then builds "successfully" with no `index.js`, electron-builder
+ * packages the `.node` without it, and the installed app dies on launch with
+ * `Cannot find module .../native/index.js`. The stale-binary hazard this
+ * whole script exists for is about the compiled binaries only, so the fast
+ * path leaves the loader alone — it is platform-generic and probes for
+ * whichever binary is present. Release builds pass `true`: they always
+ * rebuild from scratch and then assert the loader exists.
  */
 export function removeGeneratedBindings(
   nativeDir = defaultNativeDir,
-  label = 'native-clean'
+  label = 'native-clean',
+  { includeLoader = false } = {}
 ) {
+  const isLoader = (name) => name === 'index.js' || name === 'index.d.ts'
   const removed = []
   for (const name of readdirSync(nativeDir)) {
-    if (
-      !GENERATED_BINARY.test(name) &&
-      name !== 'index.js' &&
-      name !== 'index.d.ts'
-    ) {
+    if (!GENERATED_BINARY.test(name) && !(includeLoader && isLoader(name))) {
       continue
     }
     const generatedPath = join(nativeDir, name)
