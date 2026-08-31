@@ -193,6 +193,23 @@ class DesktopHintWindow {
     win.setBounds({ x, y, width: WIDTH, height: HEIGHT })
 
     if (!win.isVisible()) {
+      if (process.platform === 'darwin') {
+        // Re-assert all-Spaces membership, clearing it first so AppKit
+        // actually pushes the change. Same defect the palette hit: the
+        // WindowServer can pin the window to the Space it was first shown on
+        // while the NSWindow still reports the flag set, at which point a hint
+        // published from any other desktop is drawn where nobody can see it.
+        // Setting the identical value back is a no-op, so the false pass is
+        // what makes this work. See palette-window.ts for the measurements.
+        win.setVisibleOnAllWorkspaces(false, {
+          visibleOnFullScreen: false,
+          skipTransformProcessType: true
+        })
+        win.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true
+        })
+      }
       // Even with focusable:false, showInactive avoids a brief focus flash on
       // Windows that a plain show() can produce.
       win.showInactive()

@@ -147,6 +147,10 @@ class PaletteWindow {
    * palette when the *same* module's hotkey fires twice in a row, while a
    * different module's hotkey still switches into it. Cleared on hide(). */
   private currentModuleId: ModuleId | null = null
+  /** True while a rebuild triggered by the wrong-Space check is in flight.
+   * Bounds the repair to one attempt per open so a check that misreports
+   * can't ping-pong the window. */
+  private spaceRepairInFlight = false
   private moveStart: {
     x: number
     y: number
@@ -263,7 +267,17 @@ class PaletteWindow {
       // something reclaimed key status before the user could type — on macOS
       // that would mean the non-activating panel isn't holding key, which is
       // otherwise invisible without a debugger.
-      console.log(`[palette] blur: ${Date.now() - this.lastShownAt}ms since show`)
+      // `hide()` zeroes lastShownAt before ordering out, so a 0 here means the
+      // blur is the *consequence* of a dismissal rather than something
+      // stealing key status out from under a live palette. Printing the raw
+      // subtraction in that case yields a meaningless epoch-sized number.
+      console.log(
+        `[palette] blur: ${
+          this.lastShownAt === 0
+            ? 'follows hide()'
+            : `${Date.now() - this.lastShownAt}ms since show`
+        }`
+      )
 
       // Early-blur grace: when the activation hotkey was triggered by an
       // injected chord (AutoHotkey `*w::^!s` with Space still physically
@@ -410,14 +424,26 @@ class PaletteWindow {
     this.currentModuleId = moduleId
     win.setOpacity(0)
     if (process.platform === 'darwin') {
-      // Re-assert all-Spaces membership on every open. The collection
-      // behavior is set once at create() time, but WindowServer drops it on
-      // some display-topology changes (sleep/wake, plugging or unplugging an
-      // external monitor). Once it's gone the palette is pinned to the Space
-      // it was created on, which is the sticky "always lands on Desktop 1"
-      // state. `skipTransformProcessType` keeps this from re-running
-      // TransformProcessType — that briefly hides the window and is only
-      // needed the first time.
+      // Re-assert all-Spaces membership on every open — clearing it first.
+      //
+      // The clear is not redundant. Electron's setVisibleOnAllWorkspaces ORs
+      // NSWindowCollectionBehaviorCanJoinAllSpaces into the window's current
+      // collectionBehavior and writes the result back, so when the bit is
+      // already set the value is unchanged and AppKit has nothing new to push
+      // to the WindowServer. Those two states really do drift: measured on a
+      // live instance that had been up for hours, isVisibleOnAllWorkspaces()
+      // reported true while the WindowServer had the palette on Space 1 and
+      // nowhere else. That is what makes the palette render on Desktop 1 no
+      // matter which desktop the user is on, and why a plain re-assert never
+      // repaired it. Going false -> true forces a genuine state change.
+      //
+      // `skipTransformProcessType` keeps this off the TransformProcessType
+      // path, which briefly hides the window and is only needed on the first
+      // call (create() makes that one).
+      win.setVisibleOnAllWorkspaces(false, {
+        visibleOnFullScreen: false,
+        skipTransformProcessType: true
+      })
       win.setVisibleOnAllWorkspaces(true, {
         visibleOnFullScreen: true,
         skipTransformProcessType: true
@@ -483,6 +509,7 @@ class PaletteWindow {
       // don't re-reveal it.
       if (!win.isVisible()) return
       win.setOpacity(1)
+      if (process.platform === 'darwin') this.ensureOnCurrentSpace(moduleId)
     }
 
     // Wait for the renderer to signal it has fresh results.
@@ -586,6 +613,61 @@ class PaletteWindow {
       this.hide(true)
       return
     }
+    this.show(moduleId)
+  }
+
+  /**
+   * macOS: confirm the palette actually landed on the Space the user is
+   * looking at, and rebuild it if it didn't.
+   *
+   * Belt to the forced all-Spaces toggle's braces. Once the WindowServer has
+   * pinned a window to a single Space, nothing we set on that NSWindow is
+   * guaranteed to move it — but a window created *now* always joins the
+   * current Space. That's the same escape hatch show() already uses for
+   * Windows virtual-desktop affinity, and it's cheap here for the same
+   * reason: the renderer is a plain Vite bundle with no async init.
+   *
+   * Called from reveal(), which runs at least one event-loop turn after
+   * showInactive(). That matters — the WindowServer needs a turn to register
+   * the window, so this check reads false synchronously after the show call
+   * and true from the next turn onward.
+   */
+  private ensureOnCurrentSpace(moduleId: ModuleId): void {
+    const win = this.window
+    if (!win || win.isDestroyed() || !win.isVisible()) return
+
+    let onCurrentSpace: boolean
+    try {
+      // A pid-only id asks "does this process have any window on the current
+      // Space?". Coarser than checking the palette's own window — a Desktop
+      // Hint visible at the same moment would also answer yes — but macOS
+      // gives no public way to get a BrowserWindow's CGWindowID, and in the
+      // failure mode we care about every one of our windows is stranded on
+      // the same wrong Space anyway.
+      onCurrentSpace = isWindowOnCurrentDesktop(String(process.pid))
+    } catch (err) {
+      console.warn('[palette] Space check failed', err)
+      return
+    }
+
+    if (onCurrentSpace) {
+      this.spaceRepairInFlight = false
+      return
+    }
+    if (this.spaceRepairInFlight) {
+      console.warn(
+        '[palette] still off-Space after a rebuild — leaving it be for this open'
+      )
+      this.spaceRepairInFlight = false
+      return
+    }
+
+    console.warn(
+      '[palette] opened on another Space (all-Spaces membership lost) — rebuilding'
+    )
+    this.spaceRepairInFlight = true
+    win.destroy()
+    this.window = null
     this.show(moduleId)
   }
 
