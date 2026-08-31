@@ -12,6 +12,7 @@ import {
   ignoreWindowAction,
   resetDeckAction,
   revealAction,
+  runAsAdminAction,
   setAliasAction
 } from './ContextMenu'
 import { ConfirmDialog } from '../ConfirmDialog'
@@ -27,6 +28,12 @@ import { CURRENT_OS } from '@/lib/platform'
 
 /** The fullscreen remap bypass is implemented in the Windows hook only. */
 const SUPPORTS_FULLSCREEN_BYPASS = CURRENT_OS === 'windows'
+
+/**
+ * Elevation is a Windows concept, and so is the launcher work behind this
+ * toggle — macOS apps started from runwa already run as the user.
+ */
+const SUPPORTS_RUN_AS_ADMIN = CURRENT_OS === 'windows'
 
 /**
  * Module ids whose entries the user can attach a Ctrl+K alias to. Both
@@ -106,6 +113,7 @@ export function PaletteApp() {
   const [draftSaving, setDraftSaving] = useState(false)
 
   const setModuleAlias = useSettingsStore((s) => s.setModuleAlias)
+  const setModuleElevated = useSettingsStore((s) => s.setModuleElevated)
   const setModuleConfig = useSettingsStore((s) => s.setModuleConfig)
 
   // Window-switcher exposes a "current desktop only" filter that the
@@ -140,6 +148,35 @@ export function PaletteApp() {
       ? ((selectedItem.action as { deckId: string }).deckId)
       : null
   const isWindowRow = isWindowSwitcherRow(selectedItem)
+
+  // "Always run as administrator" applies to app rows that have a
+  // filesystem path behind them. UWP entries are addressed by AUMID, run as
+  // the interactive user by construction, and carry no `revealPath` — the
+  // same signal the reveal row already keys off.
+  const canRunAsAdmin =
+    SUPPORTS_RUN_AS_ADMIN &&
+    !!selectedItem &&
+    selectedItem.moduleId === 'app-search' &&
+    !!selectedItem.revealPath
+  const runsAsAdmin =
+    !!selectedItem &&
+    (modules
+      .find((m) => m.id === selectedItem.moduleId)
+      ?.elevated?.includes(selectedItem.id) ??
+      false)
+
+  // Flip the elevated-launch mark for the highlighted app. The list lives in
+  // the module's settings next to its aliases, so the settings store is both
+  // the writer and the source the label above reads back from.
+  const toggleRunAsAdmin = (): void => {
+    if (!selectedItem) return
+    setMenuOpen(false)
+    void setModuleElevated(selectedItem.moduleId, selectedItem.id, !runsAsAdmin)
+      // Re-run the search so the row's corner marker reflects the flip
+      // without the user reopening the palette.
+      .then(() => refresh({ preserveSelection: true }))
+      .catch((err) => console.warn('[app-search] run-as-admin toggle failed', err))
+  }
 
   // Add an ignore rule for the highlighted window and drop it (plus any
   // sibling the rule now covers) from the list. Main derives the rule from
@@ -210,6 +247,9 @@ export function PaletteApp() {
         })
       )
     }
+    if (canRunAsAdmin) {
+      actions.push(runAsAdminAction(runsAsAdmin, toggleRunAsAdmin))
+    }
     if (selectedItem?.revealPath) actions.push(revealAction(selectedItem.revealPath))
     if (isWindowRow) {
       actions.push(ignoreWindowAction(() => ignoreSelected('window')))
@@ -248,6 +288,8 @@ export function PaletteApp() {
     selectedItem?.alias,
     selectedItem?.subtitle,
     canSetAlias,
+    canRunAsAdmin,
+    runsAsAdmin,
     isWindowRow,
     fullscreenBypass,
     selectedDeckId

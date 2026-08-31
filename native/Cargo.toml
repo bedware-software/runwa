@@ -31,6 +31,9 @@ windows = { version = "0.58", features = [
   "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_ProcessStatus",
+  # Token duplication for the de-elevated launcher: reading our own
+  # elevation state and borrowing the shell's primary token.
+  "Win32_Security",
 ] }
 # Ciantic/VirtualDesktopAccessor — the Rust crate tracks Windows 11's
 # undocumented IVirtualDesktopManagerInternal COM interface. Used by

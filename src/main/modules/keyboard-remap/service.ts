@@ -1,8 +1,9 @@
-import { app, shell } from 'electron'
+import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import type { KeyboardRemapRulesView } from '@shared/types'
 import { startKeyboardRemap, stopKeyboardRemap, validateKeyboardRemap } from './native'
+import { openPathAsUser } from '../../elevation'
 import { RULES_TEMPLATE } from './rules-template'
 import { buildRulesView } from './rules-view'
 import {
@@ -73,8 +74,7 @@ class KeyboardRemapService {
     const p = this.rulesFilePath()
     // Make sure the file exists before asking the OS to open it.
     this.loadOrInitRulesFile()
-    const err = await shell.openPath(p)
-    if (err) console.warn('[keyboard-remap] openPath returned error:', err)
+    await openPathAsUser(p)
   }
 
   /**

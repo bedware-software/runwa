@@ -132,6 +132,10 @@ export function createAppSearchModule(): PaletteModule {
   // Every enumeration call caches internally; this map is a process-wide
   // lookup so `execute()` can find the entry by id without re-enumerating.
   const entriesById = new Map<string, AppEntry>()
+  // Ids the user marked "run as administrator". Refreshed on every search
+  // from the context, for the same reason `entriesById` is: `execute()` gets
+  // an item, not a context, and a search always precedes an execute.
+  let elevatedIds = new Set<string>()
 
   const toItem = (
     entry: AppEntry,
@@ -157,6 +161,16 @@ export function createAppSearchModule(): PaletteModule {
     // AUMID and have no stable folder to open, so we leave revealPath
     // undefined for them (the menu hotkey then becomes a no-op per row).
     revealPath: entry.filePath,
+    // Marker for apps the user opted into an elevated launch for. Everything
+    // else runwa starts runs as the plain interactive user, so the marked
+    // rows are the exception worth showing — same reasoning as the window
+    // switcher's fullscreen-bypass badge.
+    ...(elevatedIds.has(entry.id)
+      ? {
+          iconBadge: 'shield',
+          iconTooltip: 'Runwa launches this app as administrator'
+        }
+      : {}),
     alias,
     autoExecute: autoExecute || undefined,
     actionKind: 'launch-app',
@@ -190,6 +204,7 @@ export function createAppSearchModule(): PaletteModule {
       // Refresh the id→entry map for execute().
       entriesById.clear()
       for (const a of apps) entriesById.set(a.id, a)
+      elevatedIds = new Set(context.elevated ?? [])
 
       const aliases = context.aliases ?? {}
       const trimmed = query.trim()
@@ -277,7 +292,7 @@ export function createAppSearchModule(): PaletteModule {
       if (item.action.newInstance !== true && tryFocusRunningInstance(entry)) {
         return { dismissPalette: true }
       }
-      const ok = await launchApp(entry)
+      const ok = await launchApp(entry, { asAdmin: elevatedIds.has(entry.id) })
       if (!ok) invalidateAppCache()
       return { dismissPalette: ok }
     },

@@ -30,6 +30,7 @@ import Replace from 'lucide-react/dist/esm/icons/replace.js'
 import Rocket from 'lucide-react/dist/esm/icons/rocket.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Settings from 'lucide-react/dist/esm/icons/settings.js'
+import Shield from 'lucide-react/dist/esm/icons/shield.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
 import SunMoon from 'lucide-react/dist/esm/icons/sun-moon.js'
@@ -61,6 +62,7 @@ const ICONS_BY_HINT = {
   replace: Replace,
   rocket: Rocket,
   settings: Settings,
+  shield: Shield,
   square: Square,
   'sun-moon': SunMoon,
   terminal: Terminal
@@ -105,6 +107,7 @@ export {
   Plus,
   RefreshCw,
   RotateCcw,
+  Shield,
   SlidersHorizontal,
   Square,
   SunMoon,

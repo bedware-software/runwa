@@ -1,4 +1,4 @@
-import { clipboard, shell } from 'electron'
+import { clipboard } from 'electron'
 import type {
   FlashcardsStartQuizPayload,
   ModuleManifest,
@@ -9,6 +9,7 @@ import { paletteWindow } from '../../palette-window'
 import { flashcardsService } from './service'
 import { flashcardsStore } from './store'
 import { isDue } from './srs'
+import { openPathAsUser } from '../../elevation'
 
 /**
  * Flashcards — search dialog over the on-disk deck folder. Selecting a
@@ -249,7 +250,7 @@ export function createFlashcardsModule(): PaletteModule {
       if (key === CONFIG_OPEN_FOLDER) {
         flashcardsService.ensureFolder()
         try {
-          await shell.openPath(flashcardsService.decksFolder())
+          await openPathAsUser(flashcardsService.decksFolder())
         } catch (err) {
           console.warn('[flashcards] failed to open decks folder', err)
         }
@@ -261,11 +262,11 @@ export function createFlashcardsModule(): PaletteModule {
       }
       if (key === ACTION_EDIT_PROMPT) {
         // Make sure the file exists before handing it to the system
-        // editor — `shell.openPath` on a missing path is a silent
+        // editor — opening a missing path is a silent
         // no-op on macOS.
         flashcardsService.ensureLlmPromptFile()
         try {
-          await shell.openPath(flashcardsService.llmPromptPath())
+          await openPathAsUser(flashcardsService.llmPromptPath())
         } catch (err) {
           console.warn('[flashcards] failed to open LLM prompt file', err)
         }

@@ -270,6 +270,70 @@ pub fn get_file_icon(path: String, icon_index: Option<i32>) -> napi::Result<Opti
     }
 }
 
+/// Windows-only: true when runwa is running with an elevated (administrator)
+/// token. Everything a process launches inherits its token, so the app
+/// launcher has to know this to decide whether it must actively drop back to
+/// the interactive user. Always false elsewhere — no equivalent split exists.
+#[napi]
+pub fn is_process_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::is_process_elevated()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+/// Windows-only: start `exe` as the plain interactive user, whatever token we
+/// hold ourselves, by borrowing a primary token from the desktop shell.
+/// Returns the new process id. `args` is a raw command-line tail (as stored in
+/// a shortcut), `cwd` the working directory to start in.
+///
+/// Only usable from an elevated process — creating a process with someone
+/// else's token needs SE_IMPERSONATE_NAME, which an ordinary user token
+/// doesn't carry. Callers that aren't elevated have nothing to fix and should
+/// launch through the shell as usual.
+#[napi]
+pub fn launch_as_shell_user(
+    exe: String,
+    args: Option<String>,
+    cwd: Option<String>,
+) -> napi::Result<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::launch_as_shell_user(&exe, args.as_deref(), cwd.as_deref())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (exe, args, cwd);
+        Err(napi::Error::from_reason(
+            "launch_as_shell_user is Windows-only",
+        ))
+    }
+}
+
+/// Windows-only: start `path` elevated via the shell's `runas` verb — the
+/// per-app "run as administrator" opt-in. Raises a UAC prompt when runwa
+/// isn't elevated, and inherits our own elevated token when it is.
+#[napi]
+pub fn launch_elevated(
+    path: String,
+    args: Option<String>,
+    cwd: Option<String>,
+) -> napi::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::launch_elevated(&path, args.as_deref(), cwd.as_deref())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (path, args, cwd);
+        Err(napi::Error::from_reason("launch_elevated is Windows-only"))
+    }
+}
+
 /// macOS-only: true if this process has been granted Accessibility in
 /// System Settings → Privacy & Security → Accessibility. Always true on
 /// other platforms (no equivalent gate exists there).

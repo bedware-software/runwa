@@ -156,6 +156,12 @@ export interface ModuleMeta extends ModuleManifest {
   config: Record<string, ModuleConfigValue>
   /** User-assigned aliases keyed by module-specific stable ids. */
   aliases: Record<string, string>
+  /**
+   * Item ids marked "run as administrator", same keys as `aliases`. Read by
+   * the palette so the Ctrl+K row knows which way its label points and the
+   * result row can carry the marker.
+   */
+  elevated: string[]
 }
 
 export interface PaletteItem {
@@ -289,6 +295,13 @@ export interface ModuleSettings {
    * surface aliases simply leave this empty.
    */
   aliases?: Record<string, string>
+  /**
+   * Item ids the user asked to launch with an elevated token, keyed the same
+   * way as `aliases`. Windows + app-search only: everything runwa launches
+   * runs as the plain interactive user, and this is the per-app opt-out of
+   * that — the equivalent of Explorer's "Run as administrator".
+   */
+  elevated?: string[]
 }
 
 /**
@@ -695,6 +708,17 @@ export interface ElectronAPI {
     moduleId: ModuleId,
     itemId: string,
     alias: string | null
+  ) => Promise<Settings>
+  /**
+   * Mark a module's item as "launch with an elevated token", or clear the
+   * mark. Same per-item, per-module shape as the alias setter above, and the
+   * same trust level: the palette is allowed to write it for the row the
+   * user is standing on.
+   */
+  settingsSetModuleElevated: (
+    moduleId: ModuleId,
+    itemId: string,
+    elevated: boolean
   ) => Promise<Settings>
 
   // User Commands — dedicated CRUD keeps arbitrary shell text out of the

@@ -1,15 +1,20 @@
 use crate::{FocusTopmostResult, NativeWindow, WindowIcon};
 use std::cell::OnceCell;
 use std::ffi::c_void;
-use windows::core::PWSTR;
+use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, BOOL, COLORREF, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
+    CloseHandle, BOOL, COLORREF, HANDLE, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetObjectW,
     MonitorFromWindow, ReleaseDC, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
     DIB_RGB_COLORS, HBITMAP, HGDIOBJ, MONITOR_DEFAULTTONULL,
+};
+use windows::Win32::Security::{
+    DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TokenElevation, TokenPrimary,
+    TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE,
+    TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER,
@@ -20,20 +25,23 @@ use windows::Win32::System::Registry::{
     KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_VALUE_TYPE,
 };
 use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    AttachThreadInput, CreateProcessWithTokenW, GetCurrentProcess, GetCurrentThreadId, OpenProcess,
+    OpenProcessToken, QueryFullProcessImageNameW, CREATE_PROCESS_LOGON_FLAGS,
+    CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW,
 };
 use windows::Win32::UI::Shell::{
-    DesktopWallpaper, IDesktopWallpaper, IVirtualDesktopManager, VirtualDesktopManager,
+    DesktopWallpaper, IDesktopWallpaper, IVirtualDesktopManager, ShellExecuteExW,
+    VirtualDesktopManager, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, DrawIconEx, EnumChildWindows, EnumWindows, GetClassLongPtrW, GetClassNameW,
-    GetForegroundWindow, GetIconInfo, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    PostMessageW, SendMessageTimeoutW, SetForegroundWindow, ShowWindow, DI_NORMAL, GCL_HICON,
-    GCL_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, HWND_BROADCAST, ICONINFO, ICON_BIG,
-    ICON_SMALL, ICON_SMALL2, SMTO_ABORTIFHUNG, SW_RESTORE, WM_CLOSE, WM_GETICON, WM_SETTINGCHANGE,
-    WS_EX_TOOLWINDOW,
+    GetForegroundWindow, GetIconInfo, GetShellWindow, GetTopWindow, GetWindow, GetWindowLongW,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, PostMessageW, SendMessageTimeoutW, SetForegroundWindow, ShowWindow, DI_NORMAL,
+    GCL_HICON, GCL_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT, GW_OWNER, HICON, HWND_BROADCAST, ICONINFO,
+    ICON_BIG, ICON_SMALL, ICON_SMALL2, SMTO_ABORTIFHUNG, SW_RESTORE, SW_SHOWNORMAL, WM_CLOSE,
+    WM_GETICON, WM_SETTINGCHANGE, WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
@@ -1237,6 +1245,240 @@ pub fn set_desktop_background_color(value: &str) -> napi::Result<()> {
     }
 
     Ok(())
+}
+
+// ─── Launching at the right elevation ──────────────────────────────────────
+//
+// A child process inherits the launcher's token, so everything runwa starts
+// while it is elevated runs as administrator too. That is wrong for an app
+// launcher: elevation is something runwa needs for its own hooks (remapping
+// and desktop moves have to out-rank an elevated foreground window), not
+// something the apps it starts asked for. The damage is real — a Chromium
+// app's profile ends up half-written by a high-integrity process, single
+// instance handoff stops working across the integrity boundary because UIPI
+// drops the medium-IL window message, and screen capture misbehaves.
+//
+// So the launcher drops back down: it borrows a primary token from the
+// desktop shell (Explorer runs as the plain interactive user) and creates the
+// process with that. `launch_elevated` is the deliberate opposite, for the
+// per-app "run as administrator" opt-in.
+
+/// RAII wrapper for a kernel handle. Same shape as `RegistryKey` above — the
+/// token dance below opens three handles across fallible steps, and a guard
+/// is the only way to close them on every early return.
+struct OwnedHandle(HANDLE);
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        if !self.0.is_invalid() {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// True when this process holds an elevated (administrator) token. Note this
+/// is about the *token*, not group membership: an admin user's ordinary
+/// filtered token reports false, which is exactly the distinction the
+/// launcher cares about.
+pub fn is_process_elevated() -> bool {
+    unsafe {
+        let mut raw = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw).is_err() {
+            return false;
+        }
+        let token = OwnedHandle(raw);
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut returned = 0u32;
+        let ok = GetTokenInformation(
+            token.0,
+            TokenElevation,
+            Some(&mut elevation as *mut TOKEN_ELEVATION as *mut c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+        .is_ok();
+        ok && elevation.TokenIsElevated != 0
+    }
+}
+
+/// A primary token copied from the process that owns the desktop shell
+/// window — i.e. the Explorer the user logged into, which runs with their
+/// ordinary filtered token. `CreateProcessWithTokenW` needs
+/// SE_IMPERSONATE_NAME, which we have precisely because we are elevated.
+fn shell_user_token() -> napi::Result<OwnedHandle> {
+    unsafe {
+        let shell_hwnd = GetShellWindow();
+        if shell_hwnd.is_invalid() {
+            return Err(napi::Error::from_reason(
+                "No desktop shell window: can't borrow the interactive user's token",
+            ));
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(shell_hwnd, Some(&mut pid));
+        if pid == 0 {
+            return Err(napi::Error::from_reason(
+                "The desktop shell window reported no owning process",
+            ));
+        }
+
+        let process = OwnedHandle(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).map_err(|error| {
+                napi::Error::from_reason(format!("Opening the desktop shell process failed: {error}"))
+            })?,
+        );
+
+        let mut raw = HANDLE::default();
+        OpenProcessToken(process.0, TOKEN_DUPLICATE | TOKEN_QUERY, &mut raw).map_err(|error| {
+            napi::Error::from_reason(format!("Opening the desktop shell's token failed: {error}"))
+        })?;
+        let shell_token = OwnedHandle(raw);
+
+        let mut primary = HANDLE::default();
+        DuplicateTokenEx(
+            shell_token.0,
+            TOKEN_ASSIGN_PRIMARY
+                | TOKEN_DUPLICATE
+                | TOKEN_QUERY
+                | TOKEN_ADJUST_DEFAULT
+                | TOKEN_ADJUST_SESSIONID,
+            None,
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut primary,
+        )
+        .map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Duplicating the desktop shell's token failed: {error}"
+            ))
+        })?;
+
+        Ok(OwnedHandle(primary))
+    }
+}
+
+/// Our own environment, minus `__COMPAT_LAYER`. Windows sets that variable on
+/// a process launched through an AppCompat layer and children inherit it — so
+/// a runwa carrying `RunAsAdmin` there would hand its own elevation request
+/// straight to the app we just went to the trouble of de-elevating. Sorted
+/// case-insensitively, as an environment block is expected to be.
+fn environment_block() -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut entries: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os()
+        .filter(|(name, _)| !name.to_string_lossy().eq_ignore_ascii_case("__COMPAT_LAYER"))
+        .collect();
+    entries.sort_by_key(|(name, _)| name.to_string_lossy().to_lowercase());
+
+    let mut block: Vec<u16> = Vec::new();
+    for (name, value) in entries {
+        block.extend(name.encode_wide());
+        block.push(u16::from(b'='));
+        block.extend(value.encode_wide());
+        block.push(0);
+    }
+    // Two terminators: one for the last entry, one for the block itself. An
+    // empty environment still needs the pair, hence the unconditional push.
+    block.push(0);
+    block
+}
+
+/// `"<exe>" <args>` — `lpCommandLine` has to carry argv[0] itself, and the
+/// arguments arrive verbatim from the shortcut that named them, so they are
+/// passed through unquoted.
+fn command_line(exe: &str, args: Option<&str>) -> Vec<u16> {
+    let mut line = String::with_capacity(exe.len() + 8);
+    line.push('"');
+    line.push_str(exe);
+    line.push('"');
+    if let Some(args) = args.map(str::trim).filter(|a| !a.is_empty()) {
+        line.push(' ');
+        line.push_str(args);
+    }
+    to_wide(&line)
+}
+
+/// Start `exe` as the interactive user, dropping our elevation. Returns the
+/// new process id. The handles we get back are closed immediately: the child
+/// is detached by design, exactly like the `shell.openPath` path it replaces.
+pub fn launch_as_shell_user(
+    exe: &str,
+    args: Option<&str>,
+    cwd: Option<&str>,
+) -> napi::Result<u32> {
+    let token = shell_user_token()?;
+    let application = to_wide(exe);
+    let mut command = command_line(exe, args);
+    let directory = cwd.map(to_wide);
+    let mut environment = environment_block();
+
+    let startup = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        ..Default::default()
+    };
+    let mut process = PROCESS_INFORMATION::default();
+
+    unsafe {
+        CreateProcessWithTokenW(
+            token.0,
+            CREATE_PROCESS_LOGON_FLAGS(0),
+            PCWSTR(application.as_ptr()),
+            PWSTR(command.as_mut_ptr()),
+            CREATE_UNICODE_ENVIRONMENT,
+            Some(environment.as_mut_ptr() as *const c_void),
+            directory
+                .as_ref()
+                .map_or(PCWSTR::null(), |dir| PCWSTR(dir.as_ptr())),
+            &startup,
+            &mut process,
+        )
+        .map_err(|error| {
+            napi::Error::from_reason(format!("Launching {exe} as the current user failed: {error}"))
+        })?;
+
+        let _ = CloseHandle(process.hThread);
+        let _ = CloseHandle(process.hProcess);
+    }
+
+    Ok(process.dwProcessId)
+}
+
+/// Start `path` through the shell's `runas` verb — the same thing the
+/// Explorer context menu's "Run as administrator" does. Raises a UAC prompt
+/// when we are not already elevated, and silently inherits our own elevated
+/// token when we are.
+pub fn launch_elevated(path: &str, args: Option<&str>, cwd: Option<&str>) -> napi::Result<()> {
+    let verb = to_wide("runas");
+    let file = to_wide(path);
+    let parameters = args.map(str::trim).filter(|a| !a.is_empty()).map(to_wide);
+    let directory = cwd.map(to_wide);
+
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        // NOASYNC keeps the shell call on this thread rather than handing it
+        // to a worker that may outlive it; NO_UI suppresses the shell's own
+        // error box so the failure comes back to us as a value instead.
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: parameters
+            .as_ref()
+            .map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        lpDirectory: directory
+            .as_ref()
+            .map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|error| {
+        napi::Error::from_reason(format!("Launching {path} as administrator failed: {error}"))
+    })
 }
 
 #[cfg(test)]

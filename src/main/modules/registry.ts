@@ -102,7 +102,8 @@ class ModuleRegistry {
         enabled: s.enabled,
         directLaunchHotkey: s.directLaunchHotkey,
         config: this.buildConfig(m),
-        aliases: { ...(s.aliases ?? {}) }
+        aliases: { ...(s.aliases ?? {}) },
+        elevated: [...(s.elevated ?? [])]
       })
     }
     return results
@@ -111,6 +112,11 @@ class ModuleRegistry {
   /** Fresh snapshot of a module's aliases map for SearchContext. */
   private buildAliases(m: PaletteModule): Record<string, string> {
     return { ...(this.moduleSettingsCache.get(m.manifest.id)?.aliases ?? {}) }
+  }
+
+  /** Fresh snapshot of a module's "launch elevated" ids for SearchContext. */
+  private buildElevated(m: PaletteModule): string[] {
+    return [...(this.moduleSettingsCache.get(m.manifest.id)?.elevated ?? [])]
   }
 
   async search(req: SearchRequest): Promise<SearchResult> {
@@ -145,6 +151,7 @@ class ModuleRegistry {
         const raw = await scopedModule.search(query, controller.signal, {
           config: this.buildConfig(scopedModule),
           aliases: this.buildAliases(scopedModule),
+          elevated: this.buildElevated(scopedModule),
           focusedApp: focusContext.get()
         })
         items = raw.map<PaletteItem>((it) => ({

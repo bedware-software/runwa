@@ -132,6 +132,12 @@ export function registerIpcHandlers(): void {
       settingsStore.patchModuleAlias(moduleId, itemId, alias)
   )
 
+  ipcMain.handle(
+    'settings:setModuleElevated',
+    async (_e, moduleId: ModuleId, itemId: string, elevated: boolean) =>
+      settingsStore.patchModuleElevated(moduleId, itemId, elevated === true)
+  )
+
   // User Commands — command ids are created in main and writes are validated
   // by the dedicated store. Keeping this separate from generic settings
   // patches prevents arbitrary renderer-shaped data entering the executable

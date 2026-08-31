@@ -202,7 +202,12 @@ function validateGeneratedPackage() {
     'startKeyboardRemap',
     'getSystemTheme',
     'setSystemTheme',
-    'setDesktopBackgroundColor'
+    'setDesktopBackgroundColor',
+    // The launcher degrades silently without these — apps would go back to
+    // inheriting runwa's elevated token, which is exactly the bug the
+    // de-elevated launch path exists to prevent. Fail the build instead.
+    'isProcessElevated',
+    'launchAsShellUser'
   ]
   const missingExports = requiredExports.filter(
     (name) => typeof binding[name] !== 'function'

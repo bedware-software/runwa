@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { EyeOff, FolderOpen, Keyboard, RotateCcw, Tag } from '@/lib/lucide-icons'
+import {
+  EyeOff,
+  FolderOpen,
+  Keyboard,
+  RotateCcw,
+  Shield,
+  Tag
+} from '@/lib/lucide-icons'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
@@ -227,6 +234,27 @@ export function fullscreenBypassAction(
       ? 'Re-enable remapping in fullscreen'
       : 'Disable remapping in fullscreen',
     Icon: Keyboard,
+    onActivate
+  }
+}
+
+/**
+ * App Search: launch this app with an elevated token. Everything runwa
+ * starts runs as the plain interactive user regardless of runwa's own
+ * elevation, so this is the per-app opt-in for the few tools that genuinely
+ * want administrator — the palette's version of Explorer's "Run as
+ * administrator", except that it sticks.
+ */
+export function runAsAdminAction(
+  enabled: boolean,
+  onActivate: () => void
+): ContextMenuAction {
+  return {
+    id: 'run-as-admin',
+    label: enabled
+      ? 'Stop running as administrator'
+      : 'Always run as administrator',
+    Icon: Shield,
     onActivate
   }
 }

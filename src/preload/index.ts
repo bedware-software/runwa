@@ -68,6 +68,12 @@ const api: ElectronAPI = {
     alias: string | null
   ): Promise<Settings> =>
     ipcRenderer.invoke('settings:setModuleAlias', moduleId, itemId, alias),
+  settingsSetModuleElevated: (
+    moduleId: ModuleId,
+    itemId: string,
+    elevated: boolean
+  ): Promise<Settings> =>
+    ipcRenderer.invoke('settings:setModuleElevated', moduleId, itemId, elevated),
 
   // User Commands
   userCommandsList: (): Promise<UserCommand[]> =>

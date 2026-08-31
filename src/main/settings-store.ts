@@ -122,6 +122,35 @@ class SettingsStore extends EventEmitter {
   }
 
   /**
+   * Add or remove one item from a module's "launch elevated" list. Stored as
+   * a plain id array rather than a map: the flag has no value beyond being
+   * present, and clearing it should leave nothing behind.
+   */
+  patchModuleElevated(
+    moduleId: ModuleId,
+    itemId: string,
+    elevated: boolean
+  ): Settings {
+    const s = this.ensureInit()
+    const current = this.get()
+    const currentMod: ModuleSettings = current.modules[moduleId] ?? { enabled: false }
+    const without = (currentMod.elevated ?? []).filter((id) => id !== itemId)
+    const next: Settings = {
+      ...current,
+      modules: {
+        ...current.modules,
+        [moduleId]: {
+          ...currentMod,
+          elevated: elevated ? [...without, itemId] : without
+        }
+      }
+    }
+    s.store = next
+    this.emit('change', next)
+    return next
+  }
+
+  /**
    * Called by each module on registration. Seeds the module's entry if
    * missing, and back-fills any config keys declared on the manifest but not
    * yet stored (so upgrading runwa that adds a new config field picks up the

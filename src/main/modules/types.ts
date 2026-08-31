@@ -12,6 +12,12 @@ export interface SearchContext {
    */
   aliases: Record<string, string>
   /**
+   * Item ids the user marked "run as administrator", keyed the same way as
+   * `aliases`. Empty array when none are. Only app-search acts on it —
+   * everything else runs in-process and has no launch to elevate.
+   */
+  elevated: string[]
+  /**
    * The app that was focused when the palette opened, or null when it
    * couldn't be identified (nothing was focused, native lookup failed).
    * Modules use it to surface context-specific entries — User Commands

@@ -33,6 +33,11 @@ interface SettingsState {
     itemId: string,
     alias: string | null
   ) => Promise<void>
+  setModuleElevated: (
+    moduleId: ModuleId,
+    itemId: string,
+    elevated: boolean
+  ) => Promise<void>
   applyServerSettings: (settings: Settings) => void
 }
 
@@ -149,6 +154,26 @@ export const useSettingsStore = create<SettingsState>()(
           aliases[itemId] = normalised
         }
         mod.aliases = aliases
+      })
+    },
+
+    setModuleElevated: async (
+      moduleId: ModuleId,
+      itemId: string,
+      elevated: boolean
+    ) => {
+      const updated = await window.electronAPI.settingsSetModuleElevated(
+        moduleId,
+        itemId,
+        elevated
+      )
+      set((s) => {
+        s.settings = updated
+        const idx = s.modules.findIndex((m) => m.id === moduleId)
+        if (idx < 0) return
+        const mod = s.modules[idx]
+        const without = (mod.elevated ?? []).filter((id) => id !== itemId)
+        mod.elevated = elevated ? [...without, itemId] : without
       })
     },
 
