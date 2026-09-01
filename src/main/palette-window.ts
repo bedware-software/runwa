@@ -91,6 +91,17 @@ const SUPPORTS_RESIZE_INTENT =
   process.platform === 'win32' || process.platform === 'darwin'
 
 /**
+ * Size difference, in px, below which a non-user resize isn't worth a log
+ * line. Electron #9477: on non-100% scaling `setBounds` lands a pixel or
+ * two off what it was asked for, so `show()` measures 882 after setting
+ * 881 — every single open. That pixel used to be written straight back to
+ * settings, which made the palette creep a pixel wider on every invocation;
+ * refusing it is the fix, and staying quiet about it is what keeps the real
+ * event (a window that came back two thirds of its size) visible in the log.
+ */
+const DPI_ROUNDING_SLOP = 2
+
+/**
  * Window of time after `show()` during which a blur event is treated as
  * spurious rather than a user dismissal. Needed because:
  *
@@ -416,10 +427,22 @@ class PaletteWindow {
       SUPPORTS_RESIZE_INTENT &&
       Date.now() - this.lastUserResizeIntentAt > USER_RESIZE_INTENT_MS
     ) {
-      console.log(
-        `[palette-bounds] ignoring non-user ${reason}: ${width}x${height}, ` +
-          `keeping ${stored ? `${stored.width}x${stored.height}` : 'default'}`
+      // Anything within a pixel or two of what's stored is `setBounds`
+      // rounding, not an event — dropping it silently is what keeps this
+      // log worth reading. See DPI_ROUNDING_SLOP.
+      // With nothing stored yet the baseline is what `show()` applies, so a
+      // fresh profile doesn't log the same rounding on every open either.
+      const baseline = stored ?? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
+      const drift = Math.max(
+        Math.abs(width - baseline.width),
+        Math.abs(height - baseline.height)
       )
+      if (drift > DPI_ROUNDING_SLOP) {
+        console.log(
+          `[palette-bounds] ignoring non-user ${reason}: ${width}x${height}, ` +
+            `keeping ${stored ? `${stored.width}x${stored.height}` : 'default'}`
+        )
+      }
       return
     }
 
