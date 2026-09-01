@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen } from 'electron'
+import { BrowserWindow, ipcMain, powerMonitor, screen } from 'electron'
 import path from 'path'
 import type {
   DirectLaunchSecondPress,
@@ -55,6 +55,40 @@ const MIN_WIDTH = 480
 const MIN_HEIGHT = 320
 const MIN_VISIBLE_INTERSECTION_WIDTH = 80
 const MIN_VISIBLE_INTERSECTION_HEIGHT = 60
+
+/**
+ * How long after a `will-resize` a `resize` still counts as user-driven.
+ *
+ * Electron emits `will-resize` for a manual resize only — never for
+ * `setBounds`/`setSize`, and never for a resize the OS imposes on us. That
+ * makes it the signal that separates "the user dragged the edge" from "the
+ * window changed size on its own", which is the entire point: the persist
+ * path must not write the second kind. The window keeps emitting
+ * `will-resize` throughout the drag, so this only has to outlive the gap
+ * between the last one and the debounced write.
+ */
+const USER_RESIZE_INTENT_MS = 1500
+
+/**
+ * Bounds watchdog sampling interval.
+ *
+ * Windows shrinks the palette across some sleep/hibernate cycles: the
+ * display goes away, the window is re-DPI'd against whatever generic display
+ * Windows conjures at 100%, and comes back at 2/3 of its physical size on a
+ * 150% panel — 855x690 turned into 570x460, exactly 2/3 on both axes. The
+ * event that does it is not reliably observable (it can land while the
+ * machine is on its way down, or arrive coalesced on resume), so alongside
+ * the event hooks there's a plain timer that samples the bounds and only
+ * writes a line when something actually moved. Quiet on an idle machine,
+ * and it cannot miss a transition the way an event listener can.
+ */
+const BOUNDS_SAMPLE_MS = 60_000
+
+/** `will-resize` is a Windows/macOS event. Where it doesn't exist there is
+ * no way to tell a user resize from an imposed one, so those platforms keep
+ * the old behaviour: persist whatever the window reports. */
+const SUPPORTS_RESIZE_INTENT =
+  process.platform === 'win32' || process.platform === 'darwin'
 
 /**
  * Window of time after `show()` during which a blur event is treated as
@@ -131,6 +165,14 @@ function resolvePalettePosition(width: number, height: number): { x: number; y: 
 class PaletteWindow {
   private window: BrowserWindow | null = null
   private resizePersistTimer: NodeJS.Timeout | null = null
+  /** Timestamp of the most recent `will-resize`, i.e. the last moment we
+   * know the user was dragging an edge. See USER_RESIZE_INTENT_MS. */
+  private lastUserResizeIntentAt = 0
+  /** Bounds-watchdog state. The listeners are process-wide (screen, power)
+   * while the window is rebuilt on Windows desktop switches, so they're
+   * attached once and read `this.window` when they fire. */
+  private boundsSampleTimer: NodeJS.Timeout | null = null
+  private lastBoundsSignature: string | null = null
   /** Window bounds captured at the start of a JS-driven drag. `moveBy`
    * uses these constant width/height values on every `setBounds` call to
    * work around Electron #9477 — on non-100% DPI scaling, `setPosition`
@@ -232,6 +274,12 @@ class PaletteWindow {
       this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     }
 
+    // Only a manual resize sets this; `setBounds` and OS-imposed resizes
+    // never do. Everything downstream keys off it.
+    this.window.on('will-resize', () => {
+      this.lastUserResizeIntentAt = Date.now()
+    })
+
     // Persist user-driven resizes so the window remembers its size across
     // invocations. Debounced so we don't thrash disk during a drag.
     this.window.on('resize', () => {
@@ -243,16 +291,16 @@ class PaletteWindow {
       if (this.resizePersistTimer) clearTimeout(this.resizePersistTimer)
       this.resizePersistTimer = setTimeout(() => {
         this.resizePersistTimer = null
-        if (!this.window || this.window.isDestroyed()) return
-        if (this.moveStart) return // guard against late-firing timer
-        const [width, height] = this.window.getSize()
-        // Avoid writing tiny transient sizes during mount / teardown.
-        if (width < MIN_WIDTH || height < MIN_HEIGHT) return
-        const stored = settingsStore.get().paletteSize
-        if (stored?.width === width && stored.height === height) return
-        settingsStore.patch({ paletteSize: { width, height } })
+        this.persistSizeIfUserDriven('resize')
       }, 300)
     })
+
+    // Windows/macOS fire this once the drag ends. Writing here as well as
+    // from the debounce means the final size lands even if the last
+    // `resize` was swallowed.
+    this.window.on('resized', () => this.persistSizeIfUserDriven('resized'))
+
+    this.attachBoundsWatchdog()
 
     // Hide when the user clicks away, matching PowerToys default behavior.
     // On virtual-desktop switch the palette blurs but its HWND stays on the
@@ -339,6 +387,117 @@ class PaletteWindow {
     }
   }
 
+  /**
+   * Write the current size to settings, but only when the user is the one
+   * who caused it.
+   *
+   * The size the user drags is meant to be permanent, and `show()` restores
+   * it on every open — which is exactly why a bad write is so damaging:
+   * settings are the only copy, so whatever lands here is what the palette
+   * looks like from then on. Across some sleep/hibernate cycles Windows
+   * hands the window back re-DPI'd against a generic 100% display, two
+   * thirds of its size on a 150% panel (855x690 came back as 570x460). That
+   * arrives as an ordinary `resize`, and writing it silently replaced the
+   * dragged size for good.
+   */
+  private persistSizeIfUserDriven(reason: string): void {
+    if (!this.window || this.window.isDestroyed()) return
+    // A JS-driven move is in flight: Electron #9477 makes getSize() unreliable
+    // for the duration, so nothing measured now is worth keeping.
+    if (this.moveStart) return
+
+    const [width, height] = this.window.getSize()
+    // Avoid writing tiny transient sizes during mount / teardown.
+    if (width < MIN_WIDTH || height < MIN_HEIGHT) return
+    const stored = settingsStore.get().paletteSize
+    if (stored?.width === width && stored.height === height) return
+
+    if (
+      SUPPORTS_RESIZE_INTENT &&
+      Date.now() - this.lastUserResizeIntentAt > USER_RESIZE_INTENT_MS
+    ) {
+      console.log(
+        `[palette-bounds] ignoring non-user ${reason}: ${width}x${height}, ` +
+          `keeping ${stored ? `${stored.width}x${stored.height}` : 'default'}`
+      )
+      return
+    }
+
+    settingsStore.patch({ paletteSize: { width, height } })
+    console.log(`[palette-bounds] persisted ${reason}: ${width}x${height}`)
+  }
+
+  /**
+   * Watch the window's bounds and the display underneath it.
+   *
+   * Attached once and never torn down: the listeners are process-wide while
+   * the window itself is rebuilt whenever Windows desktop affinity forces a
+   * teardown, so they read `this.window` at fire time instead of capturing
+   * it. The timer is the load-bearing half — a shrink that happens while the
+   * machine is suspending, or one whose display event arrives coalesced with
+   * everything else on resume, is invisible to the event hooks but cannot
+   * hide from a sample taken a minute later.
+   */
+  private attachBoundsWatchdog(): void {
+    if (this.boundsSampleTimer) return
+
+    this.boundsSampleTimer = setInterval(
+      () => this.sampleBounds('tick'),
+      BOUNDS_SAMPLE_MS
+    )
+    this.boundsSampleTimer.unref()
+
+    screen.on('display-metrics-changed', (_e, display, changed) =>
+      this.sampleBounds(
+        `display-metrics-changed(${changed.join('+')} on ${display.id})`,
+        true
+      )
+    )
+    screen.on('display-added', () => this.sampleBounds('display-added', true))
+    screen.on('display-removed', () =>
+      this.sampleBounds('display-removed', true)
+    )
+
+    powerMonitor.on('suspend', () => this.sampleBounds('power:suspend', true))
+    powerMonitor.on('resume', () => this.sampleBounds('power:resume', true))
+    powerMonitor.on('lock-screen', () => this.sampleBounds('power:lock', true))
+    powerMonitor.on('unlock-screen', () =>
+      this.sampleBounds('power:unlock', true)
+    )
+  }
+
+  /**
+   * One line describing where the window is and what it's sitting on.
+   * Unforced samples are deduplicated against the previous line, so an idle
+   * machine writes nothing and any line in the log is a real transition.
+   */
+  private sampleBounds(reason: string, force = false): void {
+    const win = this.window
+    if (!win || win.isDestroyed()) return
+
+    let line: string
+    try {
+      const bounds = win.getBounds()
+      const display = screen.getDisplayMatching(bounds)
+      const { paletteSize: stored, palettePosition: pos } = settingsStore.get()
+      line =
+        `win=${bounds.width}x${bounds.height}@${bounds.x},${bounds.y} ` +
+        `stored=${stored ? `${stored.width}x${stored.height}` : 'unset'}` +
+        `@${pos ? `${pos.x},${pos.y}` : 'unset'} ` +
+        `display=${display.size.width}x${display.size.height}` +
+        `@${display.bounds.x},${display.bounds.y} ` +
+        `scale=${display.scaleFactor} count=${screen.getAllDisplays().length} ` +
+        `visible=${win.isVisible()}`
+    } catch (err) {
+      console.warn('[palette-bounds] sample failed', err)
+      return
+    }
+
+    if (!force && line === this.lastBoundsSignature) return
+    this.lastBoundsSignature = line
+    console.log(`[palette-bounds] ${reason}: ${line}`)
+  }
+
   show(moduleId: ModuleId): void {
     // Windows virtual-desktop affinity: a BrowserWindow's HWND sticks to the
     // virtual desktop where it was last shown. Hide → switch desktop → show
@@ -409,6 +568,10 @@ class PaletteWindow {
 
     const { x, y } = resolvePalettePosition(width, height)
     win.setBounds({ x, y, width, height })
+    // Cheap because it deduplicates: this only writes a line when the
+    // window or its display differs from the last sample, which on the show
+    // path means something moved it between opens.
+    this.sampleBounds('show')
 
     // Show the window fully transparent so the compositor starts producing
     // fresh frames.  Hidden windows keep a stale compositor cache, causing
