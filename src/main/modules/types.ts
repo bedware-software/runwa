@@ -1,6 +1,15 @@
 import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/types'
 import type { FocusedApp } from '../focus-context'
 
+/**
+ * Rows the registry keeps after sorting a module's results. Modules may
+ * return more — everything past this is dropped before it reaches the
+ * renderer — but work a module does *per returned row* (app search warms an
+ * icon for each) is worth capping here rather than spending on rows nobody
+ * will see.
+ */
+export const MAX_RESULTS = 100
+
 export interface SearchContext {
   /** Current config values for this module, already merged with defaults. */
   config: Record<string, ModuleConfigValue>

@@ -12,6 +12,7 @@ import {
   getWindowIconDataUrl,
   warmIconCache
 } from '../../icon-cache'
+import { fuzzyScore } from '../../fuzzy-match'
 import { isWindowIgnored, windowIgnoreStore } from './ignore-store'
 import { fullscreenBypassStore } from '../keyboard-remap/fullscreen-bypass-store'
 
@@ -70,22 +71,6 @@ function isFocusAction(a: unknown): a is FocusAction {
     'nativeId' in a &&
     typeof (a as { nativeId: unknown }).nativeId === 'string'
   )
-}
-
-/**
- * Word-initials of a title, lowercased — e.g. "Jenkins Jobs — Work" → "jjw".
- * Lets short queries match by acronym the way PowerToys Window Walker does:
- * typing "jj" surfaces "Jenkins Jobs …" even though "jj" is nowhere in the
- * title as a substring. Any run of non-alphanumeric characters is a word
- * boundary, so spaces, em-dashes, and punctuation all split words.
- */
-function computeInitials(title: string): string {
-  return title
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean)
-    .map((word) => word[0])
-    .join('')
-    .toLowerCase()
 }
 
 export function createWindowSwitcherModule(): PaletteModule {
@@ -172,8 +157,7 @@ export function createWindowSwitcherModule(): PaletteModule {
           return {
             ...w,
             title,
-            titleFellBack: trimmed.length === 0,
-            initials: computeInitials(title)
+            titleFellBack: trimmed.length === 0
           }
         })
         .filter((w) => {
@@ -208,33 +192,53 @@ export function createWindowSwitcherModule(): PaletteModule {
         return all.map((w, i) => toItem(w, i / 10000))
       }
 
-      // Bitap admits up to `threshold * queryLength` edits, so a fixed
-      // ratio is far too loose on short queries: at length 3, threshold
-      // 0.4 lets a whole character through — "ide" matches "ude"/"ode"/"de",
-      // surfacing Claude / Codex / ~\Desktop\runwa for an IDE search. Scale
-      // the error budget so 1–4 char queries demand an exact substring and
-      // only longer queries (where the ratio is actually forgiving) get
-      // real typo tolerance.
-      const threshold = trimmed.length <= 4 ? 0 : 0.3
+      // `fuzzyScore` matches on where the typed characters landed rather
+      // than on edit distance, which is what the old query-length threshold
+      // hack was approximating: it only admits a match anchored to a word
+      // start or appearing verbatim, so "ide" still can't reach Claude /
+      // Codex / ~\Desktop\runwa through their shared WindowsTerminal.exe.
+      // Acronyms come out of the same rule — "jj" scores "Jenkins Jobs …"
+      // on two word-start hits — so the separate `initials` key is gone.
+      //
+      // A window is scored on its title and its process name, best of the
+      // two: the title is what the user reads, but the process name is what
+      // they remember for a window whose title is a document name.
+      let matches: Array<{ window: (typeof all)[number]; score: number }> = []
+      for (const w of all) {
+        const byTitle = fuzzyScore(trimmed, w.title)
+        const byProcess = w.processName ? fuzzyScore(trimmed, w.processName) : null
+        const score =
+          byTitle === null
+            ? byProcess
+            : byProcess === null
+              ? byTitle
+              : Math.min(byTitle, byProcess)
+        if (score !== null) matches.push({ window: w, score })
+      }
 
-      const fuse = new Fuse(all, {
-        keys: [
-          { name: 'title', weight: 0.7 },
-          // Acronym key: with threshold 0 a short query must be a contiguous
-          // substring of the title's initials, so "jj" hits "Jenkins Jobs …"
-          // ("jjwn") without loosening the substring rule for real titles.
-          // Fuse only folds matched keys into the score, so an initials-only
-          // hit still ranks at the top.
-          { name: 'initials', weight: 0.4 },
-          { name: 'processName', weight: 0.3 }
-        ],
-        includeScore: true,
-        threshold,
-        ignoreLocation: true
-      })
+      // Nothing matched character-for-character — fall back to Fuse, the
+      // only pass that tolerates a typo. It runs solely on a query that
+      // found no real match, so its looseness can't outrank an exact one:
+      // the old 0.3 ceiling was defending against exactly that, and at 0.3
+      // a transposition ("chorme", 2 edits over 6 characters) still scores
+      // past it. 0.4 is the budget that actually catches one.
+      if (matches.length === 0) {
+        const fuse = new Fuse(all, {
+          keys: [
+            { name: 'title', weight: 0.7 },
+            { name: 'processName', weight: 0.3 }
+          ],
+          includeScore: true,
+          threshold: 0.4,
+          ignoreLocation: true
+        })
+        matches = fuse
+          .search(trimmed)
+          .map((r) => ({ window: r.item, score: r.score ?? 1 }))
+      }
 
-      const results = fuse.search(trimmed)
-      const items = results.map((r) => toItem(r.item, r.score ?? 1))
+      matches.sort((a, b) => a.score - b.score)
+      const items = matches.map((m) => toItem(m.window, m.score))
 
       // Auto-select single match (opt-in, off by default): once the query
       // has narrowed the list to exactly one window, tag it `autoExecute`

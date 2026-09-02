@@ -1,10 +1,11 @@
 import Fuse from 'fuse.js'
 import type { ModuleManifest, PaletteItem } from '@shared/types'
-import type { PaletteModule } from '../types'
+import { MAX_RESULTS, type PaletteModule } from '../types'
 import { enumerateApps, invalidateAppCache, type AppEntry } from './enumerator'
 import { launchApp } from './launcher'
 import { tryFocusRunningInstance } from './focus-running'
 import { getIconDataUrlSync, warmIconCache } from '../../icon-cache'
+import { fuzzyScore } from '../../fuzzy-match'
 
 const MANIFEST: ModuleManifest = {
   id: 'app-search',
@@ -229,47 +230,72 @@ export function createAppSearchModule(): PaletteModule {
         return [toItem(exactAliasEntry, -1, aliases[exactAliasEntry.id], true)]
       }
 
-      // Fuzzy pass — include aliases as a secondary search key so a
-      // partial alias hit ("ch" → "chrome") still surfaces the app.
-      const fuseSource = apps.map((a) => ({
-        entry: a,
-        name: a.name,
-        alias: aliases[a.id] ?? ''
-      }))
-      const fuse = new Fuse(fuseSource, {
-        keys: [
-          { name: 'name', weight: 0.7 },
-          { name: 'alias', weight: 0.3 }
-        ],
-        includeScore: true,
-        threshold: 0.4,
-        ignoreLocation: true
-      })
-      let matches = fuse.search(trimmed)
+      // Ranking pass. `fuzzyScore` is the launcher matcher: it scores where
+      // the typed characters landed, so a word-start hit beats a mid-word one
+      // and "vpn on" / "vpnon" both settle on "Corp VPN - On" rather than
+      // tying with "- Off" the way a plain edit-distance pass did. Aliases
+      // are scored against the same query and the better of the two wins —
+      // a partial alias hit ("ch" → chrome) still surfaces the app, while an
+      // exact one already short-circuited above.
+      let matches: Array<{ entry: AppEntry; score: number }> = []
+      for (const a of apps) {
+        const alias = aliases[a.id]
+        const byName = fuzzyScore(trimmed, a.name)
+        const byAlias = alias ? fuzzyScore(trimmed, alias) : null
+        const score =
+          byName === null
+            ? byAlias
+            : byAlias === null
+              ? byName
+              : Math.min(byName, byAlias)
+        if (score !== null) matches.push({ entry: a, score })
+      }
+
+      // Nothing lined up character-for-character — fall back to Fuse's
+      // edit-distance search, which is the only pass that tolerates a typo
+      // ("chorme"). It only ever runs on a query that found no real match,
+      // so its looseness can't outrank an exact one.
+      if (matches.length === 0) {
+        const fuse = new Fuse(
+          apps.map((a) => ({ entry: a, name: a.name, alias: aliases[a.id] ?? '' })),
+          {
+            keys: [
+              { name: 'name', weight: 0.7 },
+              { name: 'alias', weight: 0.3 }
+            ],
+            includeScore: true,
+            threshold: 0.4,
+            ignoreLocation: true
+          }
+        )
+        matches = fuse
+          .search(trimmed)
+          .map((r) => ({ entry: r.item.entry, score: r.score ?? 1 }))
+      }
+
+      matches.sort((a, b) => a.score - b.score)
+      // Subsequence matching casts a wider net than a substring pass, so a
+      // loose query can match most of the list. Only the rows that survive
+      // the registry's cap are worth an icon lookup.
+      matches.length = Math.min(matches.length, MAX_RESULTS)
       if (signal.aborted) return []
 
       // Prioritize mode: lift the exact-alias entry to score -1 (above
-      // any fuzzy hit). If Fuse's threshold dropped it, re-insert at
-      // the top so the alias always wins against similar-looking names.
+      // any fuzzy hit). The matcher may not have ranked it at all — an
+      // alias needn't resemble the app's name — so re-insert rather than
+      // only re-sort, and the alias always wins against similar names.
       if (exactAliasEntry && aliasMode === 'prioritize') {
-        const idx = matches.findIndex((m) => m.item.entry.id === exactAliasEntry.id)
-        const promoted = {
-          item: { entry: exactAliasEntry, name: exactAliasEntry.name, alias: normalisedQuery },
-          refIndex: 0,
-          score: -1
-        }
+        const idx = matches.findIndex((m) => m.entry.id === exactAliasEntry.id)
         if (idx >= 0) matches.splice(idx, 1)
-        matches = [promoted, ...matches]
+        matches = [{ entry: exactAliasEntry, score: -1 }, ...matches]
       }
 
       await warmIconCache(
-        matches.map((r) => r.item.entry.iconPath ?? r.item.entry.filePath)
+        matches.map((r) => r.entry.iconPath ?? r.entry.filePath)
       )
       if (signal.aborted) return []
 
-      return matches.map((r) =>
-        toItem(r.item.entry, r.score ?? 1, aliases[r.item.entry.id])
-      )
+      return matches.map((r) => toItem(r.entry, r.score, aliases[r.entry.id]))
     },
 
     async execute(item) {

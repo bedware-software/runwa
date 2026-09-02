@@ -9,11 +9,10 @@ import type {
   ExecuteResult,
   Settings
 } from '@shared/types'
-import type { PaletteModule } from './types'
+import { MAX_RESULTS, type PaletteModule } from './types'
 import { settingsStore } from '../settings-store'
 import { focusContext } from '../focus-context'
 
-const MAX_RESULTS = 100
 
 /** Build a fresh config object from a module's declared default values. */
 function defaultConfigFromManifest(
