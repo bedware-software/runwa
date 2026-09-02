@@ -66,6 +66,10 @@ async function walkForApps(
   collect: (p: string) => void
 ): Promise<void> {
   const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }]
+  // Resolved targets of symlinked directories already walked. A link cycle
+  // has to pass through a symlink, so guarding just those breaks any loop
+  // without paying `realpath` on every real directory.
+  const visitedLinks = new Set<string>()
   while (stack.length > 0) {
     const { dir, depth } = stack.pop()!
     let entries: import('fs').Dirent[]
@@ -76,15 +80,44 @@ async function walkForApps(
     }
     for (const e of entries) {
       const full = path.join(dir, e.name)
-      if (e.isDirectory()) {
+      const isLink = e.isSymbolicLink()
+      let isDir = e.isDirectory()
+      let isFile = e.isFile()
+      if (isLink) {
+        // `readdir` reports the type of the link itself, so a symlinked
+        // bundle answers false to both `isDirectory` and `isFile` and would
+        // fall through every branch below. That silently loses real apps:
+        // macOS ships Safari as /Applications/Safari.app pointing into
+        // /System/Cryptexes/App, and it's the only entry in /Applications
+        // shaped that way. Stat the target to classify it properly; a
+        // broken link throws and is skipped.
+        try {
+          const target = await fs.stat(full)
+          isDir = target.isDirectory()
+          isFile = target.isFile()
+        } catch {
+          continue
+        }
+      }
+      if (isDir) {
         if (matches(e.name)) {
           // Matched bundle (e.g. Foo.app) — collect but don't descend into
           // its internals; Contents/Frameworks/*.app are helpers, not apps.
           collect(full)
         } else if (depth + 1 < maxDepth) {
+          if (isLink) {
+            let real: string
+            try {
+              real = await fs.realpath(full)
+            } catch {
+              continue
+            }
+            if (visitedLinks.has(real)) continue
+            visitedLinks.add(real)
+          }
           stack.push({ dir: full, depth: depth + 1 })
         }
-      } else if (e.isFile() && matches(e.name)) {
+      } else if (isFile && matches(e.name)) {
         collect(full)
       }
     }
