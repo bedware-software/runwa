@@ -52,8 +52,14 @@ const GENERATED_BINARY = /^runwa-native\..+\.node$/
  * `Cannot find module .../native/index.js`. The stale-binary hazard this
  * whole script exists for is about the compiled binaries only, so the fast
  * path leaves the loader alone — it is platform-generic and probes for
- * whichever binary is present. Release builds pass `true`: they always
- * rebuild from scratch and then assert the loader exists.
+ * whichever binary is present.
+ *
+ * Release builds pass `true`, which is only safe because they compile the
+ * crate unconditionally: `prepare-native-release.mjs` runs
+ * `cargo clean --package` first, so the proc-macro always re-emits the type
+ * defs the loader is generated from. That used to be an assumption rather
+ * than a guarantee, and a purged temp directory was enough to break it —
+ * see `forceCrateRecompile` there for the full mechanism.
  */
 export function removeGeneratedBindings(
   nativeDir = defaultNativeDir,

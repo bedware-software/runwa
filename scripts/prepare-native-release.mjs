@@ -27,6 +27,9 @@ import { removeGeneratedBindings } from './clean-native-bindings.mjs'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const projectDir = join(scriptDir, '..')
 const nativeDir = join(projectDir, 'native')
+// Cargo package name of the addon crate. `cargo clean --package` needs it
+// by name, and it must track `native/Cargo.toml`.
+const crateName = 'runwa-native'
 const napiCli = join(
   projectDir,
   'node_modules',
@@ -107,12 +110,42 @@ function rustupWhich(tool) {
   return toolPath
 }
 
-function assertFile(filePath) {
+function assertFile(filePath, hint) {
   if (!existsSync(filePath) || statSync(filePath).size === 0) {
     throw new Error(
-      `Expected native build output is missing or empty: ${filePath}`
+      `Expected native build output is missing or empty: ${filePath}` +
+        (hint ? `\n${hint}` : '')
     )
   }
+}
+
+/**
+ * Delete this crate's compiled artifacts so the build that follows really
+ * compiles it. Dependencies stay cached, so it costs a few seconds.
+ *
+ * `napi build` does not derive `index.js` / `index.d.ts` from the compiled
+ * binary. It points cargo at a temp file via `TYPE_DEF_TMP_PATH`, the
+ * `#[napi]` proc-macro appends every type definition there *while the crate
+ * compiles*, and napi reads that file back to emit the loader. On a cargo
+ * cache hit the macro never runs and nothing is written, so whether a loader
+ * appears comes down to whether that temp file survived since the last real
+ * compile — and it lives in the OS temp directory (`/var/folders/…` on
+ * macOS), which is purged on a schedule nothing here controls. When it is
+ * gone, napi emits no loader and says nothing; because this script deletes
+ * the previous one up front, the checkout is left holding a binary that
+ * cannot be required at all, and re-running only repeats the failure.
+ *
+ * Forcing the compile is what the release path always assumed it was doing:
+ * `removeGeneratedBindings(…, { includeLoader: true })` is documented as
+ * safe *because* "release builds always rebuild from scratch". Nothing made
+ * that true until now. It also earns the stronger property the assumption
+ * implied — the loader ships generated from the source being shipped, not
+ * from whatever revision a leftover temp file happened to describe.
+ */
+function forceCrateRecompile(cargoPath, target, env) {
+  const args = ['clean', '--release', '--package', crateName]
+  if (target) args.push('--target', target)
+  run(cargoPath, args, nativeDir, env)
 }
 
 function buildCurrentPlatform() {
@@ -121,6 +154,7 @@ function buildCurrentPlatform() {
       `electron-builder.yml currently ships Windows x64 only; this host is ${process.arch}.`
     )
   }
+  forceCrateRecompile('cargo', null, process.env)
   runNapi(['build', '--platform', '--release'])
 }
 
@@ -144,10 +178,12 @@ function buildUniversalMacAddon() {
     RUSTC: rustcPath
   }
 
+  forceCrateRecompile(cargoPath, x64Target, rustupToolchainEnv)
   runNapi(
     ['build', '--platform', '--release', '--target', x64Target],
     rustupToolchainEnv
   )
+  forceCrateRecompile(cargoPath, arm64Target, rustupToolchainEnv)
   runNapi(
     ['build', '--platform', '--release', '--target', arm64Target],
     rustupToolchainEnv
@@ -171,8 +207,15 @@ function buildUniversalMacAddon() {
 function validateGeneratedPackage() {
   const wrapperPath = join(nativeDir, 'index.js')
   const typesPath = join(nativeDir, 'index.d.ts')
-  assertFile(wrapperPath)
-  assertFile(typesPath)
+  // The crate is force-recompiled above precisely so napi always has fresh
+  // type defs to generate these from. Reaching here means codegen itself
+  // failed, which is a different problem than a stale checkout — say so.
+  const loaderHint =
+    'napi emitted no JS loader despite a forced recompile. Check that the ' +
+    '`#[napi]` macros still expand and that `napi build` can write to ' +
+    'TYPE_DEF_TMP_PATH in the OS temp directory.'
+  assertFile(wrapperPath, loaderHint)
+  assertFile(typesPath, loaderHint)
 
   const binaries = readdirSync(nativeDir).filter((name) =>
     /^runwa-native\..+\.node$/.test(name)
