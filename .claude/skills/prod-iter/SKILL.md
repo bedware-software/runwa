@@ -182,13 +182,15 @@ Report the version just shipped and confirm the process came up. The
 version readout in the app is the user's signal that the new build actually
 installed, so state it explicitly.
 
-**macOS only:** releases are ad-hoc signed (`identity: "-"`), so every
-build has a different cdhash and macOS may treat the replaced bundle as a
-new app. If the keyboard remap, palette hotkey or window walker are dead
-after relaunch, that's TCC, not the code — the user needs to re-tick Runwa
-under System Settings → Privacy & Security → **Input Monitoring** and
-**Accessibility** (removing the stale entry with `−` first if the toggle
-looks on but doesn't work). Say so rather than debugging the feature.
+**macOS only:** replacing the bundle normally keeps the user's TCC grants.
+`scripts/mac-after-sign.mjs` re-signs with an identifier-based designated
+requirement (`designated => identifier "dev.dmitr.runwa"`), so macOS still
+recognises the new build as the same app even though ad-hoc signing gives
+it a fresh cdhash. Confirm with `codesign -d -r- /Applications/Runwa.app`
+if the keyboard remap, palette hotkey or window walker come up dead — a
+cdhash-bound DR there means the hook didn't run, and the fix is the hook,
+not re-ticking Runwa under System Settings → Privacy & Security → Input
+Monitoring / Accessibility.
 
 ## Explicitly out of scope
 
