@@ -400,6 +400,12 @@ pub enum SyntheticEvent {
     /// matching this code (e.g. `en`, `ru`). The language must already be
     /// installed as a system input source — we only activate, never add.
     ChangeLanguage(LanguageCode),
+    /// Close the frontmost window — the window, not the app. Windows posts
+    /// `WM_CLOSE` to the foreground window (what Alt+F4 and the title-bar ×
+    /// both produce); macOS presses the focused window's Accessibility
+    /// close button, because it has no keystroke that means this
+    /// everywhere (Cmd+Q quits the app, Cmd+W closes a tab).
+    CloseWindow,
 }
 
 /// A short ASCII language tag (e.g. `en`, `ru`, `en-us`). Stored as a
@@ -537,7 +543,8 @@ pub struct EmitPair {
 
 impl EmitPair {
     /// Empty pair — used for fire-and-forget actions that have nothing
-    /// to undo on release (`switch_to_workspace`, `change_language`).
+    /// to undo on release (`switch_to_workspace`, `change_language`,
+    /// `close_window`).
     pub fn press_only(events: impl IntoIterator<Item = SyntheticEvent>) -> Self {
         EmitPair {
             on_press: events.into_iter().collect(),
@@ -694,8 +701,8 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 
 /// A single rule inside an `on_hold:` list. Exactly one of the action
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
-/// `change_language`) must be populated; having zero or multiple is a
-/// parse error.
+/// `change_language` / `close_window`) must be populated; having zero or
+/// multiple is a parse error.
 ///
 /// `keys`, `to_hotkey` and `change_language` are `YamlToken` / lists of
 /// them so YAML can supply either a string (`keys: [w]`, `keys: [","]`,
@@ -717,6 +724,8 @@ struct HoldRule {
     move_to_workspace: Option<u32>,
     #[serde(default)]
     change_language: Option<YamlToken>,
+    #[serde(default)]
+    close_window: Option<bool>,
 }
 
 /// Accepts a YAML scalar that might be a string or a number; normalizes
@@ -932,11 +941,12 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
 
 /// Pick the action out of a HoldRule and bake it into an `EmitPair`.
 /// Exactly one of `to_hotkey` / `switch_to_workspace` /
-/// `move_to_workspace` / `change_language` must be populated.
+/// `move_to_workspace` / `change_language` / `close_window` must be
+/// populated.
 ///
 /// `to_hotkey` produces a balanced press/release pair (modifiers held
-/// while the combo key is held). Workspace + language actions are
-/// fire-and-forget — they go in `on_press` with an empty
+/// while the combo key is held). Workspace, language and close-window
+/// actions are fire-and-forget — they go in `on_press` with an empty
 /// `on_release`, because there's nothing to undo when the user lets
 /// the combo key up.
 fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
@@ -953,10 +963,13 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     if rule.change_language.is_some() {
         provided.push("change_language");
     }
+    if rule.close_window.is_some() {
+        provided.push("close_window");
+    }
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language, close_window"
         )),
         [_, ..] if provided.len() > 1 => Err(format!(
             "rule '{name}' has multiple action fields {provided:?}; pick exactly one"
@@ -990,6 +1003,15 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
             let code = LanguageCode::parse(token.as_str())
                 .map_err(|e| format!("rule '{name}': {e}"))?;
             Ok(EmitPair::press_only([SyntheticEvent::ChangeLanguage(code)]))
+        }
+        ["close_window"] => {
+            // `close_window: false` is a rule that does nothing, which is
+            // never what someone meant to write — say so rather than
+            // silently binding the key to a no-op.
+            if rule.close_window != Some(true) {
+                return Err(format!("rule '{name}': close_window only takes `true`"));
+            }
+            Ok(EmitPair::press_only([SyntheticEvent::CloseWindow]))
         }
         _ => unreachable!(),
     }
@@ -1599,6 +1621,55 @@ space:
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn close_window_action_parses() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [q], close_window: true }
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let p = overrides.get(&ov(alpha('Q'))).unwrap();
+                assert_eq!(p.on_press.as_slice(), &[SyntheticEvent::CloseWindow]);
+                assert!(p.on_release.is_empty());
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn close_window_rejects_false() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [q], close_window: false }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("close_window only takes `true`"),
+            "expected close_window-false error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn close_window_conflicts_with_other_actions() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [q], close_window: true, to_hotkey: [cmd, w] }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("multiple action fields"),
+            "expected multiple-action error, got: {err}"
+        );
     }
 
     #[test]

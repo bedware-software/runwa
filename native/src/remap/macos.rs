@@ -947,6 +947,14 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 change_language(*code);
                 continue;
             }
+            SyntheticEvent::CloseWindow => {
+                // No macOS keystroke means "close this window" in every
+                // app, so we press the window's Accessibility close button
+                // instead — on a detached thread, since AX is IPC. See
+                // `macos_close_window`.
+                super::macos_close_window::close_focused_window();
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;

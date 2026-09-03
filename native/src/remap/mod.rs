@@ -21,6 +21,12 @@ pub mod windows;
 pub mod macos;
 
 #[cfg(target_os = "macos")]
+pub mod macos_ax;
+
+#[cfg(target_os = "macos")]
+pub mod macos_close_window;
+
+#[cfg(target_os = "macos")]
 pub mod macos_move_window;
 
 // Active-desktop signal + JS push callback. Used by the inject paths on both

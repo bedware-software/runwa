@@ -28,47 +28,23 @@
 //!   - The entire sequence takes ~600ms; it runs on a detached thread so
 //!     the keyboard hook callback isn't blocked past its tap timeout.
 
-use core_foundation::base::TCFType;
-use core_foundation::string::CFString;
-use core_foundation_sys::base::{CFRelease, CFTypeRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton, EventField,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use core_graphics::geometry::{CGPoint, CGRect, CGSize};
-use std::os::raw::c_void;
-use std::ptr;
+use core_graphics::geometry::{CGPoint, CGRect};
 use std::thread;
 use std::time::Duration;
 
+use super::macos_ax;
 use super::synth::INJECT_TAG;
 
 // ---------------------------------------------------------------------------
-// FFI — Accessibility + mouse warping. Both live in ApplicationServices,
-// which is already linked via build.rs.
-
-// Match the type alias already in use by `native/src/macos.rs` (the window
-// switcher's AX surface) so the linker sees one consistent FFI signature
-// for `AXUIElementCopyAttributeValue`.
-type AXUIElementRef = *mut c_void;
-type AXValueRef = *const c_void;
-type AXError = i32;
-const AX_ERROR_SUCCESS: AXError = 0;
-
-// AXValueType values from AXValue.h.
-const AX_VALUE_CG_POINT_TYPE: u32 = 1;
-const AX_VALUE_CG_SIZE_TYPE: u32 = 2;
+// FFI — mouse warping. Lives in ApplicationServices alongside the
+// Accessibility surface in `macos_ax`, which build.rs already links.
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
-    fn AXUIElementCreateSystemWide() -> AXUIElementRef;
-    fn AXUIElementCopyAttributeValue(
-        element: AXUIElementRef,
-        attribute: core_foundation_sys::string::CFStringRef,
-        value: *mut CFTypeRef,
-    ) -> AXError;
-    fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> AXError;
-    fn AXValueGetValue(value: AXValueRef, the_type: u32, value_ptr: *mut c_void) -> bool;
     fn CGWarpMouseCursorPosition(new_cursor_position: CGPoint) -> i32;
     fn CGAssociateMouseAndMouseCursorPosition(connected: bool) -> i32;
 }
@@ -244,49 +220,7 @@ fn cursor_position() -> Option<CGPoint> {
 // Accessibility: query frontmost window's frame.
 
 fn active_window_frame() -> Option<CGRect> {
-    unsafe {
-        let system = AXUIElementCreateSystemWide();
-        if system.is_null() {
-            return None;
-        }
-        let _system_guard = AXGuard(system);
-        // Cap AX IPC at 250ms so a hung frontmost app can't stall us.
-        AXUIElementSetMessagingTimeout(system, 0.25);
-
-        let focused_app = ax_copy(system, "AXFocusedApplication")?;
-        let _app_guard = AXGuard(focused_app);
-        AXUIElementSetMessagingTimeout(focused_app, 0.25);
-
-        let focused_window = ax_copy(focused_app, "AXFocusedWindow")?;
-        let _window_guard = AXGuard(focused_window);
-
-        let position = ax_copy(focused_window, "AXPosition")?;
-        let _pos_guard = AXGuard(position);
-        let size = ax_copy(focused_window, "AXSize")?;
-        let _size_guard = AXGuard(size);
-
-        let mut origin = CGPoint { x: 0.0, y: 0.0 };
-        let mut dims = CGSize {
-            width: 0.0,
-            height: 0.0,
-        };
-        if !AXValueGetValue(
-            position as AXValueRef,
-            AX_VALUE_CG_POINT_TYPE,
-            &mut origin as *mut CGPoint as *mut c_void,
-        ) {
-            return None;
-        }
-        if !AXValueGetValue(
-            size as AXValueRef,
-            AX_VALUE_CG_SIZE_TYPE,
-            &mut dims as *mut CGSize as *mut c_void,
-        ) {
-            return None;
-        }
-
-        Some(CGRect { origin, size: dims })
-    }
+    macos_ax::frame(&macos_ax::focused_window()?)
 }
 
 /// Frame of one of the frontmost window's standard title-bar buttons, or
@@ -295,71 +229,7 @@ fn active_window_frame() -> Option<CGRect> {
 /// exposes these via AX, and the returned CGRect is in screen coordinates
 /// suitable for `CGEventPost` directly.
 fn active_window_button_frame(button_attr: &str) -> Option<CGRect> {
-    unsafe {
-        let system = AXUIElementCreateSystemWide();
-        if system.is_null() {
-            return None;
-        }
-        let _system_guard = AXGuard(system);
-        AXUIElementSetMessagingTimeout(system, 0.25);
-
-        let focused_app = ax_copy(system, "AXFocusedApplication")?;
-        let _app_guard = AXGuard(focused_app);
-        AXUIElementSetMessagingTimeout(focused_app, 0.25);
-
-        let focused_window = ax_copy(focused_app, "AXFocusedWindow")?;
-        let _window_guard = AXGuard(focused_window);
-
-        let button = ax_copy(focused_window, button_attr)?;
-        let _button_guard = AXGuard(button);
-
-        let position = ax_copy(button, "AXPosition")?;
-        let _pos_guard = AXGuard(position);
-        let size = ax_copy(button, "AXSize")?;
-        let _size_guard = AXGuard(size);
-
-        let mut origin = CGPoint { x: 0.0, y: 0.0 };
-        let mut dims = CGSize {
-            width: 0.0,
-            height: 0.0,
-        };
-        if !AXValueGetValue(
-            position as AXValueRef,
-            AX_VALUE_CG_POINT_TYPE,
-            &mut origin as *mut CGPoint as *mut c_void,
-        ) {
-            return None;
-        }
-        if !AXValueGetValue(
-            size as AXValueRef,
-            AX_VALUE_CG_SIZE_TYPE,
-            &mut dims as *mut CGSize as *mut c_void,
-        ) {
-            return None;
-        }
-
-        Some(CGRect { origin, size: dims })
-    }
-}
-
-unsafe fn ax_copy(el: AXUIElementRef, attr: &str) -> Option<*mut c_void> {
-    let key = CFString::new(attr);
-    let mut out: CFTypeRef = ptr::null();
-    let err = AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut out);
-    if err != AX_ERROR_SUCCESS || out.is_null() {
-        return None;
-    }
-    // Reinterpret as `*mut` — AX returns CFTypeRef (*const) but downstream
-    // AX calls take `*mut c_void` per the type alias we match. CF doesn't
-    // distinguish const-ness at the ABI level.
-    Some(out as *mut c_void)
-}
-
-struct AXGuard(AXUIElementRef);
-impl Drop for AXGuard {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { CFRelease(self.0 as CFTypeRef) }
-        }
-    }
+    let window = macos_ax::focused_window()?;
+    let button = macos_ax::attribute(&window, button_attr)?;
+    macos_ax::frame(&button)
 }

@@ -36,8 +36,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowRect,
     GetWindowThreadProcessId, PostMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG,
-    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP,
-    WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_CLOSE, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN,
+    WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
     WM_XBUTTONDOWN,
 };
 
@@ -678,6 +678,10 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 change_language(*code);
             }
+            SyntheticEvent::CloseWindow => {
+                flush_inputs(&mut inputs);
+                close_foreground_window();
+            }
         }
     }
     flush_inputs(&mut inputs);
@@ -849,6 +853,23 @@ fn vd_move_active_and_follow(n: u32) {
     // switch, the move+switch alone can leave the foreground stranded on the
     // desktop we left rather than on the window the user just carried over.
     queue_focus_job(FocusJob::Window(hwnd.0 as isize));
+}
+
+/// `close_window`: ask the foreground window to close. `WM_CLOSE` is the
+/// exact message Alt+F4 and the title-bar × produce, minus the synthetic
+/// keystroke — so it's a request, not a kill: apps still get to show
+/// "save changes?" and to refuse. Posting rather than sending keeps the
+/// hook thread out of the target app's message loop.
+fn close_foreground_window() {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return;
+    }
+    unsafe {
+        if let Err(e) = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) {
+            eprintln!("[keyboard-remap] close_window: PostMessage failed: {e:?}");
+        }
+    }
 }
 
 /// Switch the foreground window's input language by ISO 639-1 code (`en`,

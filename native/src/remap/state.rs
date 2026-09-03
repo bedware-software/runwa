@@ -799,16 +799,19 @@ impl StateMachine {
                     if let Some(pair) = pair {
                         // Enter the held (`Comboing`) path when the press
                         // either holds modifiers (push-to-talk chord) or is a
-                        // workspace switch. The latter must fire exactly once
-                        // — not re-fire on every autorepeat the way nav-style
-                        // bindings do — because the platform layer's
-                        // alternate-desktop toggle would otherwise ping-pong
-                        // between desktops while the key stays down.
+                        // one-shot window/desktop action. Those must fire
+                        // exactly once — not re-fire on every autorepeat the
+                        // way nav-style bindings do — because the platform
+                        // layer's alternate-desktop toggle would otherwise
+                        // ping-pong between desktops while the key stays
+                        // down, and a held close_window would walk through
+                        // the app's windows one autorepeat at a time.
                         let enter_held = pair.on_press.iter().any(|e| {
                             matches!(
                                 e,
                                 SyntheticEvent::ModifierDown(_)
                                     | SyntheticEvent::SwitchToWorkspace(_)
+                                    | SyntheticEvent::CloseWindow
                             )
                         });
                         if enter_held {
@@ -1721,6 +1724,28 @@ space:
         assert_eq!(m.on_event(down_autorepeat(alpha('1'))), Action::Suppress);
         // Releasing the trigger while the digit is still down tears the
         // chord down; nothing to emit.
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn close_window_fires_once_and_suppresses_autorepeat() {
+        // Same held path as a workspace switch, for a sharper reason: an
+        // autorepeating Space+Q would close the app's windows one repeat
+        // at a time. One press, one window.
+        let yaml = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - keys: [q]
+      close_window: true
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        assert_eq!(
+            m.on_event(down(alpha('Q'))),
+            emit(vec![SyntheticEvent::CloseWindow])
+        );
+        assert_eq!(m.on_event(down_autorepeat(alpha('Q'))), Action::Suppress);
         assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
     }
 

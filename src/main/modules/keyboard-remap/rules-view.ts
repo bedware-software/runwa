@@ -168,6 +168,9 @@ function formatRuleAction(
   if (typeof sw === 'number') return `switch to Desktop ${sw}`
   const mv = entry['move_to_workspace']
   if (typeof mv === 'number') return `move to Desktop ${mv}`
+  if (entry['close_window'] === true) return 'close window'
+  const lang = entry['change_language']
+  if (typeof lang === 'string') return `switch language to ${lang}`
   if (typeof toHotkey === 'string') return formatTokenList([toHotkey])
   if (Array.isArray(toHotkey)) return formatTokenList(toHotkey.map(String))
   return '?'

@@ -56,6 +56,13 @@
  *                                                  the code. Add the language in OS settings
  *                                                  first; we only activate, never install.
  *                                                  (Windows + macOS)
+ *         close_window:         true                close the frontmost window — the window,
+ *                                                  not the app. Windows posts WM_CLOSE (what
+ *                                                  Alt+F4 sends); macOS presses the window's
+ *                                                  close button via Accessibility, since it
+ *                                                  has no universal shortcut for this (Cmd+Q
+ *                                                  quits the app, Cmd+W closes a tab).
+ *                                                  (Windows + macOS)
  *
  *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
@@ -83,6 +90,8 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #   move_to_workspace:   N          move active window to VD N and follow (1-indexed)
 #   change_language:     <code>     switch system input language (e.g. en, ru); the language
 #                                   must already be installed as a system input source
+#   close_window:        true       close the frontmost window (not the whole app): WM_CLOSE on
+#                                   Windows, the window's close button via Accessibility on macOS
 
 # Global options. macos_switch_workspace_modifiers must match your macOS
 # Mission Control "Switch to Desktop N" shortcut. This template uses the
@@ -160,7 +169,7 @@ space:
     - { keys: [e], change_language: en }
     - { keys: [r], change_language: ru }
 
-    - { os: windows, keys: [q], to_hotkey: [opt, f4] }
+    - { keys: [q], close_window: true }
     - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
     - { os: macos, keys: [any], to_hotkey: [cmd] }
 `
