@@ -849,6 +849,7 @@ impl StateMachine {
                             SyntheticEvent::ModifierDown(_)
                                 | SyntheticEvent::SwitchToWorkspace(_)
                                 | SyntheticEvent::CloseWindow
+                                | SyntheticEvent::ToggleCapsLock
                                 | SyntheticEvent::KeyDown(NamedKey::CapsLock)
                         )
                     });
@@ -1054,7 +1055,7 @@ capslock:
   on_hold: [ctrl]
 "#;
 
-    /// The classic both-shifts-toggle-CapsLock chord, symmetric so
+    /// The classic both-shifts-as-CapsLock chord, symmetric so
     /// either Shift can be the one held. Each Shift keeps its own tap
     /// hotkey and — via the implicit eager/fallback modifier — its day
     /// job as Shift.
@@ -1831,6 +1832,24 @@ space:
     }
 
     #[test]
+    fn toggle_capslock_fires_once_and_suppresses_autorepeat() {
+        let yaml = r#"
+space:
+  on_hold:
+    - keys: [c]
+      toggle_capslock: true
+"#;
+        let mut m = sm(yaml);
+        m.on_event(down(LogicalKey::Space));
+        assert_eq!(
+            m.on_event(down(alpha('C'))),
+            emit(vec![SyntheticEvent::ToggleCapsLock])
+        );
+        assert_eq!(m.on_event(down_autorepeat(alpha('C'))), Action::Suppress);
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
     fn qualified_rule_falls_back_to_unqualified_when_absent() {
         // Only a bare rule exists for `1`. Pressing Space+Shift+1 — which
         // has a Shift modifier — should still fire the unqualified rule
@@ -2479,7 +2498,7 @@ left_shift:
     }
 
     #[test]
-    fn holding_left_shift_and_pressing_right_shift_toggles_capslock() {
+    fn holding_left_shift_and_pressing_right_shift_holds_capslock() {
         let mut m = sm(BOTH_SHIFTS_CAPS);
         // Left Shift goes down eagerly — it is still a Shift.
         assert_eq!(
@@ -2487,7 +2506,7 @@ left_shift:
             emit(vec![SyntheticEvent::ModifierDown(Modifier::LeftShift)])
         );
         // Right Shift is claimed by the layer: release the eager Shift so
-        // the toggle isn't chorded with it, then fire CapsLock.
+        // the synthesized CapsLock is bare, then hold CapsLock down.
         assert_eq!(
             m.on_event(down_with_mods(
                 LogicalKey::RightShift,
@@ -2531,8 +2550,9 @@ left_shift:
 
     #[test]
     fn a_held_capslock_combo_fires_exactly_once() {
-        // Windows autorepeats a held modifier's KeyDown. Firing per repeat
-        // would flicker the lock on and off.
+        // Windows autorepeats a held modifier's KeyDown. Re-emitting the
+        // CapsLock-down on every repeat would create duplicate presses for
+        // listeners such as push-to-talk apps.
         let mut m = sm(BOTH_SHIFTS_CAPS);
         m.on_event(down(LogicalKey::LeftShift));
         m.on_event(down(LogicalKey::RightShift));

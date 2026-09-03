@@ -677,6 +677,12 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 vd_move_active_and_follow(*n);
             }
+            SyntheticEvent::ToggleCapsLock => {
+                // Windows has no separate lock API worth reaching for —
+                // tapping the key IS how the lock flips here.
+                inputs.push(build_input(VK_CAPITAL, 0));
+                inputs.push(build_input(VK_CAPITAL, KEYEVENTF_KEYUP.0));
+            }
             SyntheticEvent::ChangeLanguage(code) => {
                 flush_inputs(&mut inputs);
                 change_language(*code);

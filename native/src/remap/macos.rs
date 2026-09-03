@@ -614,11 +614,10 @@ fn named_to_keycode(key: NamedKey) -> Option<u16> {
         // No macOS equivalent of the Windows context-menu key. Callers
         // should route macOS context-menu intent through `[shift, f10]`.
         NamedKey::Apps => None,
-        // Not a postable keystroke on macOS: the lock latch lives in the
-        // HID driver, below CGEvent. `inject` intercepts CapsLock before
-        // it gets here and drives the driver directly — see
-        // `toggle_caps_lock`.
-        NamedKey::CapsLock => None,
+        // CapsLock needs special handling in `inject`: IOKit moves the real
+        // lock latch, while a synthetic FlagsChanged pair makes the press
+        // visible to global-hotkey listeners.
+        NamedKey::CapsLock => Some(KeyCode::CAPS_LOCK),
         NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }
@@ -900,16 +899,6 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 flags &= !modifier_to_flag(*m);
                 (modifier_to_keycode(*m), false)
             }
-            // CapsLock is a lock, not a keystroke: posting kVK_CapsLock
-            // does nothing, because the latch lives in the HID driver
-            // below CGEvent (the same reason a `capslock:` trigger needs
-            // the hidutil→F19 detour). Toggle the driver state on the
-            // press; the release has nothing left to do.
-            SyntheticEvent::KeyDown(NamedKey::CapsLock) => {
-                toggle_caps_lock();
-                continue;
-            }
-            SyntheticEvent::KeyUp(NamedKey::CapsLock) => continue,
             SyntheticEvent::KeyDown(k) => match named_to_keycode(*k) {
                 Some(kc) => (kc, true),
                 None => continue,
@@ -962,6 +951,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 change_language(*code);
                 continue;
             }
+            SyntheticEvent::ToggleCapsLock => {
+                toggle_caps_lock();
+                continue;
+            }
             SyntheticEvent::CloseWindow => {
                 // No macOS keystroke means "close this window" in every
                 // app, so we press the window's Accessibility close button
@@ -974,7 +967,30 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;
         };
-        cge.set_flags(flags);
+        if keycode == KeyCode::CAPS_LOCK {
+            // A physical macOS CapsLock is a FlagsChanged event, not a
+            // regular KeyDown/KeyUp. Handy's `handy-keys` backend follows
+            // that contract exactly: AlphaShift means pressed, no
+            // AlphaShift means released. Posting ordinary keyboard events
+            // leaves the listener completely silent.
+            //
+            // The event itself cannot move the real lock latch — that
+            // state lives below CGEvent in IOHIDSystem — so flip the latch
+            // once on press as well. The result deliberately has both
+            // effects of a physical CapsLock: the LED/typing state toggles
+            // and global push-to-talk listeners receive a held key pair.
+            if down {
+                toggle_caps_lock();
+            }
+            cge.set_type(CGEventType::FlagsChanged);
+            cge.set_flags(if down {
+                CGEventFlags::CGEventFlagAlphaShift
+            } else {
+                CGEventFlags::empty()
+            });
+        } else {
+            cge.set_flags(flags);
+        }
         cge.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, INJECT_TAG as i64);
         cge.post(CGEventTapLocation::HID);
     }
@@ -983,12 +999,11 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
 // ---------------------------------------------------------------------------
 // CapsLock as an emit target (`to_hotkey: [capslock]`).
 //
-// The lock is driver state, not a keystroke: CGEventPost of kVK_CapsLock is
-// swallowed, because the latch lives in IOHIDSystem below the event stream.
-// (That asymmetry is also why an *incoming* CapsLock press needs the
-// hidutil→F19 detour below.) IOKit exposes the latch directly through the
-// HID system's param connection, which is what every CapsLock-toggling
-// utility on macOS uses.
+// The real lock latch lives in IOHIDSystem below the CGEvent stream, so the
+// synthetic FlagsChanged pair above is observable but cannot move it.
+// IOKit exposes the latch directly through the HID system's param
+// connection; `to_hotkey: [capslock]` uses both paths to reproduce the two
+// externally visible effects of the physical key.
 
 /// `kIOHIDCapsLockState` — the modifier-lock selector for CapsLock.
 const K_IO_HID_CAPS_LOCK_STATE: i32 = 0x0000_0001;

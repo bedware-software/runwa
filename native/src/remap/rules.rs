@@ -340,12 +340,13 @@ pub enum NamedKey {
     Escape,
     Space,
     Tab,
-    /// CapsLock as an *output*. Emitting this toggles the lock state:
-    /// Windows sends `VK_CAPITAL`, macOS drives the HID driver's lock
-    /// latch directly (a posted `kVK_CapsLock` event does nothing there —
-    /// the same reason a `capslock:` trigger needs the hidutil→F19
-    /// detour). As an *input* the physical key stays `LogicalKey::CapsLock`,
-    /// so `capslock:` and `keys: [capslock]` are unaffected.
+    /// CapsLock as an *output*. It reproduces both observable effects of a
+    /// physical press: toggling the lock/LED and sending a held press/release
+    /// pair to other apps (for example a push-to-talk binding). macOS needs
+    /// separate IOKit and CGEvent operations for those two effects; Windows
+    /// gets both from VK_CAPITAL. As an *input* the physical key stays
+    /// `LogicalKey::CapsLock`, so `capslock:` and `keys: [capslock]` are
+    /// unaffected.
     CapsLock,
     Return,
     Delete,
@@ -418,6 +419,12 @@ pub enum SyntheticEvent {
     /// close button, because it has no keystroke that means this
     /// everywhere (Cmd+Q quits the app, Cmd+W closes a tab).
     CloseWindow,
+    /// Flip the CapsLock lock state itself — the latch and the LED, not a
+    /// keystroke. Distinct from `KeyDown(NamedKey::CapsLock)`: that sends
+    /// the *key* for other apps to hear, this changes the *state* the OS
+    /// types with. macOS needs IOKit for it (a posted key event can't move
+    /// the latch); Windows gets there by tapping VK_CAPITAL.
+    ToggleCapsLock,
 }
 
 /// A short ASCII language tag (e.g. `en`, `ru`, `en-us`). Stored as a
@@ -800,7 +807,8 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 
 /// A single rule inside an `on_hold:` list. Exactly one of the action
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
-/// `change_language` / `close_window`) must be populated; having zero or
+/// `change_language` / `close_window` / `toggle_capslock`) must be
+/// populated; having zero or
 /// multiple is a parse error.
 ///
 /// `keys`, `to_hotkey` and `change_language` are `YamlToken` / lists of
@@ -825,6 +833,8 @@ struct HoldRule {
     change_language: Option<YamlToken>,
     #[serde(default)]
     close_window: Option<bool>,
+    #[serde(default)]
+    toggle_capslock: Option<bool>,
 }
 
 /// Accepts a YAML scalar that might be a string or a number; normalizes
@@ -1074,7 +1084,8 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
 
 /// Pick the action out of a HoldRule and bake it into an `EmitPair`.
 /// Exactly one of `to_hotkey` / `switch_to_workspace` /
-/// `move_to_workspace` / `change_language` / `close_window` must be
+/// `move_to_workspace` / `change_language` / `close_window` /
+/// `toggle_capslock` must be
 /// populated.
 ///
 /// `to_hotkey` produces a balanced press/release pair (modifiers held
@@ -1099,10 +1110,13 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     if rule.close_window.is_some() {
         provided.push("close_window");
     }
+    if rule.toggle_capslock.is_some() {
+        provided.push("toggle_capslock");
+    }
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language, close_window"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language, close_window, toggle_capslock"
         )),
         [_, ..] if provided.len() > 1 => Err(format!(
             "rule '{name}' has multiple action fields {provided:?}; pick exactly one"
@@ -1145,6 +1159,12 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
                 return Err(format!("rule '{name}': close_window only takes `true`"));
             }
             Ok(EmitPair::press_only([SyntheticEvent::CloseWindow]))
+        }
+        ["toggle_capslock"] => {
+            if rule.toggle_capslock != Some(true) {
+                return Err(format!("rule '{name}': toggle_capslock only takes `true`"));
+            }
+            Ok(EmitPair::press_only([SyntheticEvent::ToggleCapsLock]))
         }
         _ => unreachable!(),
     }
@@ -1805,6 +1825,41 @@ space:
         assert!(
             err.contains("multiple action fields"),
             "expected multiple-action error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn toggle_capslock_action_parses() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: [c], toggle_capslock: true }
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let pair = overrides.get(&ov(alpha('C'))).unwrap();
+                assert_eq!(
+                    pair.on_press.as_slice(),
+                    &[SyntheticEvent::ToggleCapsLock]
+                );
+                assert!(pair.on_release.is_empty());
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn toggle_capslock_rejects_false() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: [c], toggle_capslock: false }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("toggle_capslock only takes `true`"),
+            "expected toggle_capslock-false error, got: {err}"
         );
     }
 
