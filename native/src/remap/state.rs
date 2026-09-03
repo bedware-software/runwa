@@ -238,6 +238,20 @@ pub struct StateMachine {
     /// keeps `State` `Copy`, which the `match (self.state, …)`
     /// dispatch elsewhere depends on.
     combo_release: Option<SmallVec<[SyntheticEvent; 4]>>,
+    /// Modifier keys whose real KeyDown a layer swallowed as its combo key,
+    /// and whose KeyUp we therefore owe the rest of the system.
+    ///
+    /// Apps downstream track modifier state by *toggling* a bit on each
+    /// FlagsChanged — they have no other way, since macOS reports no
+    /// up/down for a modifier beyond the flag. Forward a release whose
+    /// press we ate and their toggle inverts: they start believing that
+    /// Shift is held down and never let go. Everything we emit afterwards
+    /// then looks like Shift+<key> to them, so a bare `capslock` binding
+    /// stops matching and the app goes silent — no event, no log line.
+    /// (Reproduced against Handy: hold LeftShift, tap RightShift, release
+    /// the trigger first, and the orphan RightShift-up left Handy deaf to
+    /// the next chord.)
+    swallowed_downs: SmallVec<[LogicalKey; 4]>,
 }
 
 impl StateMachine {
@@ -246,6 +260,7 @@ impl StateMachine {
             rules,
             state: State::Idle,
             combo_release: None,
+            swallowed_downs: SmallVec::new(),
         }
     }
 
@@ -290,6 +305,39 @@ impl StateMachine {
     }
 
     pub fn on_event(&mut self, ev: RawEvent) -> Action {
+        let (kind, key) = (ev.kind, ev.key);
+
+        // Is a layer about to eat this modifier's press as its combo key?
+        // Asked before dispatch, while the layer is still the one in flight.
+        // The trigger itself doesn't count — we inject a matching modifier
+        // pair for that one, so it stays balanced on its own.
+        let claimed_combo = kind == EventKind::KeyDown
+            && key.is_modifier()
+            && self.active_trigger() != Some(key)
+            && self.layer_claims(key, kind);
+
+        let action = self.dispatch(ev);
+
+        // Swallowed the press? Then owe nothing on the release either.
+        if claimed_combo && !matches!(action, Action::Forward | Action::ForwardWithModifiers(_)) {
+            if !self.swallowed_downs.contains(&key) {
+                self.swallowed_downs.push(key);
+            }
+        }
+        if kind == EventKind::KeyUp {
+            if let Some(i) = self.swallowed_downs.iter().position(|k| *k == key) {
+                self.swallowed_downs.remove(i);
+                // Only a release we were about to leak needs rewriting; an
+                // arm that already emitted or suppressed did the right thing.
+                if matches!(action, Action::Forward | Action::ForwardWithModifiers(_)) {
+                    return Action::Suppress;
+                }
+            }
+        }
+        action
+    }
+
+    fn dispatch(&mut self, ev: RawEvent) -> Action {
         // Does this key itself have a rule? Treat it as a trigger candidate
         // if it does.
         let binding = self.binding_for(ev.key);
@@ -716,6 +764,7 @@ impl StateMachine {
     /// trigger held across real typing looks like a bare tap.
     pub fn reset(&mut self) -> SmallVec<[SyntheticEvent; 8]> {
         let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+        self.swallowed_downs.clear();
         // Covers `Comboing` — its release sequence lives on the machine.
         if let Some(release) = self.combo_release.take() {
             events.extend(release);
@@ -2669,5 +2718,37 @@ space:
             m.on_event(down(LogicalKey::Space));
             assert_eq!(m.on_event(down(side)), emit(vec![caps_down()]));
         }
+    }
+
+    #[test]
+    fn releasing_the_trigger_first_does_not_leak_the_combo_key_release() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        m.on_event(down(LogicalKey::RightShift));
+        // Trigger up first — the chord tears down on this event.
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), emit(vec![caps_up()]));
+        // The combo key's release must not reach the rest of the system:
+        // its press never did, and downstream trackers toggle per event, so
+        // an orphan release leaves them believing Shift is held forever.
+        assert_eq!(m.on_event(up(LogicalKey::RightShift)), Action::Suppress);
+        // Debt settled — a later, unrelated RightShift is its own business.
+        assert_eq!(m.on_event(up(LogicalKey::RightShift)), Action::Forward);
+    }
+
+    #[test]
+    fn releasing_the_combo_key_first_is_unchanged() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        m.on_event(down(LogicalKey::RightShift));
+        assert_eq!(m.on_event(up(LogicalKey::RightShift)), emit(vec![caps_up()]));
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), Action::Suppress);
+    }
+
+    #[test]
+    fn a_modifier_the_layer_never_claimed_still_forwards_its_release() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        assert_eq!(m.on_event(down(LogicalKey::LeftCtrl)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::LeftCtrl)), Action::Forward);
     }
 }
