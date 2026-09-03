@@ -614,6 +614,11 @@ fn named_to_keycode(key: NamedKey) -> Option<u16> {
         // No macOS equivalent of the Windows context-menu key. Callers
         // should route macOS context-menu intent through `[shift, f10]`.
         NamedKey::Apps => None,
+        // Not a postable keystroke on macOS: the lock latch lives in the
+        // HID driver, below CGEvent. `inject` intercepts CapsLock before
+        // it gets here and drives the driver directly — see
+        // `toggle_caps_lock`.
+        NamedKey::CapsLock => None,
         NamedKey::Alpha(b) => alpha_to_keycode(b),
     }
 }
@@ -895,6 +900,16 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 flags &= !modifier_to_flag(*m);
                 (modifier_to_keycode(*m), false)
             }
+            // CapsLock is a lock, not a keystroke: posting kVK_CapsLock
+            // does nothing, because the latch lives in the HID driver
+            // below CGEvent (the same reason a `capslock:` trigger needs
+            // the hidutil→F19 detour). Toggle the driver state on the
+            // press; the release has nothing left to do.
+            SyntheticEvent::KeyDown(NamedKey::CapsLock) => {
+                toggle_caps_lock();
+                continue;
+            }
+            SyntheticEvent::KeyUp(NamedKey::CapsLock) => continue,
             SyntheticEvent::KeyDown(k) => match named_to_keycode(*k) {
                 Some(kc) => (kc, true),
                 None => continue,
@@ -962,6 +977,100 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
         cge.set_flags(flags);
         cge.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, INJECT_TAG as i64);
         cge.post(CGEventTapLocation::HID);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CapsLock as an emit target (`to_hotkey: [capslock]`).
+//
+// The lock is driver state, not a keystroke: CGEventPost of kVK_CapsLock is
+// swallowed, because the latch lives in IOHIDSystem below the event stream.
+// (That asymmetry is also why an *incoming* CapsLock press needs the
+// hidutil→F19 detour below.) IOKit exposes the latch directly through the
+// HID system's param connection, which is what every CapsLock-toggling
+// utility on macOS uses.
+
+/// `kIOHIDCapsLockState` — the modifier-lock selector for CapsLock.
+const K_IO_HID_CAPS_LOCK_STATE: i32 = 0x0000_0001;
+/// `kIOHIDParamConnectType` — the IOHIDSystem connection that carries the
+/// modifier-lock get/set pair.
+const K_IO_HID_PARAM_CONNECT_TYPE: u32 = 1;
+
+type MachPort = u32;
+
+use core_foundation_sys::dictionary::CFMutableDictionaryRef;
+
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOServiceMatching(name: *const std::ffi::c_char) -> CFMutableDictionaryRef;
+    fn IOServiceGetMatchingService(main_port: MachPort, matching: CFMutableDictionaryRef)
+        -> MachPort;
+    fn IOServiceOpen(
+        service: MachPort,
+        owning_task: MachPort,
+        connect_type: u32,
+        connect: *mut MachPort,
+    ) -> i32;
+    fn IOObjectRelease(object: MachPort) -> i32;
+    fn IOHIDGetModifierLockState(handle: MachPort, selector: i32, state: *mut bool) -> i32;
+    fn IOHIDSetModifierLockState(handle: MachPort, selector: i32, state: bool) -> i32;
+}
+
+extern "C" {
+    /// `mach_task_self()` is a macro over this global in C.
+    static mach_task_self_: MachPort;
+}
+
+/// The IOHIDSystem param connection, opened once and kept for the life of
+/// the process. Opening it is a Mach round-trip we don't want to pay inside
+/// the event-tap callback, where every microsecond counts against the tap's
+/// timeout budget. `Some(0)` never happens — a failed open leaves `None` and
+/// we simply stop trying to toggle.
+static HID_PARAM_CONNECT: Lazy<Mutex<Option<MachPort>>> = Lazy::new(|| Mutex::new(None));
+
+fn hid_param_connect() -> Option<MachPort> {
+    let mut cached = HID_PARAM_CONNECT.lock();
+    if let Some(conn) = *cached {
+        return Some(conn);
+    }
+    let conn = unsafe {
+        let class = std::ffi::CString::new("IOHIDSystem").ok()?;
+        let matching = IOServiceMatching(class.as_ptr());
+        if matching.is_null() {
+            return None;
+        }
+        // `IOServiceGetMatchingService` consumes the matching dictionary, so
+        // there's nothing to release on this line either way. A 0 main port
+        // is `kIOMainPortDefault` (`kIOMasterPortDefault` before macOS 12).
+        let service = IOServiceGetMatchingService(0, matching);
+        if service == 0 {
+            return None;
+        }
+        let mut conn: MachPort = 0;
+        let kr = IOServiceOpen(service, mach_task_self_, K_IO_HID_PARAM_CONNECT_TYPE, &mut conn);
+        IOObjectRelease(service);
+        if kr != 0 || conn == 0 {
+            eprintln!("[keyboard-remap] IOServiceOpen(IOHIDSystem) failed: {kr}");
+            return None;
+        }
+        conn
+    };
+    *cached = Some(conn);
+    Some(conn)
+}
+
+/// Flip the CapsLock lock state. Reads the current state first so the
+/// binding is a toggle rather than a one-way latch.
+pub(super) fn toggle_caps_lock() {
+    let Some(conn) = hid_param_connect() else {
+        return;
+    };
+    unsafe {
+        let mut state = false;
+        if IOHIDGetModifierLockState(conn, K_IO_HID_CAPS_LOCK_STATE, &mut state) != 0 {
+            return;
+        }
+        IOHIDSetModifierLockState(conn, K_IO_HID_CAPS_LOCK_STATE, !state);
     }
 }
 

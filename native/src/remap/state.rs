@@ -209,7 +209,7 @@ enum State {
     /// a real hold-to-talk binding.
     Comboing {
         trigger: LogicalKey,
-        combo_key: NamedKey,
+        combo_key: LogicalKey,
     },
     /// A transparent-modifier trigger (Shift, CapsLock-as-Ctrl, …) is
     /// physically held: we injected its `ModifierDown` the instant the
@@ -259,6 +259,36 @@ impl StateMachine {
             .cloned()
     }
 
+    /// The trigger whose layer is currently in flight, if any.
+    fn active_trigger(&self) -> Option<LogicalKey> {
+        match self.state {
+            State::Pending { trigger, .. }
+            | State::Modifying { trigger, .. }
+            | State::Comboing { trigger, .. }
+            | State::EagerModifier { trigger, .. } => Some(trigger),
+            State::Idle => None,
+        }
+    }
+
+    /// True when a modifier event belongs to the layer in flight rather
+    /// than to the user's own modifier usage. Two cases: it's the live
+    /// combo key of a `Comboing` chord (whose key-up tears the chord
+    /// down), or the layer has an explicit override keyed on it — the
+    /// `left_shift:` + `keys: [right_shift]` both-shifts chord. Everything
+    /// else keeps the blanket rule below: modifiers stay transparent
+    /// inside somebody else's layer, so Space+Shift+, still reaches
+    /// Shift+Home.
+    fn layer_claims(&self, key: LogicalKey, kind: EventKind) -> bool {
+        if let State::Comboing { combo_key, .. } = self.state {
+            return combo_key == key;
+        }
+        kind == EventKind::KeyDown
+            && self
+                .active_trigger()
+                .and_then(|t| self.binding_for(t))
+                .is_some_and(|b| b.claims_combo_key(key))
+    }
+
     pub fn on_event(&mut self, ev: RawEvent) -> Action {
         // Does this key itself have a rule? Treat it as a trigger candidate
         // if it does.
@@ -289,7 +319,11 @@ impl StateMachine {
             | State::EagerModifier { trigger, .. } => trigger == ev.key,
             State::Idle => false,
         };
-        if ev.key.is_modifier() && !matches!(self.state, State::Idle) && !is_current_trigger {
+        if ev.key.is_modifier()
+            && !matches!(self.state, State::Idle)
+            && !is_current_trigger
+            && !self.layer_claims(ev.key, ev.kind)
+        {
             if let State::Modifying { held, .. } = self.state {
                 if !held.is_empty() {
                     return Action::ForwardWithModifiers(held);
@@ -306,10 +340,9 @@ impl StateMachine {
         // generic tuple-match below so we don't need a Copy-stable
         // SmallVec inside the State variant.
         if let State::Comboing { trigger, combo_key } = self.state {
-            let combo_key_log = LogicalKey::Named(combo_key);
             // Combo-key KeyDown (incl. autorepeat) — chord modifiers
             // already held, just suppress.
-            if ev.kind == EventKind::KeyDown && ev.key == combo_key_log {
+            if ev.kind == EventKind::KeyDown && ev.key == combo_key {
                 return Action::Suppress;
             }
             // Trigger autorepeat KeyDown (e.g. OS-driven repeat of
@@ -318,7 +351,7 @@ impl StateMachine {
                 return Action::Suppress;
             }
             // Combo-key KeyUp — drop the chord, return to layer.
-            if ev.kind == EventKind::KeyUp && ev.key == combo_key_log {
+            if ev.kind == EventKind::KeyUp && ev.key == combo_key {
                 let release = self.combo_release.take().unwrap_or_default();
                 self.state = State::Modifying {
                     trigger,
@@ -374,6 +407,22 @@ impl StateMachine {
             }
             // Some other key goes down → the press is no longer a tap.
             if ev.kind == EventKind::KeyDown {
+                // An explicit combo on this layer (a modifier trigger that
+                // also carries rules — `left_shift:` + `keys: [right_shift]`)
+                // outranks the transparent-modifier role. Release the
+                // eagerly-pressed modifier first: the rule's output is
+                // written as a chord in its own right, and leaving Shift
+                // physically down would turn `to_hotkey: [left]` into
+                // Shift+Left. The layer's `fallback` re-presses it for the
+                // next key that has no rule, so capitals still work for the
+                // rest of the hold.
+                if let Some(b) = self.binding_for(trigger) {
+                    if b.on_hold.lookup(ev.modifiers, ev.key).is_some() {
+                        let action =
+                            self.handle_interruption(trigger, &b, ev.key, ev.modifiers);
+                        return prepend_release(modifier, action);
+                    }
+                }
                 // Another configured trigger preempts — but only when its hold
                 // layer actually wants the held modifier (or is itself a
                 // transparent layer). This mirrors the Pending→Pending preempt
@@ -479,13 +528,15 @@ impl StateMachine {
                     } else {
                         Action::Forward
                     }
-                } else if let ResolvedHold::TransparentModifier(m) = &b.on_hold {
-                    // Transparent-modifier trigger pressed clean (no external
-                    // modifier): press the real modifier NOW so it's genuinely
-                    // held for mouse clicks and any subsequent key — not only
-                    // after a keyboard interruption. A clean release still
-                    // fires on_tap (see the EagerModifier block above).
-                    let m = resolve_modifier_for_trigger(*m, t);
+                } else if let Some(m) = b.on_hold.eager_modifier() {
+                    // Eager layer pressed clean (no external modifier): press
+                    // the real modifier NOW so it's genuinely held for mouse
+                    // clicks and any subsequent key — not only after a
+                    // keyboard interruption. A clean release still fires
+                    // on_tap (see the EagerModifier block above). Covers both
+                    // a transparent layer and a modifier trigger that carries
+                    // explicit combos (`ResolvedHold::Explicit::eager`).
+                    let m = resolve_modifier_for_trigger(m, t);
                     self.state = State::EagerModifier {
                         trigger: t,
                         modifier: m,
@@ -759,10 +810,7 @@ impl StateMachine {
                 )
             }
 
-            ResolvedHold::Explicit {
-                overrides,
-                fallback,
-            } => {
+            ResolvedHold::Explicit { fallback, .. } => {
                 // Explicit override lookup: try the exact (modifiers, key)
                 // pair first, then fall back to the unqualified (empty,
                 // key) form so rules authored without modifier prefixes
@@ -784,58 +832,47 @@ impl StateMachine {
                 //     tap, so Space+H produces a continuous Left
                 //     arrow stream the way users expect from a nav
                 //     binding.
-                if let LogicalKey::Named(nk) = other {
-                    let pair = mods
-                        .lookup_candidates()
-                        .into_iter()
-                        .find_map(|candidate| overrides.get(&(candidate, nk)))
-                        .or_else(|| {
-                            if mods.is_empty() {
-                                None
-                            } else {
-                                overrides.get(&(ModifierMask::EMPTY, nk))
-                            }
-                        });
-                    if let Some(pair) = pair {
-                        // Enter the held (`Comboing`) path when the press
-                        // either holds modifiers (push-to-talk chord) or is a
-                        // one-shot window/desktop action. Those must fire
-                        // exactly once — not re-fire on every autorepeat the
-                        // way nav-style bindings do — because the platform
-                        // layer's alternate-desktop toggle would otherwise
-                        // ping-pong between desktops while the key stays
-                        // down, and a held close_window would walk through
-                        // the app's windows one autorepeat at a time.
-                        let enter_held = pair.on_press.iter().any(|e| {
-                            matches!(
-                                e,
-                                SyntheticEvent::ModifierDown(_)
-                                    | SyntheticEvent::SwitchToWorkspace(_)
-                                    | SyntheticEvent::CloseWindow
-                            )
-                        });
-                        if enter_held {
-                            // Emit press, stash the release sequence (empty
-                            // for a workspace switch — nothing to undo), and
-                            // wait for the combo key (or trigger) to come up.
-                            self.combo_release = Some(pair.on_release.clone());
-                            self.state = State::Comboing {
-                                trigger,
-                                combo_key: nk,
-                            };
-                            return Action::emit(pair.on_press.iter().copied());
-                        }
-                        // Nav-style: flat tap, stay in Modifying so
-                        // OS autorepeats keep re-firing the tap.
-                        self.state = State::Modifying {
+                if let Some(pair) = binding.on_hold.lookup(mods, other) {
+                    // Enter the held (`Comboing`) path when the press
+                    // either holds modifiers (push-to-talk chord) or is a
+                    // one-shot window/desktop/lock action. Those must fire
+                    // exactly once — not re-fire on every autorepeat the
+                    // way nav-style bindings do — because the platform
+                    // layer's alternate-desktop toggle would otherwise
+                    // ping-pong between desktops while the key stays
+                    // down, a held close_window would walk through the
+                    // app's windows one autorepeat at a time, and a held
+                    // CapsLock emit would flicker the lock on and off.
+                    let enter_held = pair.on_press.iter().any(|e| {
+                        matches!(
+                            e,
+                            SyntheticEvent::ModifierDown(_)
+                                | SyntheticEvent::SwitchToWorkspace(_)
+                                | SyntheticEvent::CloseWindow
+                                | SyntheticEvent::KeyDown(NamedKey::CapsLock)
+                        )
+                    });
+                    if enter_held {
+                        // Emit press, stash the release sequence (empty
+                        // for a workspace switch — nothing to undo), and
+                        // wait for the combo key (or trigger) to come up.
+                        self.combo_release = Some(pair.on_release.clone());
+                        self.state = State::Comboing {
                             trigger,
-                            held: ModifierMask::EMPTY,
+                            combo_key: other,
                         };
-                        let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
-                        events.extend(pair.on_press.iter().copied());
-                        events.extend(pair.on_release.iter().copied());
-                        return Action::Emit(events);
+                        return Action::emit(pair.on_press.iter().copied());
                     }
+                    // Nav-style: flat tap, stay in Modifying so
+                    // OS autorepeats keep re-firing the tap.
+                    self.state = State::Modifying {
+                        trigger,
+                        held: ModifierMask::EMPTY,
+                    };
+                    let mut events: SmallVec<[SyntheticEvent; 8]> = SmallVec::new();
+                    events.extend(pair.on_press.iter().copied());
+                    events.extend(pair.on_release.iter().copied());
+                    return Action::Emit(events);
                 }
 
                 // No override → fallback modifiers, if configured.
@@ -871,12 +908,41 @@ impl StateMachine {
     }
 }
 
+/// Prepend a `ModifierUp` to whatever an action already emits, so an
+/// eagerly-pressed modifier is released before the layer's own output goes
+/// out. `Forward` carries no emit list of its own, so it grows into an
+/// `EmitThenForwardWithModifiers` that injects the release and then lets
+/// the user's real event through untouched.
+fn prepend_release(modifier: Modifier, action: Action) -> Action {
+    let release = SyntheticEvent::ModifierUp(modifier);
+    let only: SmallVec<[SyntheticEvent; 8]> = smallvec::smallvec![release];
+    match action {
+        Action::Emit(mut events) => {
+            events.insert(0, release);
+            Action::Emit(events)
+        }
+        Action::EmitTap(mut events) => {
+            events.insert(0, release);
+            Action::EmitTap(events)
+        }
+        Action::EmitThenForwardWithModifiers(mut events, mask) => {
+            events.insert(0, release);
+            Action::EmitThenForwardWithModifiers(events, mask)
+        }
+        Action::Forward => Action::EmitThenForwardWithModifiers(only, ModifierMask::EMPTY),
+        Action::ForwardWithModifiers(mask) => {
+            Action::EmitThenForwardWithModifiers(only, mask)
+        }
+        Action::Suppress => Action::Emit(only),
+    }
+}
+
 /// Map a logical-key trigger to the modifier bit it sets in its OWN keydown
 /// event. Used to distinguish "self-modifier flag set because the trigger is
 /// what just went down" from "external modifier held" when deciding whether
 /// a trigger-down from Idle should start a layer or pass through as part of
 /// an OS chord.
-fn key_self_modifier(k: LogicalKey) -> Option<Modifier> {
+pub(super) fn key_self_modifier(k: LogicalKey) -> Option<Modifier> {
     match k {
         LogicalKey::Shift => Some(Modifier::Shift),
         LogicalKey::LeftShift => Some(Modifier::LeftShift),
@@ -986,6 +1052,21 @@ mod tests {
 capslock:
   on_tap: [escape]
   on_hold: [ctrl]
+"#;
+
+    /// The classic both-shifts-toggle-CapsLock chord, symmetric so
+    /// either Shift can be the one held. Each Shift keeps its own tap
+    /// hotkey and — via the implicit eager/fallback modifier — its day
+    /// job as Shift.
+    const BOTH_SHIFTS_CAPS: &str = r#"
+left_shift:
+  on_tap: [ctrl, alt, cmd, a]
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [capslock] }
+right_shift:
+  on_tap: [ctrl, alt, cmd, w]
+  on_hold:
+    - { keys: [left_shift], to_hotkey: [capslock] }
 "#;
 
     const SPACE_MAC: &str = r#"
@@ -2377,5 +2458,196 @@ left_shift:
             vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)]
         );
         assert_eq!(m.on_event(up(LogicalKey::CapsLock)), Action::Forward);
+    }
+
+    // -----------------------------------------------------------------
+    // Modifier-keyed combos (both-shifts → CapsLock)
+
+    fn mask(mods: &[Modifier]) -> ModifierMask {
+        let mut m = ModifierMask::EMPTY;
+        for md in mods {
+            m.insert(*md);
+        }
+        m
+    }
+
+    fn caps_down() -> SyntheticEvent {
+        SyntheticEvent::KeyDown(NamedKey::CapsLock)
+    }
+    fn caps_up() -> SyntheticEvent {
+        SyntheticEvent::KeyUp(NamedKey::CapsLock)
+    }
+
+    #[test]
+    fn holding_left_shift_and_pressing_right_shift_toggles_capslock() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        // Left Shift goes down eagerly — it is still a Shift.
+        assert_eq!(
+            m.on_event(down(LogicalKey::LeftShift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::LeftShift)])
+        );
+        // Right Shift is claimed by the layer: release the eager Shift so
+        // the toggle isn't chorded with it, then fire CapsLock.
+        assert_eq!(
+            m.on_event(down_with_mods(
+                LogicalKey::RightShift,
+                mask(&[Modifier::LeftShift, Modifier::RightShift])
+            )),
+            emit(vec![
+                SyntheticEvent::ModifierUp(Modifier::LeftShift),
+                caps_down()
+            ])
+        );
+        // Combo key up tears the chord down; trigger up is a hold, not a tap.
+        assert_eq!(m.on_event(up(LogicalKey::RightShift)), emit(vec![caps_up()]));
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), Action::Suppress);
+    }
+
+    #[test]
+    fn the_chord_works_with_the_shifts_the_other_way_round() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        assert_eq!(
+            m.on_event(down(LogicalKey::RightShift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::RightShift)])
+        );
+        assert_eq!(
+            m.on_event(down(LogicalKey::LeftShift)),
+            emit(vec![
+                SyntheticEvent::ModifierUp(Modifier::RightShift),
+                caps_down()
+            ])
+        );
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), emit(vec![caps_up()]));
+        assert_eq!(m.on_event(up(LogicalKey::RightShift)), Action::Suppress);
+    }
+
+    #[test]
+    fn releasing_the_trigger_first_still_tears_the_chord_down() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        m.on_event(down(LogicalKey::RightShift));
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), emit(vec![caps_up()]));
+    }
+
+    #[test]
+    fn a_held_capslock_combo_fires_exactly_once() {
+        // Windows autorepeats a held modifier's KeyDown. Firing per repeat
+        // would flicker the lock on and off.
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        m.on_event(down(LogicalKey::RightShift));
+        assert_eq!(
+            m.on_event(down_autorepeat(LogicalKey::RightShift)),
+            Action::Suppress
+        );
+        assert_eq!(
+            m.on_event(down_autorepeat(LogicalKey::LeftShift)),
+            Action::Suppress
+        );
+    }
+
+    #[test]
+    fn a_shift_carrying_a_combo_is_still_a_shift() {
+        // The whole point of the implicit eager modifier: adding one rule
+        // to `left_shift:` must not cost the user capital letters.
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        assert_eq!(
+            m.on_event(down(LogicalKey::LeftShift)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::LeftShift)])
+        );
+        assert_eq!(
+            m.on_event(down(alpha('A'))),
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::LeftShift))
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::LeftShift)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::LeftShift)])
+        );
+    }
+
+    #[test]
+    fn shift_still_capitalises_after_the_combo_has_fired() {
+        // The eager Shift was released to fire the toggle; the layer's
+        // implicit fallback has to press it again for the next plain key.
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        m.on_event(down(LogicalKey::RightShift));
+        m.on_event(up(LogicalKey::RightShift));
+        assert_eq!(
+            m.on_event(down(alpha('A'))),
+            Action::emit_then_forward_with_modifiers(
+                [SyntheticEvent::ModifierDown(Modifier::LeftShift)],
+                ModifierMask::just(Modifier::LeftShift)
+            )
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::LeftShift)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::LeftShift)])
+        );
+    }
+
+    #[test]
+    fn a_shift_carrying_a_combo_still_taps() {
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        assert_eq!(
+            m.on_event(up(LogicalKey::LeftShift)),
+            emit_tap(vec![
+                SyntheticEvent::ModifierUp(Modifier::LeftShift),
+                SyntheticEvent::ModifierDown(Modifier::Ctrl),
+                SyntheticEvent::ModifierDown(Modifier::Alt),
+                SyntheticEvent::ModifierDown(Modifier::Cmd),
+                SyntheticEvent::KeyDown(NamedKey::Alpha(b'A')),
+                SyntheticEvent::KeyUp(NamedKey::Alpha(b'A')),
+                SyntheticEvent::ModifierUp(Modifier::Cmd),
+                SyntheticEvent::ModifierUp(Modifier::Alt),
+                SyntheticEvent::ModifierUp(Modifier::Ctrl),
+            ])
+        );
+    }
+
+    #[test]
+    fn an_unclaimed_modifier_still_passes_through_the_layer() {
+        // Only the modifier a rule names is consumed. Ctrl has no rule
+        // under `left_shift:`, so it stays transparent — the existing
+        // "modifiers don't interrupt somebody else's layer" contract.
+        let mut m = sm(BOTH_SHIFTS_CAPS);
+        m.on_event(down(LogicalKey::LeftShift));
+        assert_eq!(m.on_event(down(LogicalKey::LeftCtrl)), Action::Forward);
+        assert_eq!(m.on_event(up(LogicalKey::LeftCtrl)), Action::Forward);
+    }
+
+    #[test]
+    fn a_modifier_combo_under_a_plain_trigger_works_too() {
+        // Nothing about this is Shift-specific: any trigger can name a
+        // modifier as its combo key.
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [left_shift], to_hotkey: [capslock] }
+"#;
+        let mut m = sm(src);
+        assert_eq!(m.on_event(down(LogicalKey::Space)), Action::Suppress);
+        assert_eq!(
+            m.on_event(down(LogicalKey::LeftShift)),
+            emit(vec![caps_down()])
+        );
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), emit(vec![caps_up()]));
+        assert_eq!(m.on_event(up(LogicalKey::Space)), Action::Suppress);
+    }
+
+    #[test]
+    fn an_unsided_modifier_combo_key_matches_either_side() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: [shift], to_hotkey: [capslock] }
+"#;
+        for side in [LogicalKey::LeftShift, LogicalKey::RightShift] {
+            let mut m = sm(src);
+            m.on_event(down(LogicalKey::Space));
+            assert_eq!(m.on_event(down(side)), emit(vec![caps_down()]));
+        }
     }
 }

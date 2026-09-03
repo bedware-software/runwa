@@ -458,6 +458,9 @@ fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
         NamedKey::Period => VK_OEM_PERIOD,
         NamedKey::Slash => VK_OEM_2,
         NamedKey::Apps => VK_APPS,
+        // SendInput of VK_CAPITAL drives the real lock state on Windows —
+        // no special casing needed, unlike macOS.
+        NamedKey::CapsLock => VK_CAPITAL,
         NamedKey::Alpha(b) => VIRTUAL_KEY(b as u16),
     }
 }

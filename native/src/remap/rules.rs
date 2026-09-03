@@ -21,6 +21,11 @@
 //! right_shift:
 //!   on_tap: [escape]           # only the physical right Shift
 //!
+//! left_shift:                  # hold one Shift, tap the other → CapsLock.
+//!   on_tap: [ctrl, alt, cmd, a]  # A combo key may be a modifier; the trigger
+//!   on_hold:                     # still acts as Shift for everything else.
+//!     - { keys: [right_shift], to_hotkey: [capslock] }
+//!
 //! space:
 //!   on_tap: [space]
 //!   on_hold:
@@ -41,7 +46,7 @@ use serde::Deserialize;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
-use super::state::LogicalKey;
+use super::state::{key_self_modifier, LogicalKey};
 
 // ---------------------------------------------------------------------------
 // Public data shapes (logical modifiers / pre-baked synthetic events).
@@ -335,6 +340,13 @@ pub enum NamedKey {
     Escape,
     Space,
     Tab,
+    /// CapsLock as an *output*. Emitting this toggles the lock state:
+    /// Windows sends `VK_CAPITAL`, macOS drives the HID driver's lock
+    /// latch directly (a posted `kVK_CapsLock` event does nothing there —
+    /// the same reason a `capslock:` trigger needs the hidutil→F19
+    /// detour). As an *input* the physical key stays `LogicalKey::CapsLock`,
+    /// so `capslock:` and `keys: [capslock]` are unaffected.
+    CapsLock,
     Return,
     Delete,
     F1,
@@ -497,6 +509,20 @@ impl ResolvedBinding {
             ResolvedHold::TransparentModifier(_) | ResolvedHold::Passthrough => false,
         }
     }
+
+    /// True when this trigger's hold layer has an explicit override whose
+    /// combo key is `key` (or its unsided spelling). The state machine asks
+    /// before letting the blanket "modifiers stay transparent inside a
+    /// layer" rule swallow a modifier key-down that a rule wants to claim.
+    pub fn claims_combo_key(&self, key: LogicalKey) -> bool {
+        let ResolvedHold::Explicit { overrides, .. } = &self.on_hold else {
+            return false;
+        };
+        let generic = unsided_modifier_key(key);
+        overrides
+            .keys()
+            .any(|(_, k)| *k == key || Some(*k) == generic)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -504,24 +530,97 @@ pub enum ResolvedHold {
     /// While the trigger is held, it acts as this logical modifier.
     TransparentModifier(Modifier),
     /// Explicit per-combo overrides keyed by (required physical modifiers,
-    /// trigger `NamedKey`). The state machine resolves the incoming event
-    /// to `(mods, NamedKey)` and first tries the exact-modifier lookup; if
+    /// combo `LogicalKey`). The state machine resolves the incoming event
+    /// to `(mods, key)` and first tries the exact-modifier lookup; if
     /// that misses it falls back to the `(EMPTY, key)` form so existing
     /// unqualified rules like `keys: [w]` still fire under a Shift-held
     /// press (the fallback-modifier path stamps the physical modifier on
     /// the synthesized output).
+    ///
+    /// The combo key is a `LogicalKey`, not a `NamedKey`, so a modifier can
+    /// be one: `left_shift:` + `keys: [right_shift]` is the classic
+    /// both-shifts-toggle-CapsLock chord.
     Explicit {
-        overrides: HashMap<(ModifierMask, NamedKey), EmitPair>,
+        overrides: HashMap<(ModifierMask, LogicalKey), EmitPair>,
         /// Fallback modifiers for unmapped combos, empty when none. Sourced
         /// from a rule whose `keys: [any]` (legacy `[_default]`) lists one or
         /// more modifiers in `to_hotkey`, e.g. `to_hotkey: [ctrl, shift]`.
         /// While the trigger is held, a key without an explicit override is
         /// forwarded with all of these modifiers stamped on it.
         fallback: ModifierMask,
+        /// Set for a modifier trigger that didn't declare its own
+        /// `keys: [any]` rule: the modifier is pressed the instant the
+        /// trigger goes down, exactly as `TransparentModifier` does, so
+        /// adding one combo to `left_shift:` doesn't silently cost you
+        /// capital letters, Shift+click or Shift+scroll. `fallback` is set
+        /// to the same modifier, which covers the rest of the hold once an
+        /// override has fired.
+        eager: Option<Modifier>,
     },
     /// Hold does nothing special — behave as the raw key. Used when the
     /// user wants to remap only `on_tap` without a layer.
     Passthrough,
+}
+
+impl ResolvedHold {
+    /// The modifier to press the moment the trigger goes down, if this
+    /// layer wants one. Both a transparent layer and a modifier trigger's
+    /// explicit layer do — see `Explicit::eager`.
+    pub fn eager_modifier(&self) -> Option<Modifier> {
+        match self {
+            ResolvedHold::TransparentModifier(m) => Some(*m),
+            ResolvedHold::Explicit { eager, .. } => *eager,
+            ResolvedHold::Passthrough => None,
+        }
+    }
+
+    /// Look an incoming `(modifiers, key)` event up in this layer's
+    /// explicit overrides. Tries the exact physical-side mask first, then
+    /// the generalised forms (`keys: [shift, 1]` matching either Shift),
+    /// then the unqualified `keys: [1]` rule. A modifier combo key also
+    /// falls back to its unsided spelling, so `keys: [shift]` fires for
+    /// whichever Shift the user pressed.
+    pub fn lookup(&self, mods: ModifierMask, key: LogicalKey) -> Option<&EmitPair> {
+        let ResolvedHold::Explicit { overrides, .. } = self else {
+            return None;
+        };
+        let mut key_forms: SmallVec<[LogicalKey; 2]> = SmallVec::new();
+        key_forms.push(key);
+        if let Some(generic) = unsided_modifier_key(key) {
+            key_forms.push(generic);
+        }
+        for k in key_forms {
+            let hit = mods
+                .lookup_candidates()
+                .into_iter()
+                .find_map(|candidate| overrides.get(&(candidate, k)))
+                .or_else(|| {
+                    if mods.is_empty() {
+                        None
+                    } else {
+                        overrides.get(&(ModifierMask::EMPTY, k))
+                    }
+                });
+            if hit.is_some() {
+                return hit;
+            }
+        }
+        None
+    }
+}
+
+/// The unsided spelling of a sided modifier key, so a `keys: [shift]`
+/// override matches a physical left- or right-Shift press. Mirrors
+/// `state::generic_modifier_key`, which does the same job for trigger
+/// lookup.
+fn unsided_modifier_key(k: LogicalKey) -> Option<LogicalKey> {
+    match k {
+        LogicalKey::LeftShift | LogicalKey::RightShift => Some(LogicalKey::Shift),
+        LogicalKey::LeftCtrl | LogicalKey::RightCtrl => Some(LogicalKey::Ctrl),
+        LogicalKey::LeftAlt | LogicalKey::RightAlt => Some(LogicalKey::Alt),
+        LogicalKey::LeftCmd | LogicalKey::RightCmd => Some(LogicalKey::Cmd),
+        _ => None,
+    }
 }
 
 /// Split synthesis sequence for an on_hold combo emit. The state
@@ -839,7 +938,7 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 }
             },
             HoldSpec::Rules(list) => {
-                let mut overrides: HashMap<(ModifierMask, NamedKey), EmitPair> = HashMap::new();
+                let mut overrides: HashMap<(ModifierMask, LogicalKey), EmitPair> = HashMap::new();
                 let mut fallback = ModifierMask::EMPTY;
 
                 for rule in &list {
@@ -921,16 +1020,50 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                     }
                     }
 
-                    let trigger_key = parse_named_key(trigger_raw)
-                        .ok_or_else(|| format!("unknown trigger key '{trigger_raw}' in rule"))?;
+                    // `parse_trigger_key`, not `parse_named_key`: a combo key
+                    // may be a modifier (`keys: [right_shift]`), CapsLock or
+                    // Space, the same vocabulary the top-level trigger names
+                    // use — the two sit on opposite ends of the same chord.
+                    let trigger_key = parse_trigger_key(trigger_raw).ok_or_else(|| {
+                        format!(
+                            "unknown trigger key '{trigger_raw}' in rule — expected a logical \
+                             key name like a letter, a named key (escape/tab/…), a punctuation \
+                             alias, a modifier (shift/right_shift/ctrl/…), capslock, space, or \
+                             `any` for the catch-all rule"
+                        )
+                    })?;
+                    if trigger_key == trigger {
+                        return Err(format!(
+                            "rule '{}': keys: [{trigger_raw}] is the trigger itself — a key \
+                             can't interrupt its own hold layer",
+                            rule.description.as_deref().unwrap_or("<unnamed>"),
+                        ));
+                    }
 
                     let events = bake_rule_action(rule)?;
                     overrides.insert((mods, trigger_key), events);
                 }
 
+                // A modifier trigger must keep behaving like its modifier
+                // for everything the rules don't claim — the same invariant
+                // `default_on_hold` protects. Without this, adding a single
+                // `keys: [right_shift]` combo to `left_shift:` would cost
+                // the user capital letters. A hand-written `keys: [any]`
+                // rule means they've chosen their own fallback, so leave
+                // that alone.
+                let eager = if fallback.is_empty() {
+                    key_self_modifier(trigger)
+                } else {
+                    None
+                };
+                if let Some(m) = eager {
+                    fallback = ModifierMask::just(m);
+                }
+
                 ResolvedHold::Explicit {
                     overrides,
                     fallback,
+                    eager,
                 }
             }
         },
@@ -1189,6 +1322,10 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "space" => Some(NamedKey::Space),
         "tab" => Some(NamedKey::Tab),
         "return" | "enter" => Some(NamedKey::Return),
+        // Only reachable as an emit target (`to_hotkey: [capslock]`):
+        // `parse_trigger_key` claims the same spellings first, so a
+        // trigger or `keys:` entry still resolves to LogicalKey::CapsLock.
+        "capslock" | "caps_lock" | "caps" => Some(NamedKey::CapsLock),
         "delete" | "backspace" => Some(NamedKey::Delete),
         "f1" => Some(NamedKey::F1),
         "f2" => Some(NamedKey::F2),
@@ -1305,10 +1442,10 @@ mod tests {
         NamedKey::Alpha(c as u8)
     }
 
-    /// Shorthand for the `(ModifierMask, NamedKey)` map key the override
+    /// Shorthand for the `(ModifierMask, LogicalKey)` map key the override
     /// table uses. Covers the common case of unqualified rules.
-    fn ov(nk: NamedKey) -> (ModifierMask, NamedKey) {
-        (ModifierMask::EMPTY, nk)
+    fn ov(nk: NamedKey) -> (ModifierMask, LogicalKey) {
+        (ModifierMask::EMPTY, LogicalKey::Named(nk))
     }
 
     fn binding<'a>(r: &'a ResolvedRules, key: LogicalKey) -> &'a ResolvedBinding {
@@ -1362,8 +1499,7 @@ space:
         let s = binding(&r, LogicalKey::Space);
         match &s.on_hold {
             ResolvedHold::Explicit {
-                overrides,
-                fallback,
+                overrides, fallback, ..
             } => {
                 assert_eq!(*fallback, ModifierMask::just(Modifier::Cmd));
                 let pair = overrides.get(&ov(alpha('W'))).expect("W override present");
@@ -1863,7 +1999,7 @@ space:
             ResolvedHold::Explicit { overrides, .. } => {
                 let mut ctrl_mask = ModifierMask::EMPTY;
                 ctrl_mask.insert(Modifier::Ctrl);
-                assert!(overrides.contains_key(&(ctrl_mask, alpha('L'))));
+                assert!(overrides.contains_key(&(ctrl_mask, LogicalKey::Named(alpha('L')))));
                 assert!(overrides.contains_key(&ov(alpha('W'))));
                 assert_eq!(overrides.len(), 2);
             }
@@ -1929,7 +2065,7 @@ space:
                 let mut mask = ModifierMask::EMPTY;
                 mask.insert(Modifier::RightShift);
                 let pair = overrides
-                    .get(&(mask, alpha('1')))
+                    .get(&(mask, LogicalKey::Named(alpha('1'))))
                     .expect("right-shift override present");
                 assert_eq!(
                     pair.on_press.as_slice(),
@@ -2041,5 +2177,114 @@ space:
                 panic!("shift default on_hold should be TransparentModifier(Shift), got {other:?}")
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Modifier combo keys + CapsLock as an emit target
+
+    #[test]
+    fn a_modifier_can_be_a_combo_key() {
+        let src = r#"
+left_shift:
+  on_tap: [ctrl, alt, cmd, a]
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [capslock] }
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::LeftShift).on_hold {
+            ResolvedHold::Explicit {
+                overrides,
+                fallback,
+                eager,
+            } => {
+                let pair = overrides
+                    .get(&(ModifierMask::EMPTY, LogicalKey::RightShift))
+                    .expect("right_shift override present");
+                assert_eq!(
+                    pair.on_press.as_slice(),
+                    &[SyntheticEvent::KeyDown(NamedKey::CapsLock)]
+                );
+                assert_eq!(
+                    pair.on_release.as_slice(),
+                    &[SyntheticEvent::KeyUp(NamedKey::CapsLock)]
+                );
+                // A modifier trigger that grows rules keeps its day job.
+                assert_eq!(*eager, Some(Modifier::LeftShift));
+                assert_eq!(*fallback, ModifierMask::just(Modifier::LeftShift));
+            }
+            other => panic!("expected explicit hold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_hand_written_any_rule_wins_over_the_implicit_fallback() {
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [capslock] }
+    - { keys: [any], to_hotkey: [ctrl] }
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::LeftShift).on_hold {
+            ResolvedHold::Explicit {
+                fallback, eager, ..
+            } => {
+                assert_eq!(*eager, None);
+                assert_eq!(*fallback, ModifierMask::just(Modifier::Ctrl));
+            }
+            other => panic!("expected explicit hold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_non_modifier_trigger_gets_no_implicit_fallback() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: [left_shift], to_hotkey: [capslock] }
+"#;
+        let r = parse(src).unwrap();
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit {
+                fallback, eager, ..
+            } => {
+                assert_eq!(*eager, None);
+                assert!(fallback.is_empty());
+            }
+            other => panic!("expected explicit hold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capslock_is_an_emit_target_and_still_a_trigger_name() {
+        // `to_hotkey: [capslock]` bakes a NamedKey the platform layers
+        // turn into a lock toggle...
+        assert_eq!(parse_named_key("capslock"), Some(NamedKey::CapsLock));
+        // ...while the trigger/`keys:` vocabulary keeps resolving the
+        // physical key to LogicalKey::CapsLock.
+        assert_eq!(parse_trigger_key("capslock"), Some(LogicalKey::CapsLock));
+    }
+
+    #[test]
+    fn a_rule_cannot_name_its_own_trigger() {
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [left_shift], to_hotkey: [capslock] }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("the trigger itself"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_combo_key_still_names_the_modifier_vocabulary() {
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [nonsense], to_hotkey: [capslock] }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("unknown trigger key 'nonsense'"), "{err}");
+        assert!(err.contains("shift/right_shift"), "{err}");
     }
 }

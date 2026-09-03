@@ -43,11 +43,24 @@
  *                                                            [shift, 1]       either Shift held
  *                                                            [right_shift, 1] right Shift only
  *                                                            [ctrl, shift, 1]
+ *                                                          The trigger key may itself be a
+ *                                                          modifier — `left_shift:` with
+ *                                                          `keys: [right_shift]` is the classic
+ *                                                          both-shifts chord. An unsided name
+ *                                                          (`[shift]`) matches either side. A
+ *                                                          modifier trigger that grows rules
+ *                                                          keeps acting as its modifier for
+ *                                                          everything the rules don't claim, so
+ *                                                          Shift still capitalises.
  *       <exactly one action>:
  *         to_hotkey:            [mod, ..., key]    emit this key combo. Keys include the
  *                                                  named `apps` / `menu` key (Windows
  *                                                  {AppsKey} / context menu; no-op on macOS —
- *                                                  use [shift, f10] there instead).
+ *                                                  use [shift, f10] there instead) and
+ *                                                  `capslock`, which toggles the lock (Windows
+ *                                                  sends VK_CAPITAL; macOS drives the HID
+ *                                                  driver's latch, since no posted keystroke
+ *                                                  can move it).
  *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
  *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
  *         change_language:      <code>             switch system input language to a code like
@@ -104,10 +117,16 @@ capslock:
   on_tap: [escape]
   on_hold: [ctrl]
 
+# Holding either Shift and tapping the other toggles CapsLock. Both blocks
+# keep working as ordinary Shift for everything else.
 left_shift:
   on_tap: [ctrl, opt, cmd, a]
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [capslock] }
 right_shift:
   on_tap: [ctrl, opt, cmd, w]
+  on_hold:
+    - { keys: [left_shift], to_hotkey: [capslock] }
 
 left_opt:
   on_tap: [f7]
