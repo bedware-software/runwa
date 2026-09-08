@@ -50,11 +50,15 @@ import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
  * built-in route to settings is always available.
  */
 
+/** Keyboard Remap actions the palette can drive without opening settings:
+ *  open the rules YAML in an editor, then re-install the hook from it. */
+type KeyboardRemapCommand = 'edit-rules' | 'reload-rules'
+
 type CommandKind =
   | { kind: 'window'; command: WindowCommand }
   | { kind: 'open-settings'; tab?: SettingsTabId }
   | { kind: 'auto-dark-mode'; command: 'schedule' | 'toggle' }
-  | { kind: 'keyboard-remap'; command: 'edit-rules' }
+  | { kind: 'keyboard-remap'; command: KeyboardRemapCommand }
   | { kind: 'create-user-command' }
 
 /**
@@ -245,7 +249,20 @@ const STATIC_COMMANDS: CommandDef[] = [
     action: { kind: 'keyboard-remap', command: 'edit-rules' },
     requiresModuleId: KEYBOARD_REMAP_ID,
     configDescription:
-      'Open keyboard-rules.yaml in the system editor — the same thing the Edit button in Keyboard Remap settings does. The file is seeded from the template if it does not exist yet; edits take effect after Reload in settings.'
+      'Open keyboard-rules.yaml in the system editor — the same thing the Edit button in Keyboard Remap settings does. The file is seeded from the template if it does not exist yet; edits take effect once the rules are reloaded.'
+  },
+  {
+    id: 'reload-keyboard-remap-rules',
+    title: 'Reload Keyboard Remap rules',
+    icon: 'refresh-cw',
+    subtitle: 'Re-install the hook from the edited YAML — no restart.',
+    group: 'Keyboard Remap',
+    configKey: 'enableReloadKeyboardRemapRules',
+    defaultEnabled: true,
+    action: { kind: 'keyboard-remap', command: 'reload-rules' },
+    requiresModuleId: KEYBOARD_REMAP_ID,
+    configDescription:
+      'Re-read keyboard-rules.yaml and re-install the hook, the same as the Reload button in Keyboard Remap settings. A Desktop Hint confirms the reload, or reports why the file was rejected — invalid rules leave the previous working remap active.'
   }
 ]
 
@@ -271,7 +288,7 @@ interface AutoDarkModeAction {
 
 interface KeyboardRemapAction {
   kind: 'keyboard-remap'
-  command: 'edit-rules'
+  command: KeyboardRemapCommand
 }
 
 interface CreateUserCommandAction {
@@ -304,7 +321,8 @@ function isActionPayload(a: unknown): a is ActionPayload {
     return command === 'schedule' || command === 'toggle'
   }
   if (k === 'keyboard-remap') {
-    return (a as { command?: unknown }).command === 'edit-rules'
+    const command = (a as { command?: unknown }).command
+    return command === 'edit-rules' || command === 'reload-rules'
   }
   if (k === 'create-user-command') return true
   return false
@@ -680,6 +698,22 @@ export function createCommandPaletteModule(
           command.action.command !== item.action.command ||
           !commandIsEnabledNow(command)
         ) {
+          return { dismissPalette: false }
+        }
+
+        if (item.action.command === 'reload-rules') {
+          // Nothing new comes to the front — the reload reports itself
+          // through a focusless Desktop Hint — so hand focus back to
+          // whatever the user was editing the rules in.
+          paletteWindow.hide(true)
+          try {
+            keyboardRemapService.reloadFromCommand()
+          } catch (error) {
+            console.warn(
+              '[command-palette] reloading keyboard rules failed:',
+              error
+            )
+          }
           return { dismissPalette: false }
         }
 

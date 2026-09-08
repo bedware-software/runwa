@@ -3,13 +3,23 @@ import fs from 'fs'
 import path from 'path'
 import type { KeyboardRemapRulesView } from '@shared/types'
 import { startKeyboardRemap, stopKeyboardRemap, validateKeyboardRemap } from './native'
+import { desktopHintWindow } from '../../desktop-hint-window'
 import { openPathAsUser } from '../../elevation'
+import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { RULES_TEMPLATE } from './rules-template'
 import { buildRulesView } from './rules-view'
 import {
   isAccessibilityTrusted,
   requestAccessibilityPermission
 } from '../window-switcher/native'
+
+const DESKTOP_HINT_SOURCE = KEYBOARD_REMAP_ID
+const HINT_DURATION_MS = 2200
+/** Failures carry a reason worth reading, so they linger. */
+const ERROR_HINT_DURATION_MS = 6000
+/** Hint surface is 300 px wide — past this the box grows taller than the
+ *  glance it is meant to be. The console keeps the untruncated error. */
+const HINT_MESSAGE_MAX_CHARS = 140
 
 /**
  * Lifecycle owner for the native keyboard-remap hook.
@@ -75,6 +85,25 @@ class KeyboardRemapService {
     // Make sure the file exists before asking the OS to open it.
     this.loadOrInitRulesFile()
     await openPathAsUser(p)
+  }
+
+  /**
+   * Command Palette action: re-install the hook from disk and report the
+   * outcome through the shared Desktop Hint. Same work as the settings
+   * Reload button, minus the panel that would otherwise render the
+   * returned view — the point of the command is not having to open
+   * settings after editing the YAML.
+   */
+  reloadFromCommand(): KeyboardRemapRulesView {
+    const view = this.reload()
+    desktopHintWindow.show({
+      source: DESKTOP_HINT_SOURCE,
+      message: view.error
+        ? hintMessage(view.error)
+        : 'Keyboard rules reloaded',
+      durationMs: view.error ? ERROR_HINT_DURATION_MS : HINT_DURATION_MS
+    })
+    return view
   }
 
   /**
@@ -217,6 +246,14 @@ class KeyboardRemapService {
       return RULES_TEMPLATE
     }
   }
+}
+
+/** Collapse a multi-line parser error into one hint-sized line. */
+function hintMessage(error: string): string {
+  const flat = error.replace(/\s+/g, ' ').trim()
+  return flat.length > HINT_MESSAGE_MAX_CHARS
+    ? `${flat.slice(0, HINT_MESSAGE_MAX_CHARS - 1).trimEnd()}…`
+    : flat
 }
 
 function errorMessage(err: unknown): string {
