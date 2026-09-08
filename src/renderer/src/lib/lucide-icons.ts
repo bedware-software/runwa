@@ -57,6 +57,7 @@ const ICONS_BY_HINT = {
   mic: Mic,
   'minimize-2': Minimize2,
   package: Package,
+  pencil: Pencil,
   plus: Plus,
   'refresh-cw': RefreshCw,
   replace: Replace,

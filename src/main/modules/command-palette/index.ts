@@ -22,6 +22,8 @@ import {
 } from '../user-commands/scope'
 import { userCommandsStore } from '../user-commands/store'
 import { autoDarkModeService } from '../auto-dark-mode/service'
+import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
+import { keyboardRemapService } from '../keyboard-remap/service'
 import { appDisplayName, focusContext, type FocusedApp } from '../../focus-context'
 import { AUTO_DARK_MODE_ID } from '@shared/auto-dark-mode'
 import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
@@ -52,6 +54,7 @@ type CommandKind =
   | { kind: 'window'; command: WindowCommand }
   | { kind: 'open-settings'; tab?: SettingsTabId }
   | { kind: 'auto-dark-mode'; command: 'schedule' | 'toggle' }
+  | { kind: 'keyboard-remap'; command: 'edit-rules' }
   | { kind: 'create-user-command' }
 
 /**
@@ -230,6 +233,19 @@ const STATIC_COMMANDS: CommandDef[] = [
     requiresModuleId: AUTO_DARK_MODE_ID,
     configDescription:
       'Switch the system appearance and enter Manual mode so the schedule does not immediately undo the change.'
+  },
+  {
+    id: 'edit-keyboard-remap-rules',
+    title: 'Edit Keyboard Remap rules',
+    icon: 'pencil',
+    subtitle: 'Open the tap/hold rules YAML in your system editor.',
+    group: 'Keyboard Remap',
+    configKey: 'enableEditKeyboardRemapRules',
+    defaultEnabled: true,
+    action: { kind: 'keyboard-remap', command: 'edit-rules' },
+    requiresModuleId: KEYBOARD_REMAP_ID,
+    configDescription:
+      'Open keyboard-rules.yaml in the system editor — the same thing the Edit button in Keyboard Remap settings does. The file is seeded from the template if it does not exist yet; edits take effect after Reload in settings.'
   }
 ]
 
@@ -253,6 +269,11 @@ interface AutoDarkModeAction {
   command: 'schedule' | 'toggle'
 }
 
+interface KeyboardRemapAction {
+  kind: 'keyboard-remap'
+  command: 'edit-rules'
+}
+
 interface CreateUserCommandAction {
   kind: 'create-user-command'
 }
@@ -262,6 +283,7 @@ type ActionPayload =
   | OpenSettingsAction
   | UserCommandAction
   | AutoDarkModeAction
+  | KeyboardRemapAction
   | CreateUserCommandAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
@@ -280,6 +302,9 @@ function isActionPayload(a: unknown): a is ActionPayload {
   if (k === 'auto-dark-mode') {
     const command = (a as { command?: unknown }).command
     return command === 'schedule' || command === 'toggle'
+  }
+  if (k === 'keyboard-remap') {
+    return (a as { command?: unknown }).command === 'edit-rules'
   }
   if (k === 'create-user-command') return true
   return false
@@ -304,6 +329,7 @@ function requiredModuleEnabled(moduleId: ModuleId | undefined): boolean {
 function actionKindFor(action: CommandKind): string {
   if (action.kind === 'open-settings') return 'open-settings'
   if (action.kind === 'auto-dark-mode') return 'auto-dark-mode'
+  if (action.kind === 'keyboard-remap') return 'keyboard-remap'
   if (action.kind === 'create-user-command') return 'create-user-command'
   return 'window-command'
 }
@@ -323,6 +349,12 @@ function actionPayloadFor(action: CommandKind): ActionPayload {
       kind: 'auto-dark-mode',
       command: action.command
     } satisfies AutoDarkModeAction
+  }
+  if (action.kind === 'keyboard-remap') {
+    return {
+      kind: 'keyboard-remap',
+      command: action.command
+    } satisfies KeyboardRemapAction
   }
   return {
     kind: 'window',
@@ -632,6 +664,35 @@ export function createCommandPaletteModule(
           // The service already logged the detailed platform error and showed
           // a concise failure Desktop Hint. Keep the palette dismissed.
           console.warn('[command-palette] Auto Dark Mode command failed:', error)
+        }
+        return { dismissPalette: false }
+      }
+
+      if (item.action.kind === 'keyboard-remap') {
+        const command = COMMANDS.find(
+          (candidate) => `cmd:${candidate.id}` === item.id
+        )
+        if (
+          item.moduleId !== MODULE_ID ||
+          item.actionKind !== 'keyboard-remap' ||
+          !command ||
+          command.action.kind !== 'keyboard-remap' ||
+          command.action.command !== item.action.command ||
+          !commandIsEnabledNow(command)
+        ) {
+          return { dismissPalette: false }
+        }
+
+        // Same handoff as Open Settings: the editor is what should land in
+        // front, so hide without restoring focus to the previous window.
+        paletteWindow.hide()
+        try {
+          await keyboardRemapService.openRulesInEditor()
+        } catch (error) {
+          console.warn(
+            '[command-palette] opening keyboard rules failed:',
+            error
+          )
         }
         return { dismissPalette: false }
       }

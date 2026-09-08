@@ -1,9 +1,10 @@
 import type { ModuleManifest } from '@shared/types'
 import type { PaletteModule } from '../types'
+import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { keyboardRemapService } from './service'
 
 const MANIFEST: ModuleManifest = {
-  id: 'keyboard-remap',
+  id: KEYBOARD_REMAP_ID,
   name: 'Keyboard Remap',
   icon: 'keyboard',
   kind: 'service',
