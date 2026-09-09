@@ -4,26 +4,39 @@
 //!   - A dedicated thread installs `WH_KEYBOARD_LL`, then runs a
 //!     `GetMessageW` pump. The hook proc bounces to a thread-local state
 //!     machine guarded by a mutex.
+//!   - A message-only window created on that thread re-installs the hook
+//!     when the events that reshuffle the chain fire, so launch order
+//!     doesn't decide who owns a key. See `ChainWatcher`.
 //!   - Teardown posts `WM_QUIT` to the hook thread, which drops out of the
 //!     message loop, calls `UnhookWindowsHookEx`, and exits.
-//!   - All synthetic events go through `SendInput` with
-//!     `dwExtraInfo = INJECT_TAG`. The hook skips anything carrying that
-//!     tag, so we don't re-enter ourselves.
+//!   - All synthetic events go through `SendInput` carrying one of the
+//!     `INJECT_TAG*` stamps in `dwExtraInfo`. A tagged event never reaches
+//!     the state machine — we don't re-enter ourselves — and the tag picks
+//!     which hooks *behind* ours get to see it.
 //!
 //! The LL hook runs on the thread that installed it; `LowLevelHooksTimeout`
 //! (default 300ms) will force Windows to skip the hook if the callback
 //! blocks, so the state machine path must stay allocation-light and lock
 //! durations must be short.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Power::{
+    RegisterSuspendResumeNotification, UnregisterSuspendResumeNotification, HPOWERNOTIFY,
+};
+use windows::Win32::System::RemoteDesktop::{
+    WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -33,12 +46,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_RWIN, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowRect,
-    GetWindowThreadProcessId, PostMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG,
-    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_CLOSE, WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN,
-    WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_XBUTTONDOWN,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    GetForegroundWindow, GetMessageW, GetWindowRect, GetWindowThreadProcessId, KillTimer,
+    PostMessageW, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, DEVICE_NOTIFY_WINDOW_HANDLE, HHOOK, HWND_MESSAGE,
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PBT_APMRESUMEAUTOMATIC,
+    PBT_APMRESUMESUSPEND, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE,
+    WM_INPUTLANGCHANGEREQUEST, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_POWERBROADCAST, WM_QUIT, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
+    WM_WTSSESSION_CHANGE, WM_XBUTTONDOWN, WNDCLASSW, WTS_CONSOLE_CONNECT, WTS_SESSION_UNLOCK,
 };
 
 use super::rules::{LanguageCode, Modifier, ModifierMask, NamedKey, ResolvedRules, SyntheticEvent};
@@ -118,6 +134,7 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
                     return;
                 }
             };
+            ACTIVE_KEYBOARD_HOOK.store(hhook.0 as isize, Ordering::SeqCst);
 
             // Low-level mouse hook on the SAME thread — the GetMessageW pump
             // below serves it too. It only feeds button-downs to the state
@@ -146,6 +163,11 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
                 ready_tx_clone.notify_all();
             }
 
+            // Subscriptions that keep us at the head of the hook chain. The
+            // window is created on this thread, so its `WndProc` runs from
+            // the pump below.
+            let watcher = ChainWatcher::install();
+
             // Standard modal loop. `WM_QUIT` (posted by `stop`) makes
             // `GetMessageW` return 0.
             let mut msg: MSG = std::mem::zeroed();
@@ -159,6 +181,10 @@ pub fn install(rules: ResolvedRules) -> Result<WindowsHook, String> {
             }
 
             // Teardown.
+            if let Some(watcher) = watcher {
+                watcher.remove();
+            }
+            let hhook = HHOOK(ACTIVE_KEYBOARD_HOOK.swap(0, Ordering::SeqCst) as *mut _);
             let _ = UnhookWindowsHookEx(hhook);
             if let Some(mh) = mouse_hook {
                 let _ = UnhookWindowsHookEx(mh);
@@ -195,18 +221,272 @@ enum ReadyState {
 }
 
 // ---------------------------------------------------------------------------
+// Hook-chain ownership.
+//
+// Windows calls `WH_KEYBOARD_LL` hooks newest-first, so the app that
+// installed last decides what the ones before it are even allowed to see.
+// That makes launch order load-bearing, which it must not be. It bites in
+// practice: a speech-to-text listener bound to CapsLock (Handy's
+// `handy-keys` backend is one) *blocks* the key rather than observing it, so
+// whenever it sits in front of us CapsLock stops producing Escape at all.
+//
+// Re-installing is the only lever. Windows offers no way to ask where we sit
+// in the chain, and no way to notice we've been shadowed — raw input is no
+// escape hatch either: a blocking hook runs *before* raw input is generated,
+// so a suppressed key never shows up in `WM_INPUT` (measured, not assumed).
+// The only real question is therefore what triggers a re-install. Two
+// triggers, and no idle polling between them:
+//
+//   - The session and power notifications the watcher window subscribes to.
+//     Unlock, console connect and resume from sleep are exactly the events
+//     such listeners re-hook on themselves, which is precisely when they
+//     would otherwise overtake us.
+//   - A bounded burst after startup, because the launch race has no event to
+//     hang off: nothing tells us another process just hooked, and a listener
+//     that hooks only once its speech model has loaded can land a minute
+//     after we do. The burst runs out and its timer is killed.
+
+/// The live keyboard hook, as a raw `HHOOK` value. Global because the
+/// watcher window's `WndProc` re-asserts it too, and that runs on the hook
+/// thread but outside the frame that owns the handle. Zero means "no hook".
+static ACTIVE_KEYBOARD_HOOK: AtomicIsize = AtomicIsize::new(0);
+
+/// Delays between startup re-asserts, each measured from the previous one —
+/// so roughly 2s, 7s, 17s, 47s, 1m47s and 3m47s after install. Long enough
+/// to outlast a slow-starting competitor, finite so that steady state costs
+/// nothing.
+const STARTUP_REASSERT_SCHEDULE_MS: [u32; 6] = [2_000, 5_000, 10_000, 30_000, 60_000, 120_000];
+
+/// How far through `STARTUP_REASSERT_SCHEDULE_MS` we are.
+static STARTUP_BURST_STEP: AtomicU32 = AtomicU32::new(0);
+
+/// Timer id for the startup burst, scoped to the watcher window.
+const STARTUP_BURST_TIMER: usize = 1;
+
+/// Whether the last re-assert failed, so a persistent failure logs once
+/// rather than on every trigger.
+static REASSERT_FAILING: AtomicBool = AtomicBool::new(false);
+
+/// `WTS_REMOTE_CONNECT` — the crate binds its console sibling but not this
+/// one. Reconnecting an RDP session lands here rather than in
+/// `WTS_CONSOLE_CONNECT`.
+const WTS_REMOTE_CONNECT: u32 = 3;
+
+/// Put our keyboard hook back at the head of the low-level chain.
+///
+/// The replacement goes in *before* the old one comes out, so there's no
+/// instant where keystrokes go unmapped. Both hooks run this thread's
+/// `ll_proc` for that instant; `IN_LL_PROC` stops the nested call from
+/// putting the same event through the state machine twice.
+///
+/// Doubles as recovery from Windows silently dropping the hook after a
+/// `LowLevelHooksTimeout` overrun.
+unsafe fn reassert_keyboard_hook(reason: &str) {
+    let current = ACTIVE_KEYBOARD_HOOK.load(Ordering::SeqCst);
+    if current == 0 {
+        return;
+    }
+    match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_proc), None, 0) {
+        Ok(fresh) => {
+            ACTIVE_KEYBOARD_HOOK.store(fresh.0 as isize, Ordering::SeqCst);
+            let _ = UnhookWindowsHookEx(HHOOK(current as *mut _));
+            REASSERT_FAILING.store(false, Ordering::Relaxed);
+        }
+        // Keep the hook we have — it still works, it's just no longer
+        // guaranteed to be first. The next trigger tries again.
+        Err(err) => {
+            if !REASSERT_FAILING.swap(true, Ordering::Relaxed) {
+                eprintln!("[keyboard-remap] hook re-assert ({reason}) failed: {err}");
+            }
+        }
+    }
+}
+
+/// Message-only window holding the subscriptions that drive re-asserts.
+struct ChainWatcher {
+    hwnd: HWND,
+    /// `HPOWERNOTIFY` from `RegisterSuspendResumeNotification`, or 0 when
+    /// the subscription didn't take.
+    power: isize,
+}
+
+impl ChainWatcher {
+    /// Best-effort: every piece degrades on its own. Without the window
+    /// there are no notifications and no burst, and the hook simply keeps
+    /// whatever position it was installed at — which is what it did before
+    /// any of this existed.
+    unsafe fn install() -> Option<ChainWatcher> {
+        let class = w!("runwa-keyboard-chain-watcher");
+        let instance = HINSTANCE(GetModuleHandleW(None).ok()?.0);
+        // Ignore the result: a second install in the same process finds the
+        // class already registered, which is not an error for us.
+        let _ = RegisterClassW(&WNDCLASSW {
+            lpfnWndProc: Some(watcher_wndproc),
+            lpszClassName: class,
+            hInstance: instance,
+            ..Default::default()
+        });
+
+        let hwnd = match CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            class,
+            PCWSTR::null(),
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            None,
+            instance,
+            None,
+        ) {
+            Ok(h) => h,
+            Err(err) => {
+                eprintln!(
+                    "[keyboard-remap] chain watcher window failed ({err}); the hook \
+                     won't reclaim the head of the chain after unlock or resume"
+                );
+                return None;
+            }
+        };
+
+        if let Err(err) = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) {
+            eprintln!("[keyboard-remap] session notifications unavailable: {err}");
+        }
+
+        // `RegisterSuspendResumeNotification` (user32), not the powrprof
+        // `PowerRegisterSuspendResumeNotification` — the latter rejects a
+        // window recipient with ERROR_INVALID_PARAMETER and only takes a
+        // callback.
+        let power =
+            match RegisterSuspendResumeNotification(HANDLE(hwnd.0), DEVICE_NOTIFY_WINDOW_HANDLE) {
+                Ok(handle) => handle.0,
+                Err(err) => {
+                    eprintln!("[keyboard-remap] resume notifications unavailable: {err}");
+                    0
+                }
+            };
+
+        STARTUP_BURST_STEP.store(0, Ordering::SeqCst);
+        arm_startup_burst(hwnd);
+
+        Some(ChainWatcher { hwnd, power })
+    }
+
+    unsafe fn remove(self) {
+        let _ = KillTimer(self.hwnd, STARTUP_BURST_TIMER);
+        if self.power != 0 {
+            let _ = UnregisterSuspendResumeNotification(HPOWERNOTIFY(self.power));
+        }
+        let _ = WTSUnRegisterSessionNotification(self.hwnd);
+        let _ = DestroyWindow(self.hwnd);
+    }
+}
+
+/// Schedule the next startup re-assert, or stop once the schedule is spent.
+unsafe fn arm_startup_burst(hwnd: HWND) {
+    let step = STARTUP_BURST_STEP.load(Ordering::SeqCst) as usize;
+    match STARTUP_REASSERT_SCHEDULE_MS.get(step) {
+        Some(&delay) => {
+            SetTimer(hwnd, STARTUP_BURST_TIMER, delay, None);
+        }
+        None => {
+            let _ = KillTimer(hwnd, STARTUP_BURST_TIMER);
+        }
+    }
+}
+
+unsafe extern "system" fn watcher_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_TIMER if wparam.0 == STARTUP_BURST_TIMER => {
+            reassert_keyboard_hook("startup");
+            STARTUP_BURST_STEP.fetch_add(1, Ordering::SeqCst);
+            arm_startup_burst(hwnd);
+            LRESULT(0)
+        }
+        // Unlock and (re)connect are when a competing listener re-hooks.
+        WM_WTSSESSION_CHANGE => {
+            let event = wparam.0 as u32;
+            if event == WTS_SESSION_UNLOCK
+                || event == WTS_CONSOLE_CONNECT
+                || event == WTS_REMOTE_CONNECT
+            {
+                reassert_keyboard_hook("session change");
+            }
+            LRESULT(0)
+        }
+        WM_POWERBROADCAST => {
+            let event = wparam.0 as u32;
+            if event == PBT_APMRESUMESUSPEND || event == PBT_APMRESUMEAUTOMATIC {
+                reassert_keyboard_hook("resume");
+            }
+            LRESULT(1)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LL hook procedure.
+
+thread_local! {
+    /// Set while `ll_proc` is deciding an event. During a re-assert both the
+    /// fresh hook and the outgoing one are momentarily installed on this
+    /// thread, and `CallNextHookEx` walks straight from one into the other.
+    /// The nested call is an event we already handled, so it only forwards.
+    static IN_LL_PROC: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Clears `IN_LL_PROC` on the way out of `ll_proc`, which has far too many
+/// early returns to unset it by hand.
+struct LlProcGuard;
+
+impl Drop for LlProcGuard {
+    fn drop(&mut self) {
+        IN_LL_PROC.with(|flag| flag.set(false));
+    }
+}
 
 unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code < 0 {
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
+    if IN_LL_PROC.with(|flag| flag.replace(true)) {
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+    let _guard = LlProcGuard;
+
     let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
 
-    // Skip events we injected ourselves.
-    if (info.flags.0 & LLKHF_INJECTED.0) != 0 && info.dwExtraInfo == INJECT_TAG {
-        return CallNextHookEx(None, code, wparam, lparam);
+    // Events we injected ourselves never reach the state machine. The tag
+    // decides what the hooks behind ours are allowed to do with them.
+    if (info.flags.0 & LLKHF_INJECTED.0) != 0 {
+        match info.dwExtraInfo {
+            // Ordinary synthetic output: hand it down the chain like a real
+            // key, so other tools' hooks still observe what we emit.
+            INJECT_TAG => return CallNextHookEx(None, code, wparam, lparam),
+            // The lock-latch half of a CapsLock emit. Returning 0 *without*
+            // calling the next hook leaves the event on its way to win32k,
+            // which flips the latch and lights the LED, while skipping every
+            // hook behind ours — including any that would have eaten it.
+            INJECT_TAG_LATCH => return LRESULT(0),
+            // The listener half of the same emit. The rest of the chain sees
+            // a CapsLock press/release pair, then we swallow it, so the
+            // latch moves exactly once — from the half above — whether or
+            // not anyone downstream blocked this one.
+            INJECT_TAG_DECOY => {
+                let _ = CallNextHookEx(None, code, wparam, lparam);
+                return LRESULT(1);
+            }
+            _ => {}
+        }
     }
 
     let kind = match wparam.0 as u32 {
@@ -458,8 +738,9 @@ fn named_to_vk(key: NamedKey) -> VIRTUAL_KEY {
         NamedKey::Period => VK_OEM_PERIOD,
         NamedKey::Slash => VK_OEM_2,
         NamedKey::Apps => VK_APPS,
-        // SendInput of VK_CAPITAL drives the real lock state on Windows —
-        // no special casing needed, unlike macOS.
+        // Reached only for a `keys:`-side lookup — `inject` splits an
+        // emitted CapsLock into its latch and listener halves before it
+        // gets here. See `push_caps_emit`.
         NamedKey::CapsLock => VK_CAPITAL,
         NamedKey::Alpha(b) => VIRTUAL_KEY(b as u16),
     }
@@ -650,6 +931,13 @@ fn covers_monitor(hwnd: HWND) -> bool {
 // ---------------------------------------------------------------------------
 // SendInput injection.
 
+/// The lock-latch half of a CapsLock emit — reaches win32k, invisible to
+/// every hook behind ours. See the `ll_proc` tag dispatch.
+const INJECT_TAG_LATCH: usize = 0x52554E4C; // "RUNL"
+/// The listener half of a CapsLock emit — visible to every hook behind
+/// ours, never reaches win32k.
+const INJECT_TAG_DECOY: usize = 0x52554E44; // "RUND"
+
 fn inject(events: &[SyntheticEvent]) {
     // Keyboard inputs get batched into a single SendInput call (atomic —
     // no other input can interleave). VD switches happen out-of-band and
@@ -663,6 +951,10 @@ fn inject(events: &[SyntheticEvent]) {
             SyntheticEvent::ModifierUp(m) => {
                 inputs.push(build_input(modifier_to_vk(*m), KEYEVENTF_KEYUP.0));
             }
+            // CapsLock as an emit target has to reproduce both effects of a
+            // physical press separately — see `push_caps_emit`.
+            SyntheticEvent::KeyDown(NamedKey::CapsLock) => push_caps_emit(&mut inputs, true),
+            SyntheticEvent::KeyUp(NamedKey::CapsLock) => push_caps_emit(&mut inputs, false),
             SyntheticEvent::KeyDown(k) => {
                 inputs.push(build_input(named_to_vk(*k), 0));
             }
@@ -679,9 +971,16 @@ fn inject(events: &[SyntheticEvent]) {
             }
             SyntheticEvent::ToggleCapsLock => {
                 // Windows has no separate lock API worth reaching for —
-                // tapping the key IS how the lock flips here.
-                inputs.push(build_input(VK_CAPITAL, 0));
-                inputs.push(build_input(VK_CAPITAL, KEYEVENTF_KEYUP.0));
+                // tapping the key IS how the lock flips here. State only,
+                // with no keystroke for anyone else to hear, so the latch
+                // tag alone: nothing downstream sees it, nothing downstream
+                // can block it.
+                inputs.push(build_tagged_input(VK_CAPITAL, 0, INJECT_TAG_LATCH));
+                inputs.push(build_tagged_input(
+                    VK_CAPITAL,
+                    KEYEVENTF_KEYUP.0,
+                    INJECT_TAG_LATCH,
+                ));
             }
             SyntheticEvent::ChangeLanguage(code) => {
                 flush_inputs(&mut inputs);
@@ -694,6 +993,40 @@ fn inject(events: &[SyntheticEvent]) {
         }
     }
     flush_inputs(&mut inputs);
+}
+
+/// Queue one edge of a `to_hotkey: [capslock]` emit.
+///
+/// A physical CapsLock does two separate things: other apps hear a key
+/// press/release pair, and the OS flips the lock latch (and the LED). One
+/// `SendInput` of VK_CAPITAL used to cover both — until a hook behind ours
+/// started blocking CapsLock without checking `LLKHF_INJECTED`, which killed
+/// the event before win32k could move the latch. The key still reached the
+/// blocker, so dictation started; the LED just never came on. macOS has had
+/// the two effects split all along (a CGEvent for listeners, IOKit for the
+/// latch) — this is the same split expressed in hook-chain terms:
+///
+///   - the decoy pair brackets the combo, so a push-to-talk listener sees
+///     the same held-key shape a physical press has;
+///   - the latch is a complete tap on the press edge, because the lock
+///     flips on key-down and leaving VK_CAPITAL logically down would strand
+///     it held.
+fn push_caps_emit(inputs: &mut SmallVec<[INPUT; 8]>, down: bool) {
+    if down {
+        inputs.push(build_tagged_input(VK_CAPITAL, 0, INJECT_TAG_DECOY));
+        inputs.push(build_tagged_input(VK_CAPITAL, 0, INJECT_TAG_LATCH));
+        inputs.push(build_tagged_input(
+            VK_CAPITAL,
+            KEYEVENTF_KEYUP.0,
+            INJECT_TAG_LATCH,
+        ));
+    } else {
+        inputs.push(build_tagged_input(
+            VK_CAPITAL,
+            KEYEVENTF_KEYUP.0,
+            INJECT_TAG_DECOY,
+        ));
+    }
 }
 
 fn flush_inputs(inputs: &mut SmallVec<[INPUT; 8]>) {
@@ -1135,6 +1468,10 @@ fn primary_lang_id(code: &str) -> Option<u16> {
 }
 
 fn build_input(vk: VIRTUAL_KEY, flags: u32) -> INPUT {
+    build_tagged_input(vk, flags, INJECT_TAG)
+}
+
+fn build_tagged_input(vk: VIRTUAL_KEY, flags: u32, tag: usize) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
@@ -1143,8 +1480,27 @@ fn build_input(vk: VIRTUAL_KEY, flags: u32) -> INPUT {
                 wScan: 0,
                 dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(flags),
                 time: 0,
-                dwExtraInfo: INJECT_TAG,
+                dwExtraInfo: tag,
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod chain_watcher_tests {
+    use super::*;
+
+    /// The watcher is the whole of the launch-order fix, and every way it can
+    /// fail is silent — an unregistered class, a rejected message-only
+    /// parent, a notification API that turns out not to accept a window
+    /// handle (`PowerRegisterSuspendResumeNotification` does exactly that).
+    /// Nothing here would show up in behaviour except CapsLock quietly going
+    /// back to whoever hooked last.
+    #[test]
+    fn watcher_window_and_subscriptions_install() {
+        let watcher = unsafe { ChainWatcher::install() }.expect("chain watcher installs");
+        assert!(!watcher.hwnd.0.is_null(), "message-only window created");
+        assert_ne!(watcher.power, 0, "resume notification registered");
+        unsafe { watcher.remove() };
     }
 }

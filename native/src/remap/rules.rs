@@ -342,9 +342,11 @@ pub enum NamedKey {
     Tab,
     /// CapsLock as an *output*. It reproduces both observable effects of a
     /// physical press: toggling the lock/LED and sending a held press/release
-    /// pair to other apps (for example a push-to-talk binding). macOS needs
-    /// separate IOKit and CGEvent operations for those two effects; Windows
-    /// gets both from VK_CAPITAL. As an *input* the physical key stays
+    /// pair to other apps (for example a push-to-talk binding). Both
+    /// platforms need the two effects driven separately — macOS through
+    /// IOKit and CGEvent, Windows through two differently tagged injections,
+    /// because a listener's hook that blocks CapsLock would otherwise take
+    /// the lock down with it. As an *input* the physical key stays
     /// `LogicalKey::CapsLock`, so `capslock:` and `keys: [capslock]` are
     /// unaffected.
     CapsLock,
@@ -423,7 +425,8 @@ pub enum SyntheticEvent {
     /// keystroke. Distinct from `KeyDown(NamedKey::CapsLock)`: that sends
     /// the *key* for other apps to hear, this changes the *state* the OS
     /// types with. macOS needs IOKit for it (a posted key event can't move
-    /// the latch); Windows gets there by tapping VK_CAPITAL.
+    /// the latch); Windows taps VK_CAPITAL, hidden from every other hook so
+    /// no listener can swallow it.
     ToggleCapsLock,
 }
 
