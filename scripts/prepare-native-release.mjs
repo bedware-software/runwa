@@ -195,7 +195,11 @@ function buildUniversalMacAddon() {
   assertFile(universalBinary)
   // napi 2.x does not propagate lipo's exit status from `napi universal`.
   // Verify both slices explicitly before allowing electron-builder to run.
-  run('lipo', [universalBinary, '-verify_arch', 'x86_64', 'arm64'], nativeDir)
+  // One arch per call: newer lipo reads any extra argument after the first
+  // arch as a second input file and refuses the whole check.
+  for (const arch of ['x86_64', 'arm64']) {
+    run('lipo', [universalBinary, '-verify_arch', arch], nativeDir)
+  }
 
   // The universal binary is the release artifact. Removing thin binaries
   // makes it impossible for a package to accidentally select a host-only

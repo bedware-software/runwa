@@ -1,6 +1,5 @@
-//! macOS: the Accessibility plumbing shared by the rule actions that have
-//! to reach into the frontmost window (`move_to_workspace`,
-//! `close_window`).
+//! macOS: the Accessibility plumbing for rule actions that have to reach
+//! into the frontmost window (`move_to_workspace`).
 //!
 //! AX hands back +1-retained CFTypes, so every element travels in an
 //! [`AXGuard`] that releases on drop. A copy stays valid independently of
@@ -43,20 +42,8 @@ extern "C" {
         attribute: CFStringRef,
         value: *mut CFTypeRef,
     ) -> AXError;
-    fn AXUIElementSetAttributeValue(
-        element: AXUIElementRef,
-        attribute: CFStringRef,
-        value: CFTypeRef,
-    ) -> AXError;
-    fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> AXError;
     fn AXValueGetValue(value: AXValueRef, the_type: u32, value_ptr: *mut c_void) -> bool;
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    static kCFBooleanTrue: CFTypeRef;
-    static kCFBooleanFalse: CFTypeRef;
 }
 
 /// An owned AX reference — element or value. CFReleases on drop.
@@ -106,38 +93,6 @@ pub(super) fn attribute(el: &AXGuard, attr: &str) -> Option<AXGuard> {
     // AX calls take `*mut c_void` per the type alias we match. CF doesn't
     // distinguish const-ness at the ABI level.
     Some(AXGuard(out as *mut c_void))
-}
-
-/// True when `attr` is a CFBoolean that reads true. CFBoolean values are
-/// process-wide singletons, so pointer identity is the whole comparison.
-pub(super) fn attribute_is_true(el: &AXGuard, attr: &str) -> bool {
-    let Some(value) = attribute(el, attr) else {
-        return false;
-    };
-    unsafe { value.0 as CFTypeRef == kCFBooleanTrue }
-}
-
-/// Write a boolean attribute (`AXFullScreen`, …). `false` means AX
-/// refused — usually because the window doesn't publish that attribute as
-/// settable.
-pub(super) fn set_bool_attribute(el: &AXGuard, attr: &str, value: bool) -> bool {
-    let key = CFString::new(attr);
-    let boolean = unsafe {
-        if value {
-            kCFBooleanTrue
-        } else {
-            kCFBooleanFalse
-        }
-    };
-    let err = unsafe { AXUIElementSetAttributeValue(el.0, key.as_concrete_TypeRef(), boolean) };
-    err == AX_ERROR_SUCCESS
-}
-
-/// Perform a named action (`AXPress`, `AXRaise`, …) on an element.
-pub(super) fn perform(el: &AXGuard, action: &str) -> bool {
-    let name = CFString::new(action);
-    let err = unsafe { AXUIElementPerformAction(el.0, name.as_concrete_TypeRef()) };
-    err == AX_ERROR_SUCCESS
 }
 
 /// Screen-coordinate frame of an element, read from `AXPosition` +

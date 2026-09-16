@@ -54,12 +54,15 @@ export default async function afterSign(context) {
         '--preserve-metadata=entitlements,flags,runtime',
         appPath
       ],
-      { stdio: ['ignore', 'inherit', 'inherit'] }
+      // codesign narrates every nested bundle it touches. Keep that out of
+      // the build log; execFileSync folds stderr into the thrown error, so
+      // a failure still says why.
+      { stdio: ['ignore', 'pipe', 'pipe'] }
     )
     execFileSync(
       'codesign',
-      ['--verify', '--deep', '--strict', '--verbose=2', appPath],
-      { stdio: ['ignore', 'inherit', 'inherit'] }
+      ['--verify', '--deep', '--strict', appPath],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
     )
 
     const entitlements = execFileSync(
