@@ -458,15 +458,16 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    if IN_LL_PROC.with(|flag| flag.replace(true)) {
-        return CallNextHookEx(None, code, wparam, lparam);
-    }
-    let _guard = LlProcGuard;
-
     let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
 
     // Events we injected ourselves never reach the state machine. The tag
     // decides what the hooks behind ours are allowed to do with them.
+    //
+    // This runs before the `IN_LL_PROC` check on purpose: `SendInput` called
+    // from inside this proc re-enters it synchronously on this thread, before
+    // `SendInput` returns (measured). Every event we emit therefore arrives
+    // *nested* — behind the guard, the tags would never be read and the
+    // latch half would be forwarded to whichever hook blocks CapsLock.
     if (info.flags.0 & LLKHF_INJECTED.0) != 0 {
         match info.dwExtraInfo {
             // Ordinary synthetic output: hand it down the chain like a real
@@ -488,6 +489,11 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
             _ => {}
         }
     }
+
+    if IN_LL_PROC.with(|flag| flag.replace(true)) {
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+    let _guard = LlProcGuard;
 
     let kind = match wparam.0 as u32 {
         WM_KEYDOWN | WM_SYSKEYDOWN => EventKind::KeyDown,
