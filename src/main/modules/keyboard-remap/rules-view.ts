@@ -171,8 +171,16 @@ function formatRuleAction(
   if (entry['close_window'] === true) return 'close window'
   const lang = entry['change_language']
   if (typeof lang === 'string') return `switch language to ${lang}`
-  if (typeof toHotkey === 'string') return formatTokenList([toHotkey])
-  if (Array.isArray(toHotkey)) return formatTokenList(toHotkey.map(String))
+  const toggleCaps = entry['toggle_capslock'] === true
+  const hotkey =
+    typeof toHotkey === 'string'
+      ? formatTokenList([toHotkey])
+      : Array.isArray(toHotkey)
+        ? formatTokenList(toHotkey.map(String))
+        : null
+  if (hotkey && toggleCaps) return `${hotkey} + toggle CapsLock`
+  if (hotkey) return hotkey
+  if (toggleCaps) return 'toggle CapsLock'
   return '?'
 }
 

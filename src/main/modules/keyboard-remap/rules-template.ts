@@ -76,6 +76,15 @@
  *                                                  has no universal shortcut for this (Cmd+Q
  *                                                  quits the app, Cmd+W closes a tab).
  *                                                  (Windows + macOS)
+ *         toggle_capslock:      true                flip the CapsLock lock (and LED) without
+ *                                                  sending the key to anyone. May be paired
+ *                                                  with to_hotkey — the one pair allowed —
+ *                                                  to give a listener its own key and keep
+ *                                                  the lock as the indicator:
+ *                                                    to_hotkey: [f18], toggle_capslock: true
+ *                                                  F13–F24 exist for exactly this (no
+ *                                                  physical key; macOS stops at F20 and
+ *                                                  reserves F19 for CapsLock).
  *
  *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
@@ -105,6 +114,7 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   must already be installed as a system input source
 #   close_window:        true       close the frontmost window (not the whole app): WM_CLOSE on
 #                                   Windows, the window's close button via Accessibility on macOS
+#   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
 
 # Global options. macos_switch_workspace_modifiers must match your macOS
 # Mission Control "Switch to Desktop N" shortcut. This template uses the
@@ -117,16 +127,19 @@ capslock:
   on_tap: [escape]
   on_hold: [ctrl]
 
-# Holding either Shift and tapping the other toggles CapsLock. Both blocks
-# keep working as ordinary Shift for everything else.
+# Holding either Shift and tapping the other sends F18 — bind a dictation
+# app (e.g. Handy) to F18 — and flips CapsLock so its LED shows the state.
+# Don't bind the listener to CapsLock itself: an app that swallows CapsLock
+# takes it from runwa too, depending on which one hooked the keyboard last.
+# Both blocks keep working as ordinary Shift for everything else.
 left_shift:
   on_tap: [ctrl, opt, cmd, a]
   on_hold:
-    - { keys: [right_shift], to_hotkey: [capslock] }
+    - { keys: [right_shift], to_hotkey: [f18], toggle_capslock: true }
 right_shift:
   on_tap: [ctrl, opt, cmd, w]
   on_hold:
-    - { keys: [left_shift], to_hotkey: [capslock] }
+    - { keys: [left_shift], to_hotkey: [f18], toggle_capslock: true }
 
 left_opt:
   on_tap: [f7]

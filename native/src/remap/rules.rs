@@ -364,6 +364,24 @@ pub enum NamedKey {
     F10,
     F11,
     F12,
+    /// F13–F24 have no physical key on most keyboards, which is exactly what
+    /// makes them useful: a key no one presses by hand is a collision-free
+    /// hotkey for another app to listen on (`to_hotkey: [f18]`). macOS
+    /// virtual keycodes stop at F20, so F21–F24 synthesize nothing there, and
+    /// F19 as a *trigger* on macOS is claimed by the CapsLock→F19 `hidutil`
+    /// remap.
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
     // Navigation.
     Left,
     Right,
@@ -812,7 +830,8 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
 /// `change_language` / `close_window` / `toggle_capslock`) must be
 /// populated; having zero or
-/// multiple is a parse error.
+/// multiple is a parse error — except `to_hotkey` + `toggle_capslock`,
+/// which pair up (see `bake_rule_action`).
 ///
 /// `keys`, `to_hotkey` and `change_language` are `YamlToken` / lists of
 /// them so YAML can supply either a string (`keys: [w]`, `keys: [","]`,
@@ -1096,6 +1115,13 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
 /// actions are fire-and-forget — they go in `on_press` with an empty
 /// `on_release`, because there's nothing to undo when the user lets
 /// the combo key up.
+///
+/// The one legal pair is `to_hotkey` + `toggle_capslock`: a hotkey for a
+/// listener plus the lock state as its indicator. It's what
+/// `to_hotkey: [capslock]` does, minus making the listener bind CapsLock
+/// itself — a listener that swallows CapsLock owns the key for every app
+/// behind it in the hook chain, which makes launch order decide whether
+/// CapsLock works at all.
 fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     let mut provided: SmallVec<[&'static str; 4]> = SmallVec::new();
     if rule.to_hotkey.is_some() {
@@ -1121,19 +1147,29 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
         [] => Err(format!(
             "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language, close_window, toggle_capslock"
         )),
-        [_, ..] if provided.len() > 1 => Err(format!(
-            "rule '{name}' has multiple action fields {provided:?}; pick exactly one"
-        )),
-        ["to_hotkey"] => {
-            let tokens: Vec<String> = rule
-                .to_hotkey
-                .as_ref()
-                .unwrap()
-                .iter()
-                .map(|t| t.0.clone())
-                .collect();
-            bake_hotkey_tokens(&tokens)
+        ["to_hotkey", "toggle_capslock"] => {
+            if rule.toggle_capslock != Some(true) {
+                return Err(format!("rule '{name}': toggle_capslock only takes `true`"));
+            }
+            let mut pair = bake_hotkey_tokens(&hotkey_tokens(rule))?;
+            // `[capslock]` already flips the lock; flipping it again here
+            // would cancel it out on every press.
+            if pair
+                .on_press
+                .contains(&SyntheticEvent::KeyDown(NamedKey::CapsLock))
+            {
+                return Err(format!(
+                    "rule '{name}': to_hotkey [capslock] already toggles the lock; drop toggle_capslock"
+                ));
+            }
+            pair.on_press.push(SyntheticEvent::ToggleCapsLock);
+            Ok(pair)
         }
+        [_, ..] if provided.len() > 1 => Err(format!(
+            "rule '{name}' has multiple action fields {provided:?}; pick exactly one \
+             (to_hotkey + toggle_capslock is the only pair allowed)"
+        )),
+        ["to_hotkey"] => bake_hotkey_tokens(&hotkey_tokens(rule)),
         ["switch_to_workspace"] => {
             let n = rule.switch_to_workspace.unwrap();
             if n == 0 {
@@ -1171,6 +1207,13 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
         }
         _ => unreachable!(),
     }
+}
+
+fn hotkey_tokens(rule: &HoldRule) -> Vec<String> {
+    rule.to_hotkey
+        .as_ref()
+        .map(|tokens| tokens.iter().map(|t| t.0.clone()).collect())
+        .unwrap_or_default()
 }
 
 /// Pre-bake a hotkey token list into a split press/release sequence.
@@ -1362,6 +1405,18 @@ fn parse_named_key(s: &str) -> Option<NamedKey> {
         "f10" => Some(NamedKey::F10),
         "f11" => Some(NamedKey::F11),
         "f12" => Some(NamedKey::F12),
+        "f13" => Some(NamedKey::F13),
+        "f14" => Some(NamedKey::F14),
+        "f15" => Some(NamedKey::F15),
+        "f16" => Some(NamedKey::F16),
+        "f17" => Some(NamedKey::F17),
+        "f18" => Some(NamedKey::F18),
+        "f19" => Some(NamedKey::F19),
+        "f20" => Some(NamedKey::F20),
+        "f21" => Some(NamedKey::F21),
+        "f22" => Some(NamedKey::F22),
+        "f23" => Some(NamedKey::F23),
+        "f24" => Some(NamedKey::F24),
         // Context-menu key. `apps` / `menu` mirror AutoHotkey's `{AppsKey}`.
         "apps" | "appskey" | "menu" | "contextmenu" | "context_menu" => Some(NamedKey::Apps),
         // Navigation — word forms only (arrows aren't typable as a single
@@ -1863,6 +1918,73 @@ space:
         assert!(
             err.contains("toggle_capslock only takes `true`"),
             "expected toggle_capslock-false error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn f13_through_f24_parse_as_named_keys() {
+        assert_eq!(parse_named_key("f13"), Some(NamedKey::F13));
+        assert_eq!(parse_named_key("F18"), Some(NamedKey::F18));
+        assert_eq!(parse_named_key("f24"), Some(NamedKey::F24));
+        assert_eq!(parse_named_key("f25"), None);
+    }
+
+    #[test]
+    fn to_hotkey_pairs_with_toggle_capslock() {
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [f18], toggle_capslock: true }
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::LeftShift).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let pair = overrides
+                    .get(&(ModifierMask::EMPTY, LogicalKey::RightShift))
+                    .unwrap();
+                // The key for the listener, then the lock for the indicator.
+                assert_eq!(
+                    pair.on_press.as_slice(),
+                    &[
+                        SyntheticEvent::KeyDown(NamedKey::F18),
+                        SyntheticEvent::ToggleCapsLock
+                    ]
+                );
+                // Only the key is released — the lock stays where it went.
+                assert_eq!(
+                    pair.on_release.as_slice(),
+                    &[SyntheticEvent::KeyUp(NamedKey::F18)]
+                );
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn to_hotkey_capslock_rejects_a_second_toggle() {
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [capslock], toggle_capslock: true }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("already toggles the lock"),
+            "expected double-toggle error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn toggle_capslock_still_conflicts_with_non_hotkey_actions() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: [c], toggle_capslock: true, close_window: true }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.contains("multiple action fields"),
+            "expected multiple-action error, got: {err}"
         );
     }
 

@@ -2572,6 +2572,40 @@ left_shift:
     }
 
     #[test]
+    fn both_shifts_can_hold_a_listener_key_and_flip_the_lock_once() {
+        // The listener-friendly form of the chord: a key nobody binds by hand
+        // for the dictation app, and the lock as the indicator.
+        let src = r#"
+left_shift:
+  on_hold:
+    - { keys: [right_shift], to_hotkey: [f18], toggle_capslock: true }
+"#;
+        let mut m = sm(src);
+        m.on_event(down(LogicalKey::LeftShift));
+        assert_eq!(
+            m.on_event(down_with_mods(
+                LogicalKey::RightShift,
+                mask(&[Modifier::LeftShift, Modifier::RightShift])
+            )),
+            emit(vec![
+                SyntheticEvent::ModifierUp(Modifier::LeftShift),
+                SyntheticEvent::KeyDown(NamedKey::F18),
+                SyntheticEvent::ToggleCapsLock
+            ])
+        );
+        // Held, not re-fired: autorepeat must not flicker the lock.
+        assert_eq!(
+            m.on_event(down_autorepeat(LogicalKey::RightShift)),
+            Action::Suppress
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::RightShift)),
+            emit(vec![SyntheticEvent::KeyUp(NamedKey::F18)])
+        );
+        assert_eq!(m.on_event(up(LogicalKey::LeftShift)), Action::Suppress);
+    }
+
+    #[test]
     fn the_chord_works_with_the_shifts_the_other_way_round() {
         let mut m = sm(BOTH_SHIFTS_CAPS);
         assert_eq!(
