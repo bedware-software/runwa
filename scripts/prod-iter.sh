@@ -7,7 +7,7 @@
 # The order is deliberate. Commit first: the husky pre-commit hook bumps the patch version,
 # and that number is the only way to tell the new build from the old one. Build while Runwa
 # keeps running (the build only writes to out/ and release/). Stop it only for the few
-# seconds the install takes.
+# seconds the install takes. Push last, once the new build is running.
 #
 # No tests and no typecheck: this is the fast dogfooding loop, verification is its own pass.
 
@@ -33,7 +33,7 @@ case $(uname -m) in
   *)      die "unsupported architecture $(uname -m)" ;;
 esac
 
-step "1/6 Commit"
+step "1/7 Commit"
 old_version=$(pkg_version)
 if [[ -z $(git status --porcelain) ]]; then
   installed=$([[ -d $app ]] && bundle_version $app || print none)
@@ -60,13 +60,13 @@ else
   print "$old_version -> $version"
 fi
 
-step "2/6 Build $version for $arch (Runwa keeps running)"
+step "2/7 Build $version for $arch (Runwa keeps running)"
 # Only this Mac's .app: without --<arch> --dir electron-builder also packs a dmg and a zip for
 # both architectures. The Rust addon is built universal either way, and dist:mac rebuilds it
 # from scratch, so there is no separate build:native step.
 npm run dist:mac -- --$arch --dir
 
-step "3/6 Check build output"
+step "3/7 Check build output"
 [[ -d $built ]] || die "$built not found, did the build fail?"
 built_version=$(bundle_version $built)
 [[ $built_version == $version ]] || die "$built is $built_version, expected $version"
@@ -77,7 +77,7 @@ codesign -d -r- $built 2>/dev/null | grep -q '^designated => identifier "dev.dmi
   die "$built lacks the identifier-based designated requirement, did scripts/mac-after-sign.mjs run?"
 print "$built is $built_version"
 
-step "4/6 Stop Runwa"
+step "4/7 Stop Runwa"
 if runwa_running; then
   # SIGTERM is a graceful app.quit() (see the signal handlers in src/main/index.ts), and
   # Runwa force-kills itself if that takes over 2s. The -9 is for a truly wedged process.
@@ -93,7 +93,7 @@ else
   print "Runwa is not running"
 fi
 
-step "5/6 Install to $app"
+step "5/7 Install to $app"
 # Replace the whole bundle: files the new version dropped would otherwise linger inside it and
 # break the code-signature seal. ditto keeps the framework symlinks and xattrs intact. The old
 # bundle is parked, not deleted, until the copy lands, so a failed copy can't leave the
@@ -107,11 +107,16 @@ if ! ditto $built $app; then
 fi
 rm -rf ${parked:h}
 
-step "6/6 Relaunch"
+step "6/7 Relaunch"
 installed=$(bundle_version $app)
 [[ $installed == $version ]] || die "the installed app reports $installed, expected $version"
 open $app
 for i in {1..50}; do runwa_running && break; sleep 0.1; done
 runwa_running || die "Runwa did not start, check $log"
+
+step "7/7 Push"
+# Last on purpose: the new build is already running, so a failed push (offline, remote moved
+# on) costs nothing but a retry. -u origin HEAD also covers a branch with no upstream yet.
+git push -u origin HEAD || die "$version is installed, but the push failed"
 
 print "\n\e[32mShipped $version to $app\e[0m (log: $log)"

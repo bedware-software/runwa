@@ -6,7 +6,7 @@
 # The order is deliberate. Commit first: the husky pre-commit hook bumps the patch version,
 # and that number is the only way to tell the new build from the old one. Build while Runwa
 # keeps running (the build only writes to out\ and release\). Stop it only for the few
-# seconds the install takes.
+# seconds the install takes. Push last, once the new build is running.
 #
 # No tests and no typecheck: this is the fast dogfooding loop, verification is its own pass.
 #
@@ -63,7 +63,7 @@ try {
     throw 'Runwa runs as administrator, so this shell cannot stop it. Rerun from an elevated PowerShell.'
   }
 
-  Step '1/6 Commit'
+  Step '1/7 Commit'
   $oldVersion = Get-PkgVersion
   $status = git status --porcelain
   if ($LASTEXITCODE -ne 0) { throw 'git status failed' }
@@ -95,17 +95,17 @@ try {
     Write-Host "$oldVersion -> $version"
   }
 
-  Step "2/6 Build $version (Runwa keeps running)"
+  Step "2/7 Build $version (Runwa keeps running)"
   # dist:win rebuilds the Rust addon from scratch, so there is no separate build:native step.
   Invoke-Checked { npm run dist:win }
 
-  Step '3/6 Check build output'
+  Step '3/7 Check build output'
   # electron-builder.yml: artifactName ${productName}-${version}-setup.${ext}
   $installer = Join-Path $repo "release\Runwa-$version-setup.exe"
   if (-not (Test-Path -LiteralPath $installer)) { throw "$installer not found, did the build fail?" }
   Write-Host $installer
 
-  Step '4/6 Stop Runwa'
+  Step '4/7 Stop Runwa'
   if (Get-Process Runwa -ErrorAction SilentlyContinue) {
     Write-Host "Stopping $exe"
     # The Chromium helpers are Runwa.exe too and die with the main process, so "process not
@@ -119,19 +119,25 @@ try {
     Write-Host 'Runwa is not running'
   }
 
-  Step '5/6 Install silently'
+  Step '5/7 Install silently'
   # NSIS is oneClick: false, per-user, so /S is an unattended install into the previous
   # install location (default %LOCALAPPDATA%\Programs\Runwa). It does not launch the app.
   $setup = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
   if ($setup.ExitCode -ne 0) { throw "installer exited with code $($setup.ExitCode)" }
 
-  Step '6/6 Relaunch'
+  Step '6/7 Relaunch'
   if (-not (Test-Path -LiteralPath $exe)) { throw "$exe not found after install" }
   $installed = Get-ExeVersion $exe
   if ($installed -ne $version) { throw "the installed app reports $installed, expected $version" }
   # Inherits this shell's token: elevated here means elevated Runwa, and a non-elevated shell
   # gets the usual UAC prompt when "Run as administrator" is on.
   Start-Process -FilePath $exe
+
+  Step '7/7 Push'
+  # Last on purpose: the new build is already running, so a failed push (offline, remote moved
+  # on) costs nothing but a retry. -u origin HEAD also covers a branch with no upstream yet.
+  git push -u origin HEAD
+  if ($LASTEXITCODE -ne 0) { throw "$version is installed, but the push failed" }
 
   Write-Host "`nShipped $version to $exe (log: $log)" -ForegroundColor Green
 }

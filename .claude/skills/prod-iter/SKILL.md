@@ -3,7 +3,7 @@ name: prod-iter
 description: >-
   Fast local install of Runwa for manual iteration: runs scripts/prod-iter.sh
   (macOS) or scripts/prod-iter.ps1 (Windows), which commit, build while the
-  app keeps running, then stop / install / relaunch it. Skips all tests by
+  app keeps running, then stop / install / relaunch it and push. Skips all tests by
   design. Trigger on "prod iter", "PROD ITER", or a request to get the
   current changes installed and running as fast as possible.
 ---
@@ -12,7 +12,7 @@ description: >-
 
 The whole loop lives in the script. Run it from the repo root and don't
 re-implement or pre-run any of its steps — no separate native build, no
-tests, no typecheck, no push.
+tests, no typecheck, no separate push (the script pushes last).
 
 macOS:
 
