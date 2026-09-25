@@ -57,6 +57,13 @@ interface PaletteState {
    * `exitQuiz()` (Esc inside the quiz UI). */
   quiz: QuizSession | null
 
+  /** Item whose `confirm` prompt is up, waiting on the user; null when no
+   * confirmation is pending. Set instead of executing an item that asks
+   * first, then run by `confirmPending()` or dropped by `cancelPending()`. */
+  pendingConfirm: PaletteItem | null
+  confirmPending: () => Promise<void>
+  cancelPending: () => void
+
   setQuery: (query: string) => void
   selectNext: () => void
   selectPrev: () => void
@@ -135,6 +142,7 @@ export const usePaletteStore = create<PaletteState>()(
     isLoading: false,
     requestId: 0,
     quiz: null,
+    pendingConfirm: null,
 
     setQuery: (query: string) => {
       // Typing means the user is staying in the palette — drop any queued
@@ -194,11 +202,36 @@ export const usePaletteStore = create<PaletteState>()(
         const action = (item.action ?? {}) as Record<string, unknown>
         payload = { ...item, action: { ...action, newInstance: true } }
       }
+      if (payload.confirm) {
+        set((s) => {
+          s.pendingConfirm = payload
+        })
+        return
+      }
       try {
         await window.electronAPI.modulesExecute(payload)
       } catch (err) {
         console.warn('[palette] execute failed', err)
       }
+    },
+
+    confirmPending: async () => {
+      const item = get().pendingConfirm
+      if (!item) return
+      set((s) => {
+        s.pendingConfirm = null
+      })
+      try {
+        await window.electronAPI.modulesExecute(item)
+      } catch (err) {
+        console.warn('[palette] execute failed', err)
+      }
+    },
+
+    cancelPending: () => {
+      set((s) => {
+        s.pendingConfirm = null
+      })
     },
 
     activateSecond: () => {
@@ -304,6 +337,9 @@ export const usePaletteStore = create<PaletteState>()(
         // A new palette session always lands in search mode, even if a
         // quiz was abandoned mid-card by the user closing the window.
         s.quiz = null
+        // Same for a confirmation left open when the palette was dismissed:
+        // an OS command must never be one Enter away in the next session.
+        s.pendingConfirm = null
       })
 
       // Run the initial search immediately (no debounce) and signal main
@@ -503,9 +539,14 @@ async function runSearch(
     // this now" — used by app-search's launch-on-alias mode. Fire the
     // normal execute IPC; main dismisses the palette on success. Only
     // the first matching item is honoured to prevent surprise
-    // multi-launch if several carry the flag.
+    // multi-launch if several carry the flag. An item that asks first
+    // gets its confirmation instead — an alias is no way around it.
     const auto = result.items.find((i) => i.autoExecute)
-    if (auto) {
+    if (auto?.confirm) {
+      set((s) => {
+        s.pendingConfirm = auto
+      })
+    } else if (auto) {
       void window.electronAPI.modulesExecute(auto)
     }
   } catch (err) {

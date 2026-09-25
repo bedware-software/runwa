@@ -13,6 +13,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import GraduationCap from 'lucide-react/dist/esm/icons/graduation-cap.js'
+import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import Hash from 'lucide-react/dist/esm/icons/hash.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import Keyboard from 'lucide-react/dist/esm/icons/keyboard.js'
@@ -22,13 +23,16 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-circle.js'
 import Maximize2 from 'lucide-react/dist/esm/icons/maximize-2.js'
 import Mic from 'lucide-react/dist/esm/icons/mic.js'
 import Minimize2 from 'lucide-react/dist/esm/icons/minimize-2.js'
+import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Power from 'lucide-react/dist/esm/icons/power.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Replace from 'lucide-react/dist/esm/icons/replace.js'
 import Rocket from 'lucide-react/dist/esm/icons/rocket.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import Settings from 'lucide-react/dist/esm/icons/settings.js'
 import Shield from 'lucide-react/dist/esm/icons/shield.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
@@ -49,6 +53,7 @@ const ICONS_BY_HINT = {
   clock: Clock,
   'folder-open': FolderOpen,
   'graduation-cap': GraduationCap,
+  'hard-drive-download': HardDriveDownload,
   info: Info,
   keyboard: Keyboard,
   'keyboard-off': KeyboardOff,
@@ -56,12 +61,15 @@ const ICONS_BY_HINT = {
   'maximize-2': Maximize2,
   mic: Mic,
   'minimize-2': Minimize2,
+  moon: Moon,
   package: Package,
   pencil: Pencil,
   plus: Plus,
+  power: Power,
   'refresh-cw': RefreshCw,
   replace: Replace,
   rocket: Rocket,
+  'rotate-cw': RotateCw,
   settings: Settings,
   shield: Shield,
   square: Square,

@@ -2,6 +2,7 @@ import type {
   ModuleId,
   ModuleManifest,
   PaletteItem,
+  PaletteItemConfirm,
   SettingsTabId,
   UserCommandDraftPayload
 } from '@shared/types'
@@ -10,6 +11,11 @@ import { paletteWindow } from '../../palette-window'
 import { settingsWindow } from '../../settings-window'
 import { settingsStore } from '../../settings-store'
 import { simulateWindowCommand, type WindowCommand } from './keystrokes'
+import {
+  powerCommandSupported,
+  runPowerCommand,
+  type PowerCommand
+} from './power'
 import {
   executeUserCommand,
   sendUserCommandKeystroke
@@ -31,7 +37,7 @@ import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
 /**
  * Command Palette — system and user-defined commands exposed as palette
  * entries. Ships window-management commands (Maximize, Minimize, Restore),
- * a built-in
+ * OS power commands (Shut down, Restart, Sleep, Hibernate), a built-in
  * "Open Settings" entry under the Settings group, and one
  * "Open <Module> Settings" deep-link per registered module under the
  * "Module Settings" group.
@@ -59,6 +65,7 @@ type CommandKind =
   | { kind: 'open-settings'; tab?: SettingsTabId }
   | { kind: 'auto-dark-mode'; command: 'schedule' | 'toggle' }
   | { kind: 'keyboard-remap'; command: KeyboardRemapCommand }
+  | { kind: 'power'; command: PowerCommand }
   | { kind: 'create-user-command' }
 
 /**
@@ -120,6 +127,11 @@ interface CommandDef {
   action: CommandKind
   /** Hide and reject this command unless the owning module is enabled. */
   requiresModuleId?: ModuleId
+  /** Extra words the query also matches, for names people type as one
+   * word or by a synonym ("shutdown", "reboot"). */
+  keywords?: readonly string[]
+  /** Ask before running — see PaletteItem.confirm. */
+  confirm?: PaletteItemConfirm
   /** Longer description shown in the settings checkbox row. */
   configDescription: string
   /**
@@ -134,7 +146,11 @@ interface CommandDef {
   contextualTitle?: (focusedApp: FocusedApp | null) => string | null
 }
 
-const STATIC_COMMANDS: CommandDef[] = [
+/** Shared by Shut down and Restart — both close every app. */
+const CLOSES_APPS_MESSAGE =
+  'Every open app will be asked to quit. Save your work first.'
+
+const BUILT_IN_COMMANDS: CommandDef[] = [
   {
     id: 'open-settings',
     title: 'Open settings',
@@ -263,8 +279,75 @@ const STATIC_COMMANDS: CommandDef[] = [
     requiresModuleId: KEYBOARD_REMAP_ID,
     configDescription:
       'Re-read keyboard-rules.yaml and re-install the hook, the same as the Reload button in Keyboard Remap settings. A Desktop Hint confirms the reload, or reports why the file was rejected — invalid rules leave the previous working remap active.'
+  },
+  {
+    id: 'shutdown',
+    title: 'Shut down',
+    icon: 'power',
+    subtitle: 'Turn the computer off.',
+    group: 'OS',
+    configKey: 'enableShutdown',
+    defaultEnabled: true,
+    action: { kind: 'power', command: 'shutdown' },
+    keywords: ['shutdown', 'power off', 'turn off'],
+    confirm: {
+      title: 'Shut down the computer?',
+      message: CLOSES_APPS_MESSAGE,
+      confirmLabel: 'Shut down'
+    },
+    configDescription:
+      'Shut the computer down after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "shut down". Windows: shutdown /s. Linux: systemctl poweroff.'
+  },
+  {
+    id: 'restart',
+    title: 'Restart',
+    icon: 'rotate-cw',
+    subtitle: 'Restart the computer.',
+    group: 'OS',
+    configKey: 'enableRestart',
+    defaultEnabled: true,
+    action: { kind: 'power', command: 'restart' },
+    keywords: ['reboot'],
+    confirm: {
+      title: 'Restart the computer?',
+      message: CLOSES_APPS_MESSAGE,
+      confirmLabel: 'Restart'
+    },
+    configDescription:
+      'Restart the computer after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "restart". Windows: shutdown /r. Linux: systemctl reboot.'
+  },
+  {
+    id: 'sleep',
+    title: 'Sleep',
+    icon: 'moon',
+    subtitle: 'Put the computer to sleep.',
+    group: 'OS',
+    configKey: 'enableSleep',
+    defaultEnabled: true,
+    action: { kind: 'power', command: 'sleep' },
+    keywords: ['suspend'],
+    configDescription:
+      'Put the computer to sleep right away — nothing is closed, so no confirmation. macOS: pmset sleepnow. Windows: SetSuspendState. Linux: systemctl suspend.'
+  },
+  {
+    id: 'hibernate',
+    title: 'Hibernate',
+    icon: 'hard-drive-download',
+    subtitle: 'Save the session to disk and power off.',
+    group: 'OS',
+    configKey: 'enableHibernate',
+    defaultEnabled: true,
+    action: { kind: 'power', command: 'hibernate' },
+    configDescription:
+      'Save memory to disk and power off; the session comes back as it was on the next start. Windows: shutdown /h — fails if hibernation is turned off (powercfg /h on). Linux: systemctl hibernate. Not offered on macOS, which has no per-request hibernate.'
   }
 ]
+
+/** The built-ins this OS can run. Hibernate is left out on macOS — from the
+ * palette and from the settings checkboxes built off this list alike. */
+const STATIC_COMMANDS = BUILT_IN_COMMANDS.filter(
+  (c) => c.action.kind !== 'power' || powerCommandSupported(c.action.command)
+)
 
 interface WindowCommandAction {
   kind: 'window'
@@ -291,6 +374,11 @@ interface KeyboardRemapAction {
   command: KeyboardRemapCommand
 }
 
+interface PowerAction {
+  kind: 'power'
+  command: PowerCommand
+}
+
 interface CreateUserCommandAction {
   kind: 'create-user-command'
 }
@@ -301,6 +389,7 @@ type ActionPayload =
   | UserCommandAction
   | AutoDarkModeAction
   | KeyboardRemapAction
+  | PowerAction
   | CreateUserCommandAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
@@ -323,6 +412,15 @@ function isActionPayload(a: unknown): a is ActionPayload {
   if (k === 'keyboard-remap') {
     const command = (a as { command?: unknown }).command
     return command === 'edit-rules' || command === 'reload-rules'
+  }
+  if (k === 'power') {
+    const command = (a as { command?: unknown }).command
+    return (
+      command === 'shutdown' ||
+      command === 'restart' ||
+      command === 'sleep' ||
+      command === 'hibernate'
+    )
   }
   if (k === 'create-user-command') return true
   return false
@@ -348,6 +446,7 @@ function actionKindFor(action: CommandKind): string {
   if (action.kind === 'open-settings') return 'open-settings'
   if (action.kind === 'auto-dark-mode') return 'auto-dark-mode'
   if (action.kind === 'keyboard-remap') return 'keyboard-remap'
+  if (action.kind === 'power') return 'power'
   if (action.kind === 'create-user-command') return 'create-user-command'
   return 'window-command'
 }
@@ -373,6 +472,12 @@ function actionPayloadFor(action: CommandKind): ActionPayload {
       kind: 'keyboard-remap',
       command: action.command
     } satisfies KeyboardRemapAction
+  }
+  if (action.kind === 'power') {
+    return {
+      kind: 'power',
+      command: action.command
+    } satisfies PowerAction
   }
   return {
     kind: 'window',
@@ -430,7 +535,7 @@ export function createCommandPaletteModule(
     icon: MODULE_ICON,
     kind: 'search',
     description:
-      'System and user-defined commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), and a deep-link "Open <Module> Settings" entry for every registered module. User-created entries are managed in User Commands under Other; the ones scoped to an application are listed only while that application is the one behind the palette.',
+      'System and user-defined commands you can run from the palette. Ships an "Open Settings" entry, window-management commands (Maximize, Minimize, Restore), OS power commands (Shut down, Restart, Sleep, Hibernate), and a deep-link "Open <Module> Settings" entry for every registered module. User-created entries are managed in User Commands under Other; the ones scoped to an application are listed only while that application is the one behind the palette.',
     defaultEnabled: true,
     supportsDirectLaunch: true,
     defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
@@ -467,6 +572,9 @@ export function createCommandPaletteModule(
         group: string
         alias?: string
         badge?: string
+        confirm?: PaletteItemConfirm
+        /** Matched by the query alongside the title; not sent to the palette. */
+        keywords?: readonly string[]
         actionKind: string
         action: ActionPayload
       }
@@ -496,6 +604,8 @@ export function createCommandPaletteModule(
             iconHint: c.icon,
             group: c.group,
             alias: aliases[id],
+            confirm: c.confirm,
+            keywords: c.keywords,
             actionKind: actionKindFor(c.action),
             action: actionPayloadFor(c.action)
           })
@@ -574,14 +684,17 @@ export function createCommandPaletteModule(
         ? entries.find((entry) => entry.alias === normalisedQuery)
         : undefined
       if (aliasMatch) {
-        return [{ ...aliasMatch, autoExecute: true, score: -1 }]
+        const { keywords: _keywords, ...item } = aliasMatch
+        return [{ ...item, autoExecute: true, score: -1 }]
       }
 
       const items: Array<Omit<PaletteItem, 'moduleId'>> = []
-      for (const entry of entries) {
-        if (trimmed && !entry.title.toLowerCase().includes(normalisedQuery)) {
-          continue
-        }
+      for (const { keywords, ...entry } of entries) {
+        const matches =
+          !trimmed ||
+          entry.title.toLowerCase().includes(normalisedQuery) ||
+          keywords?.some((k) => k.includes(normalisedQuery))
+        if (!matches) continue
         items.push({ ...entry, score: items.length / 10000 })
       }
       return items
@@ -728,6 +841,29 @@ export function createCommandPaletteModule(
             error
           )
         }
+        return { dismissPalette: false }
+      }
+
+      if (item.action.kind === 'power') {
+        const command = COMMANDS.find(
+          (candidate) => `cmd:${candidate.id}` === item.id
+        )
+        if (
+          item.moduleId !== MODULE_ID ||
+          item.actionKind !== 'power' ||
+          !command ||
+          command.action.kind !== 'power' ||
+          command.action.command !== item.action.command ||
+          !commandIsEnabledNow(command)
+        ) {
+          return { dismissPalette: false }
+        }
+
+        // Hand focus back first, so the app the user was in is the one in
+        // front after waking from sleep. Any confirmation already happened
+        // in the palette (PaletteItem.confirm) before this call was made.
+        paletteWindow.hide(true)
+        runPowerCommand(item.action.command)
         return { dismissPalette: false }
       }
 

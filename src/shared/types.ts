@@ -231,12 +231,26 @@ export interface PaletteItem {
    * "Windows Control" sections, etc.).
    */
   group?: string
+  /**
+   * Ask before running. When set, Enter / click / alias auto-execute open a
+   * confirmation dialog with this text instead of executing, and the item
+   * only runs once the user confirms. For commands that can't be taken
+   * back — the OS group's Shut down and Restart.
+   */
+  confirm?: PaletteItemConfirm
   /** Per-module action discriminator. Re-validated by the owning module on execute. */
   actionKind: string
   /** Opaque payload, owned by the module. Renderer never interprets this. */
   action: unknown
   /** Lower = better match. Optional — modules that don't compute may omit. */
   score?: number
+}
+
+export interface PaletteItemConfirm {
+  title: string
+  message: string
+  /** Label of the button that runs the item — name the action itself. */
+  confirmLabel: string
 }
 
 export interface SearchRequest {

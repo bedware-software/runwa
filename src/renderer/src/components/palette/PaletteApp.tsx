@@ -62,6 +62,9 @@ export function PaletteApp() {
   const selectNext = usePaletteStore((s) => s.selectNext)
   const selectPrev = usePaletteStore((s) => s.selectPrev)
   const executeSelected = usePaletteStore((s) => s.executeSelected)
+  const pendingConfirm = usePaletteStore((s) => s.pendingConfirm)
+  const confirmPending = usePaletteStore((s) => s.confirmPending)
+  const cancelPending = usePaletteStore((s) => s.cancelPending)
   const onPaletteShow = usePaletteStore((s) => s.onPaletteShow)
   const refresh = usePaletteStore((s) => s.refresh)
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
@@ -361,6 +364,15 @@ export function PaletteApp() {
     }
   }, [resetDeckId])
 
+  // And for the "are you sure?" prompt of items that ask before running
+  // (Shut down, Restart).
+  useEffect(() => {
+    if (pendingConfirm === null) return
+    return () => {
+      inputRef.current?.focus()
+    }
+  }, [pendingConfirm])
+
   // Initial hydration
   useEffect(() => {
     void hydrate()
@@ -504,7 +516,13 @@ export function PaletteApp() {
     // the palette's Enter handler would fire BEFORE the button's
     // native activation, executing the deck instead of confirming the
     // reset.
-    if (menuOpen || aliasModalOpen || resetDeckId !== null || draftApp !== null) {
+    if (
+      menuOpen ||
+      aliasModalOpen ||
+      resetDeckId !== null ||
+      draftApp !== null ||
+      pendingConfirm !== null
+    ) {
       return
     }
 
@@ -918,6 +936,16 @@ export function PaletteApp() {
         destructive
         onConfirm={() => void confirmReset()}
         onCancel={() => setResetDeckId(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.confirm?.title ?? ''}
+        message={pendingConfirm?.confirm?.message ?? ''}
+        confirmLabel={pendingConfirm?.confirm?.confirmLabel}
+        destructive
+        onConfirm={() => void confirmPending()}
+        onCancel={cancelPending}
       />
     </div>
   )
