@@ -944,6 +944,7 @@ export function PaletteApp() {
         message={pendingConfirm?.confirm?.message ?? ''}
         confirmLabel={pendingConfirm?.confirm?.confirmLabel}
         destructive
+        keyboardDriven
         onConfirm={() => void confirmPending()}
         onCancel={cancelPending}
       />
