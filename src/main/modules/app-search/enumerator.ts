@@ -5,7 +5,7 @@ import path from 'path'
 
 /**
  * A launchable installed app. One of `filePath` or `uwpAppId` is set:
- *  - filePath: classic shortcut / exe / .app bundle — launch via shell.openPath
+ *  - filePath: classic shortcut / exe / .app bundle — launched by launcher.ts
  *  - uwpAppId: AUMID for UWP/Store apps — launch via `explorer.exe shell:AppsFolder\<AUMID>`
  *
  * `iconPath`, when set, overrides the icon source. Used for UWP entries

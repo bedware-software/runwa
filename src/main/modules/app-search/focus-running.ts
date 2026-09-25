@@ -12,7 +12,7 @@ import {
  * macOS-style activation for App Search on Windows: if the selected app
  * already has a window open, focus that window instead of spawning a second
  * instance. macOS gets this for free — LaunchServices activates the running
- * instance when `shell.openPath` hits an already-open .app bundle — so this
+ * instance when asked to open an already-running .app bundle — so this
  * file only ever does work on win32 and every other platform falls straight
  * through to the normal launch path.
  *
