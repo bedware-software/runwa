@@ -109,11 +109,17 @@ try {
   if (Get-Process Runwa -ErrorAction SilentlyContinue) {
     Write-Host "Stopping $exe"
     # The Chromium helpers are Runwa.exe too and die with the main process, so "process not
-    # found" for some of them is expected.
-    Stop-Process -Name Runwa -Force -ErrorAction SilentlyContinue
-    Wait-Process -Name Runwa -Timeout 15 -ErrorAction SilentlyContinue
-    if (Get-Process Runwa -ErrorAction SilentlyContinue) {
-      throw 'Runwa is still running after 15s. If it runs as administrator, rerun from an elevated PowerShell.'
+    # found" for some of them is expected. Killed helpers stay in the process list for ~100ms
+    # after they have exited, and Wait-Process doesn't wait for exited ones, so poll until the
+    # list is actually empty. Killing again each round also catches a helper the main process
+    # respawned just before it died.
+    $deadline = (Get-Date).AddSeconds(15)
+    while (Get-Process Runwa -ErrorAction SilentlyContinue) {
+      if ((Get-Date) -gt $deadline) {
+        throw 'Runwa is still running after 15s. If it runs as administrator, rerun from an elevated PowerShell.'
+      }
+      Stop-Process -Name Runwa -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Milliseconds 100
     }
   } else {
     Write-Host 'Runwa is not running'
