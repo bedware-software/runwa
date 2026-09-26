@@ -1,4 +1,6 @@
 import type {
+  ModuleConfigField,
+  ModuleConfigValue,
   ModuleId,
   ModuleManifest,
   PaletteItem,
@@ -13,6 +15,7 @@ import { settingsStore } from '../../settings-store'
 import { simulateWindowCommand, type WindowCommand } from './keystrokes'
 import {
   powerCommandSupported,
+  reopenWindowsSupported,
   runPowerCommand,
   type PowerCommand
 } from './power'
@@ -130,8 +133,11 @@ interface CommandDef {
   /** Extra words the query also matches, for names people type as one
    * word or by a synonym ("shutdown", "reboot"). */
   keywords?: readonly string[]
-  /** Ask before running — see PaletteItem.confirm. */
-  confirm?: PaletteItemConfirm
+  /** Ask before running — see PaletteItem.confirm. A function gets the
+   * module's current config, for a prompt that spells out a setting. */
+  confirm?:
+    | PaletteItemConfirm
+    | ((config: Record<string, ModuleConfigValue>) => PaletteItemConfirm)
   /** Longer description shown in the settings checkbox row. */
   configDescription: string
   /**
@@ -146,9 +152,45 @@ interface CommandDef {
   contextualTitle?: (focusedApp: FocusedApp | null) => string | null
 }
 
-/** Shared by Shut down and Restart — both close every app. */
-const CLOSES_APPS_MESSAGE =
-  'Every open app will be asked to quit. Save your work first.'
+/**
+ * Config key for what Shut down and Restart leave behind: 'clean' (default)
+ * or 'reopen' — the "Reopen windows when logging back in" checkbox of the
+ * macOS dialog, as one standing choice. Only offered where the OS has the
+ * notion (reopenWindowsSupported).
+ */
+const AFTER_SESSION_END_KEY = 'afterShutdownOrRestart'
+
+function reopensWindows(
+  config: Record<string, ModuleConfigValue> | undefined
+): boolean {
+  return (
+    reopenWindowsSupported() && config?.[AFTER_SESSION_END_KEY] === 'reopen'
+  )
+}
+
+const AFTER_SESSION_END_FIELD: ModuleConfigField = {
+  key: AFTER_SESSION_END_KEY,
+  type: 'radio',
+  label: 'After Shut down or Restart',
+  description:
+    'Whether the apps and windows open now come back when you log back in. macOS: the "Reopen windows when logging back in" checkbox of the Apple menu dialog — a clean start also leaves that checkbox unticked. Windows: shutdown /s, /r for a clean start; /sg, /g to restart registered apps.',
+  defaultValue: 'clean',
+  options: [
+    { value: 'clean', label: 'Start clean' },
+    { value: 'reopen', label: 'Reopen windows' }
+  ],
+  group: 'OS'
+}
+
+/** Shared by Shut down and Restart — both close every app, and both follow
+ * AFTER_SESSION_END_KEY for whether they come back. */
+function closesAppsMessage(config: Record<string, ModuleConfigValue>): string {
+  const message = 'Every open app will be asked to quit. Save your work first.'
+  if (!reopenWindowsSupported()) return message
+  return reopensWindows(config)
+    ? `${message} Your apps and windows reopen when you log back in.`
+    : `${message} Nothing reopens when you log back in.`
+}
 
 const BUILT_IN_COMMANDS: CommandDef[] = [
   {
@@ -290,13 +332,13 @@ const BUILT_IN_COMMANDS: CommandDef[] = [
     defaultEnabled: true,
     action: { kind: 'power', command: 'shutdown' },
     keywords: ['shutdown', 'power off', 'turn off'],
-    confirm: {
+    confirm: (config) => ({
       title: 'Shut down the computer?',
-      message: CLOSES_APPS_MESSAGE,
+      message: closesAppsMessage(config),
       confirmLabel: 'Shut down'
-    },
+    }),
     configDescription:
-      'Shut the computer down after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "shut down". Windows: shutdown /s. Linux: systemctl poweroff.'
+      'Shut the computer down after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "shut down". Windows: shutdown /s (/sg to reopen windows). Linux: systemctl poweroff.'
   },
   {
     id: 'restart',
@@ -308,13 +350,13 @@ const BUILT_IN_COMMANDS: CommandDef[] = [
     defaultEnabled: true,
     action: { kind: 'power', command: 'restart' },
     keywords: ['reboot'],
-    confirm: {
+    confirm: (config) => ({
       title: 'Restart the computer?',
-      message: CLOSES_APPS_MESSAGE,
+      message: closesAppsMessage(config),
       confirmLabel: 'Restart'
-    },
+    }),
     configDescription:
-      'Restart the computer after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "restart". Windows: shutdown /r. Linux: systemctl reboot.'
+      'Restart the computer after a confirmation. Apps are asked to quit first, as with the OS menu. macOS: System Events "restart". Windows: shutdown /r (/g to reopen windows). Linux: systemctl reboot.'
   },
   {
     id: 'sleep',
@@ -539,15 +581,23 @@ export function createCommandPaletteModule(
     defaultEnabled: true,
     supportsDirectLaunch: true,
     defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+P',
-    configFields: COMMANDS.map((c) => ({
-      key: c.configKey,
-      type: 'checkbox' as const,
-      label: c.title,
-      description: c.configDescription,
-      defaultValue: c.defaultEnabled,
-      group: c.group,
-      ...(c.readOnly ? { readOnly: true } : {})
-    })),
+    configFields: (() => {
+      const fields: ModuleConfigField[] = COMMANDS.map((c) => ({
+        key: c.configKey,
+        type: 'checkbox' as const,
+        label: c.title,
+        description: c.configDescription,
+        defaultValue: c.defaultEnabled,
+        group: c.group,
+        ...(c.readOnly ? { readOnly: true } : {})
+      }))
+      if (!reopenWindowsSupported()) return fields
+      // Closes the OS group, below its commands' checkboxes. A radio, so
+      // the group's toggle-all leaves it be.
+      const osEnd = fields.map((f) => f.group).lastIndexOf('OS') + 1
+      fields.splice(osEnd, 0, AFTER_SESSION_END_FIELD)
+      return fields
+    })(),
     defaultAliases: DEFAULT_ALIASES
   }
 
@@ -604,7 +654,10 @@ export function createCommandPaletteModule(
             iconHint: c.icon,
             group: c.group,
             alias: aliases[id],
-            confirm: c.confirm,
+            confirm:
+              typeof c.confirm === 'function'
+                ? c.confirm(context.config)
+                : c.confirm,
             keywords: c.keywords,
             actionKind: actionKindFor(c.action),
             action: actionPayloadFor(c.action)
@@ -863,7 +916,11 @@ export function createCommandPaletteModule(
         // front after waking from sleep. Any confirmation already happened
         // in the palette (PaletteItem.confirm) before this call was made.
         paletteWindow.hide(true)
-        runPowerCommand(item.action.command)
+        runPowerCommand(item.action.command, {
+          reopenWindows: reopensWindows(
+            settingsStore.get().modules[MODULE_ID]?.config
+          )
+        })
         return { dismissPalette: false }
       }
 
