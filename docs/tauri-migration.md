@@ -65,6 +65,13 @@ npm run tauri:build    # release build + installers (NSIS / .app+.dmg / AppImage
 Linux additionally needs the WebKitGTK dev packages
 (`libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev`).
 
+The npm scripts run the Tauri CLI through `scripts/tauri.mjs`, which puts
+rustup's toolchain first on PATH, as the macOS addon release build already
+does. A Homebrew `rust` install can otherwise shadow rustup, and its cargo
+stops starting whenever Homebrew upgrades a library it links (`dyld: Library
+not loaded: …/libllhttp.9.3.dylib`). Running `npx tauri …` directly skips
+that step.
+
 - **Quit the Electron runwa first.** Both register the same global hotkeys;
   the second one to start gets a "registration failed" warning in its log.
 - **Data folder.** Release builds use the Electron folder (`%APPDATA%\Runwa`,

@@ -16,9 +16,9 @@
     "dist:win": "npm run prepare:native:release -- win32 && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --win --x64",
     "dist:mac": "npm run prepare:native:release -- darwin && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --mac",
     "dist:linux": "npm run prepare:native:release -- linux && electron-vite build && node --disable-warning=DEP0190 node_modules/electron-builder/cli.js --linux",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri": "node scripts/tauri.mjs",
+    "tauri:dev": "node scripts/tauri.mjs dev",
+    "tauri:build": "node scripts/tauri.mjs build",
     "tauri:renderer:dev": "vite --config vite.tauri.config.ts",
     "tauri:renderer:build": "vite build --config vite.tauri.config.ts",
     "prepare": "husky"
