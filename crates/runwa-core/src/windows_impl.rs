@@ -45,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 thread_local! {
-  /// Cached COM init marker — COM is initialized once per napi worker thread.
+  /// Cached COM init marker — COM is initialized once per calling thread.
   static COM_INIT: OnceCell<()> = const { OnceCell::new() };
 }
 
@@ -292,13 +292,13 @@ pub(crate) fn get_process_info(pid: u32) -> (String, Option<String>) {
 pub fn list_windows(
     current_desktop_only: bool,
     hide_system_windows: bool,
-) -> napi::Result<Vec<NativeWindow>> {
+) -> crate::Result<Vec<NativeWindow>> {
     let mut collector: Vec<NativeWindow> = Vec::new();
     let lparam = LPARAM(&mut collector as *mut Vec<NativeWindow> as isize);
 
     unsafe {
         EnumWindows(Some(enum_windows_proc), lparam)
-            .map_err(|e| napi::Error::from_reason(format!("EnumWindows failed: {e}")))?;
+            .map_err(|e| crate::Error::from_reason(format!("EnumWindows failed: {e}")))?;
     }
 
     // Hide system shell surfaces and DWM-cloaked windows. Two passes:
@@ -361,10 +361,10 @@ pub fn list_windows(
     Ok(collector)
 }
 
-pub fn focus_window(id: &str) -> napi::Result<bool> {
+pub fn focus_window(id: &str) -> crate::Result<bool> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
 
     let hwnd = HWND(hwnd_val as *mut _);
 
@@ -386,15 +386,15 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
 /// a target that answers WM_CLOSE with a modal prompt would otherwise block
 /// our thread on its message pump. `true` means the message was queued, not
 /// that the window is gone.
-pub fn close_window(id: &str) -> napi::Result<bool> {
+pub fn close_window(id: &str) -> crate::Result<bool> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let hwnd = HWND(hwnd_val as *mut _);
     unsafe { Ok(PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok()) }
 }
 
-pub fn get_foreground_window() -> napi::Result<String> {
+pub fn get_foreground_window() -> crate::Result<String> {
     unsafe {
         let hwnd = GetForegroundWindow();
         Ok((hwnd.0 as isize).to_string())
@@ -414,10 +414,10 @@ pub fn get_foreground_window() -> napi::Result<String> {
 /// previously-focused window owning the foreground (and any still-held
 /// modifier keys from the hotkey chord), so the next keystroke fires a
 /// shortcut on the wrong window — e.g. Alt+Space → system menu on the IDE.
-pub fn force_foreground_window(id: &str) -> napi::Result<bool> {
+pub fn force_foreground_window(id: &str) -> crate::Result<bool> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let hwnd = HWND(hwnd_val as *mut _);
     unsafe { Ok(force_foreground_hwnd(hwnd)) }
 }
@@ -499,7 +499,7 @@ pub fn focus_topmost_after_desktop_switch() {
 /// diagnostics. Also mirrors the log to `%TEMP%\runwa-native.log` as a
 /// post-mortem sink. Temporary diagnostic — drop the `log` field once the
 /// AHK-interaction story is nailed down.
-pub fn focus_topmost_on_current_desktop(exclude_id: &str) -> napi::Result<FocusTopmostResult> {
+pub fn focus_topmost_on_current_desktop(exclude_id: &str) -> crate::Result<FocusTopmostResult> {
     let exclude_hwnd_val: isize = exclude_id.parse().unwrap_or(0);
     let exclude_hwnd = HWND(exclude_hwnd_val as *mut _);
     let vdm = create_virtual_desktop_manager();
@@ -675,10 +675,10 @@ unsafe fn window_rect_tuple(hwnd: HWND) -> (i32, i32, i32, i32) {
 /// callers can log titles/process names next to raw handles. Returns `None`
 /// when the HWND is dead or otherwise refuses to answer `GetWindowThreadProcessId`
 /// — i.e. the window no longer exists.
-pub fn describe_window(id: &str) -> napi::Result<Option<NativeWindow>> {
+pub fn describe_window(id: &str) -> crate::Result<Option<NativeWindow>> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let hwnd = HWND(hwnd_val as *mut _);
 
     unsafe {
@@ -720,10 +720,10 @@ pub fn describe_window(id: &str) -> napi::Result<Option<NativeWindow>> {
 ///
 /// Returns `None` if none of the above yield a usable HICON. The caller
 /// (TypeScript side) then falls back to the exe-based icon resolver.
-pub fn get_window_icon(id: &str) -> napi::Result<Option<WindowIcon>> {
+pub fn get_window_icon(id: &str) -> crate::Result<Option<WindowIcon>> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let hwnd = HWND(hwnd_val as *mut _);
 
     unsafe {
@@ -763,7 +763,7 @@ pub fn get_window_icon(id: &str) -> napi::Result<Option<WindowIcon>> {
 /// sparse for installer-shipped shortcuts (AdGuard, and similar
 /// MSI-packaged apps). `ExtractIconExW` pulls the resource directly from
 /// the file, bypassing that cache entirely.
-pub fn get_file_icon(path: &str, icon_index: i32) -> napi::Result<Option<WindowIcon>> {
+pub fn get_file_icon(path: &str, icon_index: i32) -> crate::Result<Option<WindowIcon>> {
     use windows::core::PCWSTR;
     use windows::Win32::UI::Shell::ExtractIconExW;
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
@@ -851,7 +851,7 @@ unsafe fn find_window_icon(hwnd: HWND) -> Option<HICON> {
 /// mask-based and 32bpp-with-alpha icons into the destination surface with
 /// correct per-pixel alpha. For ancient 1bpp icons whose alpha channel ends
 /// up all-zero we synthesise alpha from the rendered pixels as a last resort.
-unsafe fn hicon_to_bgra(hicon: HICON) -> napi::Result<Option<WindowIcon>> {
+unsafe fn hicon_to_bgra(hicon: HICON) -> crate::Result<Option<WindowIcon>> {
     let mut info = ICONINFO::default();
     if GetIconInfo(hicon, &mut info).is_err() {
         return Ok(None);
@@ -1013,10 +1013,10 @@ fn clamp_icon_dims(width: u32, height: u32, max_dim: u32) -> (u32, u32) {
 /// Returns `true` when we can't determine desktop membership (missing VDM,
 /// query error, invalid HWND) — we'd rather attempt the focus and risk a
 /// desktop jump than silently drop the restore in cases that might be fine.
-pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
+pub fn is_window_on_current_desktop(id: &str) -> crate::Result<bool> {
     let hwnd_val: isize = id
         .parse()
-        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .map_err(|_| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let hwnd = HWND(hwnd_val as *mut _);
 
     let Some(vdm) = create_virtual_desktop_manager() else {
@@ -1037,7 +1037,7 @@ pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
 /// keyboard-remap module uses for workspace switching. On failure (older
 /// Windows 10 builds or COM hiccups) returns 0, which degrades the tray
 /// icon to "desktop 1" rather than crashing the poll loop.
-pub fn get_current_desktop_number() -> napi::Result<u32> {
+pub fn get_current_desktop_number() -> crate::Result<u32> {
     match winvd::get_current_desktop() {
         Ok(d) => match d.get_index() {
             Ok(idx) => Ok(idx),
@@ -1064,9 +1064,9 @@ impl Drop for RegistryKey {
     }
 }
 
-fn registry_error(action: &str, status: WIN32_ERROR) -> napi::Error {
+fn registry_error(action: &str, status: WIN32_ERROR) -> crate::Error {
     let source = windows::core::Error::from(status);
-    napi::Error::from_reason(format!(
+    crate::Error::from_reason(format!(
         "{action} failed: {source} (Windows error {})",
         status.0
     ))
@@ -1074,7 +1074,7 @@ fn registry_error(action: &str, status: WIN32_ERROR) -> napi::Error {
 
 fn open_personalize_key(
     access: windows::Win32::System::Registry::REG_SAM_FLAGS,
-) -> napi::Result<RegistryKey> {
+) -> crate::Result<RegistryKey> {
     let mut key = HKEY::default();
     let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, PERSONALIZE_KEY, 0, access, &mut key) };
     if status.is_err() {
@@ -1086,7 +1086,7 @@ fn open_personalize_key(
     Ok(RegistryKey(key))
 }
 
-fn read_theme_value(key: HKEY, name: windows::core::PCWSTR) -> napi::Result<u32> {
+fn read_theme_value(key: HKEY, name: windows::core::PCWSTR) -> crate::Result<u32> {
     let mut value = 0u32;
     let mut value_type = REG_VALUE_TYPE::default();
     let mut size = std::mem::size_of::<u32>() as u32;
@@ -1104,14 +1104,14 @@ fn read_theme_value(key: HKEY, name: windows::core::PCWSTR) -> napi::Result<u32>
         return Err(registry_error("Reading the Windows theme setting", status));
     }
     if value_type != REG_DWORD || size != std::mem::size_of::<u32>() as u32 {
-        return Err(napi::Error::from_reason(
+        return Err(crate::Error::from_reason(
             "The Windows theme registry value is not a REG_DWORD",
         ));
     }
     Ok(value)
 }
 
-fn write_theme_value(key: HKEY, name: windows::core::PCWSTR, value: u32) -> napi::Result<()> {
+fn write_theme_value(key: HKEY, name: windows::core::PCWSTR, value: u32) -> crate::Result<()> {
     let bytes = value.to_le_bytes();
     let status = unsafe { RegSetValueExW(key, name, 0, REG_DWORD, Some(&bytes)) };
     if status.is_err() {
@@ -1120,7 +1120,7 @@ fn write_theme_value(key: HKEY, name: windows::core::PCWSTR, value: u32) -> napi
     Ok(())
 }
 
-pub fn get_system_theme() -> napi::Result<String> {
+pub fn get_system_theme() -> crate::Result<String> {
     let key = open_personalize_key(KEY_QUERY_VALUE)?;
     let uses_light_theme = read_theme_value(key.0, APPS_USE_LIGHT_THEME)?;
     Ok(if uses_light_theme == 0 {
@@ -1130,12 +1130,12 @@ pub fn get_system_theme() -> napi::Result<String> {
     })
 }
 
-pub fn set_system_theme(theme: &str) -> napi::Result<()> {
+pub fn set_system_theme(theme: &str) -> crate::Result<()> {
     let uses_light_theme = match theme {
         "light" => 1,
         "dark" => 0,
         _ => {
-            return Err(napi::Error::from_reason(format!(
+            return Err(crate::Error::from_reason(format!(
                 "Invalid system theme {theme:?}; expected \"light\" or \"dark\""
             )))
         }
@@ -1148,7 +1148,7 @@ pub fn set_system_theme(theme: &str) -> napi::Result<()> {
     let verified_apps = read_theme_value(key.0, APPS_USE_LIGHT_THEME)?;
     let verified_system = read_theme_value(key.0, SYSTEM_USES_LIGHT_THEME)?;
     if verified_apps != uses_light_theme || verified_system != uses_light_theme {
-        return Err(napi::Error::from_reason(
+        return Err(crate::Error::from_reason(
             "Windows did not persist both application and system theme settings",
         ));
     }
@@ -1205,15 +1205,15 @@ fn parse_desktop_color(value: &str) -> Result<COLORREF, String> {
 
 /// Reveal a solid desktop color while preserving Windows' configured image
 /// path so a future SetWallpaper call can turn picture mode back on.
-pub fn set_desktop_background_color(value: &str) -> napi::Result<()> {
-    let color = parse_desktop_color(value).map_err(napi::Error::from_reason)?;
+pub fn set_desktop_background_color(value: &str) -> crate::Result<()> {
+    let color = parse_desktop_color(value).map_err(crate::Error::from_reason)?;
     ensure_com_init();
 
     let wallpaper = unsafe {
         CoCreateInstance::<_, IDesktopWallpaper>(&DesktopWallpaper, None, CLSCTX_LOCAL_SERVER)
     }
     .map_err(|error| {
-        napi::Error::from_reason(format!(
+        crate::Error::from_reason(format!(
             "Creating the Windows desktop wallpaper service failed: {error}"
         ))
     })?;
@@ -1222,23 +1222,23 @@ pub fn set_desktop_background_color(value: &str) -> napi::Result<()> {
         // Set the color before hiding the image to avoid flashing the previous
         // color between the two COM calls.
         wallpaper.SetBackgroundColor(color).map_err(|error| {
-            napi::Error::from_reason(format!(
+            crate::Error::from_reason(format!(
                 "Setting the Windows desktop background color failed: {error}"
             ))
         })?;
         wallpaper.Enable(BOOL(0)).map_err(|error| {
-            napi::Error::from_reason(format!(
+            crate::Error::from_reason(format!(
                 "Showing the Windows desktop background color failed: {error}"
             ))
         })?;
 
         let verified = wallpaper.GetBackgroundColor().map_err(|error| {
-            napi::Error::from_reason(format!(
+            crate::Error::from_reason(format!(
                 "Verifying the Windows desktop background color failed: {error}"
             ))
         })?;
         if verified.0 != color.0 {
-            return Err(napi::Error::from_reason(
+            return Err(crate::Error::from_reason(
                 "Windows did not persist the requested desktop background color",
             ));
         }
@@ -1311,31 +1311,33 @@ pub fn is_process_elevated() -> bool {
 /// window — i.e. the Explorer the user logged into, which runs with their
 /// ordinary filtered token. `CreateProcessWithTokenW` needs
 /// SE_IMPERSONATE_NAME, which we have precisely because we are elevated.
-fn shell_user_token() -> napi::Result<OwnedHandle> {
+fn shell_user_token() -> crate::Result<OwnedHandle> {
     unsafe {
         let shell_hwnd = GetShellWindow();
         if shell_hwnd.is_invalid() {
-            return Err(napi::Error::from_reason(
+            return Err(crate::Error::from_reason(
                 "No desktop shell window: can't borrow the interactive user's token",
             ));
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(shell_hwnd, Some(&mut pid));
         if pid == 0 {
-            return Err(napi::Error::from_reason(
+            return Err(crate::Error::from_reason(
                 "The desktop shell window reported no owning process",
             ));
         }
 
         let process = OwnedHandle(
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).map_err(|error| {
-                napi::Error::from_reason(format!("Opening the desktop shell process failed: {error}"))
+                crate::Error::from_reason(format!(
+                    "Opening the desktop shell process failed: {error}"
+                ))
             })?,
         );
 
         let mut raw = HANDLE::default();
         OpenProcessToken(process.0, TOKEN_DUPLICATE | TOKEN_QUERY, &mut raw).map_err(|error| {
-            napi::Error::from_reason(format!("Opening the desktop shell's token failed: {error}"))
+            crate::Error::from_reason(format!("Opening the desktop shell's token failed: {error}"))
         })?;
         let shell_token = OwnedHandle(raw);
 
@@ -1353,7 +1355,7 @@ fn shell_user_token() -> napi::Result<OwnedHandle> {
             &mut primary,
         )
         .map_err(|error| {
-            napi::Error::from_reason(format!(
+            crate::Error::from_reason(format!(
                 "Duplicating the desktop shell's token failed: {error}"
             ))
         })?;
@@ -1371,7 +1373,11 @@ fn environment_block() -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
 
     let mut entries: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os()
-        .filter(|(name, _)| !name.to_string_lossy().eq_ignore_ascii_case("__COMPAT_LAYER"))
+        .filter(|(name, _)| {
+            !name
+                .to_string_lossy()
+                .eq_ignore_ascii_case("__COMPAT_LAYER")
+        })
         .collect();
     entries.sort_by_key(|(name, _)| name.to_string_lossy().to_lowercase());
 
@@ -1410,7 +1416,7 @@ pub fn launch_as_shell_user(
     exe: &str,
     args: Option<&str>,
     cwd: Option<&str>,
-) -> napi::Result<u32> {
+) -> crate::Result<u32> {
     let token = shell_user_token()?;
     let application = to_wide(exe);
     let mut command = command_line(exe, args);
@@ -1438,7 +1444,9 @@ pub fn launch_as_shell_user(
             &mut process,
         )
         .map_err(|error| {
-            napi::Error::from_reason(format!("Launching {exe} as the current user failed: {error}"))
+            crate::Error::from_reason(format!(
+                "Launching {exe} as the current user failed: {error}"
+            ))
         })?;
 
         let _ = CloseHandle(process.hThread);
@@ -1452,7 +1460,7 @@ pub fn launch_as_shell_user(
 /// Explorer context menu's "Run as administrator" does. Raises a UAC prompt
 /// when we are not already elevated, and silently inherits our own elevated
 /// token when we are.
-pub fn launch_elevated(path: &str, args: Option<&str>, cwd: Option<&str>) -> napi::Result<()> {
+pub fn launch_elevated(path: &str, args: Option<&str>, cwd: Option<&str>) -> crate::Result<()> {
     let verb = to_wide("runas");
     let file = to_wide(path);
     let parameters = args.map(str::trim).filter(|a| !a.is_empty()).map(to_wide);
@@ -1477,7 +1485,7 @@ pub fn launch_elevated(path: &str, args: Option<&str>, cwd: Option<&str>) -> nap
     };
 
     unsafe { ShellExecuteExW(&mut info) }.map_err(|error| {
-        napi::Error::from_reason(format!("Launching {path} as administrator failed: {error}"))
+        crate::Error::from_reason(format!("Launching {path} as administrator failed: {error}"))
     })
 }
 

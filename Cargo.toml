@@ -1,0 +1,18 @@
+# Rust workspace for the Tauri shell and the platform layer it shares with
+# the Electron build.
+#
+#   crates/runwa-core — OS integration (windows, focus, keyboard hook, …)
+#   src-tauri         — the Tauri app
+#
+# `native/` (the napi addon the Electron build loads) is kept out of the
+# workspace: `napi build` drives it from its own directory with its own lock
+# file and target dir, exactly as before the split.
+[workspace]
+resolver = "2"
+members = ["crates/runwa-core", "src-tauri"]
+exclude = ["native"]
+
+[profile.release]
+lto = true
+strip = "symbols"
+codegen-units = 1

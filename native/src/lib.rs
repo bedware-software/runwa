@@ -1,15 +1,18 @@
 #![deny(clippy::all)]
 
+//! napi-rs facade over `runwa-core` for the Electron build.
+//!
+//! All platform code lives in `crates/runwa-core`, which the Tauri app links
+//! directly. This crate only converts between core types and JS values, so
+//! the JS API — and the generated `index.d.ts` — is unchanged. It goes away
+//! together with the Electron shell.
+
 #[macro_use]
 extern crate napi_derive;
 
-#[cfg(target_os = "windows")]
-mod windows_impl;
-
-#[cfg(target_os = "macos")]
-mod macos;
-
-mod remap;
+fn to_napi(err: runwa_core::Error) -> napi::Error {
+    napi::Error::from_reason(err.to_string())
+}
 
 #[napi(object)]
 #[derive(Clone)]
@@ -20,6 +23,19 @@ pub struct NativeWindow {
     pub process_name: String,
     pub executable_path: Option<String>,
     pub bundle_id: Option<String>,
+}
+
+impl From<runwa_core::NativeWindow> for NativeWindow {
+    fn from(w: runwa_core::NativeWindow) -> Self {
+        Self {
+            id: w.id,
+            pid: w.pid,
+            title: w.title,
+            process_name: w.process_name,
+            executable_path: w.executable_path,
+            bundle_id: w.bundle_id,
+        }
+    }
 }
 
 #[napi(object)]
@@ -35,6 +51,16 @@ pub struct FocusTopmostResult {
     pub log: Vec<String>,
 }
 
+impl From<runwa_core::FocusTopmostResult> for FocusTopmostResult {
+    fn from(r: runwa_core::FocusTopmostResult) -> Self {
+        Self {
+            ok: r.ok,
+            picked_hwnd: r.picked_hwnd,
+            log: r.log,
+        }
+    }
+}
+
 /// Raw BGRA pixel buffer suitable for `nativeImage.createFromBitmap` on the
 /// TypeScript side (Electron's per-platform default is BGRA). Sourced from
 /// the window's actual icon (WM_GETICON / class icon), which differs from
@@ -47,42 +73,29 @@ pub struct WindowIcon {
     pub bgra: napi::bindgen_prelude::Buffer,
 }
 
+impl From<runwa_core::WindowIcon> for WindowIcon {
+    fn from(icon: runwa_core::WindowIcon) -> Self {
+        Self {
+            width: icon.width,
+            height: icon.height,
+            bgra: icon.bgra.into(),
+        }
+    }
+}
+
 #[napi]
 pub fn list_windows(
     current_desktop_only: bool,
     hide_system_windows: bool,
 ) -> napi::Result<Vec<NativeWindow>> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::list_windows(current_desktop_only, hide_system_windows)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        macos::list_windows(current_desktop_only, hide_system_windows)
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let _ = current_desktop_only;
-        let _ = hide_system_windows;
-        Ok(Vec::new())
-    }
+    runwa_core::list_windows(current_desktop_only, hide_system_windows)
+        .map(|windows| windows.into_iter().map(NativeWindow::from).collect())
+        .map_err(to_napi)
 }
 
 #[napi]
 pub fn focus_window(id: String) -> napi::Result<bool> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::focus_window(&id)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        macos::focus_window(&id)
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let _ = id;
-        Ok(false)
-    }
+    runwa_core::focus_window(&id).map_err(to_napi)
 }
 
 /// Ask a window to close — equivalent to clicking its close button.
@@ -93,67 +106,24 @@ pub fn focus_window(id: String) -> napi::Result<bool> {
 /// gone.
 #[napi]
 pub fn close_window(id: String) -> napi::Result<bool> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::close_window(&id)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        macos::close_window(&id)
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let _ = id;
-        Ok(false)
-    }
+    runwa_core::close_window(&id).map_err(to_napi)
 }
 
 #[napi]
 pub fn get_foreground_window() -> napi::Result<String> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::get_foreground_window()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        macos::get_foreground_window()
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        Ok(String::new())
-    }
+    runwa_core::get_foreground_window().map_err(to_napi)
 }
 
 #[napi]
 pub fn force_foreground_window(id: String) -> napi::Result<bool> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::force_foreground_window(&id)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Non-Windows platforms don't have the foreground-lock problem in the
-        // same shape — the OS grants focus when the palette shows. Focus from
-        // the Rust side falls back to the regular focus_window path if needed.
-        let _ = id;
-        Ok(true)
-    }
+    runwa_core::force_foreground_window(&id).map_err(to_napi)
 }
 
 #[napi]
 pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::describe_window(&id)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // macOS window ids are `${pid}:${windowNumber}` strings — resolving them
-        // cheaply would need CGWindowListCopyWindowInfo per call. The palette's
-        // diagnostic logs are Windows-only today, so no-op on other platforms.
-        let _ = id;
-        Ok(None)
-    }
+    runwa_core::describe_window(&id)
+        .map(|window| window.map(NativeWindow::from))
+        .map_err(to_napi)
 }
 
 /// Zero-based index of the currently active virtual desktop. Intended for a
@@ -164,18 +134,7 @@ pub fn describe_window(id: String) -> napi::Result<Option<NativeWindow>> {
 /// action recorded (0 until the first such switch). Linux / other: always 0.
 #[napi]
 pub fn get_current_desktop_number() -> napi::Result<u32> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::get_current_desktop_number()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Ok(remap::desktop::get())
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        Ok(0)
-    }
+    runwa_core::get_current_desktop_number().map_err(to_napi)
 }
 
 /// Register a JS callback invoked with the new 0-based desktop ordinal every
@@ -188,10 +147,16 @@ pub fn get_current_desktop_number() -> napi::Result<u32> {
 pub fn set_desktop_change_callback(callback: napi::JsFunction) -> napi::Result<()> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction};
+        use napi::threadsafe_function::{
+            ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+        };
         let tsfn: ThreadsafeFunction<u32, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<u32>| Ok(vec![ctx.value]))?;
-        remap::desktop::set_callback(tsfn);
+        // Non-blocking: enqueues onto the Node event loop and returns at once,
+        // which is what the hook thread calling this requires.
+        runwa_core::set_desktop_change_callback(move |desktop| {
+            tsfn.call(desktop, ThreadsafeFunctionCallMode::NonBlocking);
+        });
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -203,54 +168,21 @@ pub fn set_desktop_change_callback(callback: napi::JsFunction) -> napi::Result<(
 
 #[napi]
 pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::is_window_on_current_desktop(&id)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        macos::is_window_on_current_desktop(&id)
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        // No virtual-desktop concept to consult — every window counts as
-        // being on the current one.
-        let _ = id;
-        Ok(true)
-    }
+    runwa_core::is_window_on_current_desktop(&id).map_err(to_napi)
 }
 
 #[napi]
 pub fn focus_topmost_on_current_desktop(exclude_id: String) -> napi::Result<FocusTopmostResult> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::focus_topmost_on_current_desktop(&exclude_id)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = exclude_id;
-        Ok(FocusTopmostResult {
-            ok: false,
-            picked_hwnd: None,
-            log: Vec::new(),
-        })
-    }
+    runwa_core::focus_topmost_on_current_desktop(&exclude_id)
+        .map(FocusTopmostResult::from)
+        .map_err(to_napi)
 }
 
 #[napi]
 pub fn get_window_icon(id: String) -> napi::Result<Option<WindowIcon>> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::get_window_icon(&id)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // macOS icons are per-app (NSRunningApplication.icon), resolvable from
-        // the bundle identifier. Not wired yet — macOS path still relies on the
-        // executable-based icon fallback on the TS side.
-        let _ = id;
-        Ok(None)
-    }
+    runwa_core::get_window_icon(&id)
+        .map(|icon| icon.map(WindowIcon::from))
+        .map_err(to_napi)
 }
 
 /// Windows-only fallback when Electron's `app.getFileIcon` returns an
@@ -259,15 +191,9 @@ pub fn get_window_icon(id: String) -> napi::Result<Option<WindowIcon>> {
 /// cache which is sparse for installer-shipped shortcuts.
 #[napi]
 pub fn get_file_icon(path: String, icon_index: Option<i32>) -> napi::Result<Option<WindowIcon>> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::get_file_icon(&path, icon_index.unwrap_or(0))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (path, icon_index);
-        Ok(None)
-    }
+    runwa_core::get_file_icon(&path, icon_index.unwrap_or(0))
+        .map(|icon| icon.map(WindowIcon::from))
+        .map_err(to_napi)
 }
 
 /// Windows-only: true when runwa is running with an elevated (administrator)
@@ -276,14 +202,7 @@ pub fn get_file_icon(path: String, icon_index: Option<i32>) -> napi::Result<Opti
 /// the interactive user. Always false elsewhere — no equivalent split exists.
 #[napi]
 pub fn is_process_elevated() -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::is_process_elevated()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        false
-    }
+    runwa_core::is_process_elevated()
 }
 
 /// Windows-only: start `exe` as the plain interactive user, whatever token we
@@ -301,17 +220,7 @@ pub fn launch_as_shell_user(
     args: Option<String>,
     cwd: Option<String>,
 ) -> napi::Result<u32> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::launch_as_shell_user(&exe, args.as_deref(), cwd.as_deref())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (exe, args, cwd);
-        Err(napi::Error::from_reason(
-            "launch_as_shell_user is Windows-only",
-        ))
-    }
+    runwa_core::launch_as_shell_user(&exe, args.as_deref(), cwd.as_deref()).map_err(to_napi)
 }
 
 /// Windows-only: start `path` elevated via the shell's `runas` verb — the
@@ -323,15 +232,7 @@ pub fn launch_elevated(
     args: Option<String>,
     cwd: Option<String>,
 ) -> napi::Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::launch_elevated(&path, args.as_deref(), cwd.as_deref())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (path, args, cwd);
-        Err(napi::Error::from_reason("launch_elevated is Windows-only"))
-    }
+    runwa_core::launch_elevated(&path, args.as_deref(), cwd.as_deref()).map_err(to_napi)
 }
 
 /// macOS-only: true if this process has been granted Accessibility in
@@ -339,14 +240,7 @@ pub fn launch_elevated(
 /// other platforms (no equivalent gate exists there).
 #[napi]
 pub fn is_accessibility_trusted() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::is_accessibility_trusted()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    runwa_core::is_accessibility_trusted()
 }
 
 /// macOS-only: shows the one-time Accessibility permission prompt and
@@ -355,14 +249,7 @@ pub fn is_accessibility_trusted() -> bool {
 /// caches the trust bit per-process at launch.
 #[napi]
 pub fn request_accessibility_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::request_accessibility_permission()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    runwa_core::request_accessibility_permission()
 }
 
 /// macOS-only: true if `CGPreflightScreenCaptureAccess` reports Screen
@@ -371,14 +258,7 @@ pub fn request_accessibility_permission() -> bool {
 /// require this to be true.
 #[napi]
 pub fn is_screen_recording_granted() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::is_screen_recording_granted()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    runwa_core::is_screen_recording_granted()
 }
 
 /// macOS-only: triggers the Screen Recording permission prompt and registers
@@ -389,14 +269,7 @@ pub fn is_screen_recording_granted() -> bool {
 /// `CGWindowList` starts returning window titles.
 #[napi]
 pub fn request_screen_recording_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::request_screen_recording_permission()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    runwa_core::request_screen_recording_permission()
 }
 
 /// Install a cross-platform keyboard remapping hook. `rules_json` is a JSON5
@@ -404,21 +277,21 @@ pub fn request_screen_recording_permission() -> bool {
 /// Returns an opaque handle id; pass it to `stop_keyboard_remap` to tear down.
 #[napi]
 pub fn start_keyboard_remap(rules_json: String) -> napi::Result<u32> {
-    remap::start(&rules_json).map_err(napi::Error::from_reason)
+    runwa_core::start_keyboard_remap(&rules_json).map_err(to_napi)
 }
 
 /// Validate keyboard remap rules without installing or replacing the active
 /// hook. Uses the same authoritative Rust parser as `start_keyboard_remap`.
 #[napi]
 pub fn validate_keyboard_remap(rules_json: String) -> napi::Result<()> {
-    remap::validate(&rules_json).map_err(napi::Error::from_reason)
+    runwa_core::validate_keyboard_remap(&rules_json).map_err(to_napi)
 }
 
 /// Tear down a keyboard remap hook previously installed via
 /// `start_keyboard_remap`. Unknown handle ids return an error.
 #[napi]
 pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
-    remap::stop(handle).map_err(napi::Error::from_reason)
+    runwa_core::stop_keyboard_remap(handle).map_err(to_napi)
 }
 
 /// Switch the system input language to the one matching `code` (ISO 639-1,
@@ -431,7 +304,7 @@ pub fn stop_keyboard_remap(handle: u32) -> napi::Result<()> {
 /// Returns an error only if `code` fails to parse.
 #[napi]
 pub fn set_input_language(code: String) -> napi::Result<()> {
-    remap::set_input_language(&code).map_err(napi::Error::from_reason)
+    runwa_core::set_input_language(&code).map_err(to_napi)
 }
 
 /// Replace the set of executables (bare file names, e.g. `cs2.exe`) that
@@ -440,7 +313,7 @@ pub fn set_input_language(code: String) -> napi::Result<()> {
 /// and after every edit, so the list is always a full replacement.
 #[napi]
 pub fn set_remap_fullscreen_bypass(process_names: Vec<String>) {
-    remap::set_fullscreen_bypass_processes(process_names);
+    runwa_core::set_remap_fullscreen_bypass(process_names);
 }
 
 /// Read the Windows application appearance preference. Returns `"light"` or
@@ -448,33 +321,14 @@ pub fn set_remap_fullscreen_bypass(process_names: Vec<String>) {
 /// macOS, so this native API intentionally reports unsupported elsewhere.
 #[napi]
 pub fn get_system_theme() -> napi::Result<String> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::get_system_theme()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err(napi::Error::from_reason(
-            "Native system theme control is only available on Windows",
-        ))
-    }
+    runwa_core::get_system_theme().map_err(to_napi)
 }
 
 /// Set both the Windows application and system appearance preferences, then
 /// broadcast `WM_SETTINGCHANGE` so the shell and running applications refresh.
 #[napi]
 pub fn set_system_theme(theme: String) -> napi::Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::set_system_theme(&theme)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = theme;
-        Err(napi::Error::from_reason(
-            "Native system theme control is only available on Windows",
-        ))
-    }
+    runwa_core::set_system_theme(&theme).map_err(to_napi)
 }
 
 /// Windows-only: reveal a solid desktop color in `#RRGGBB` format. The
@@ -482,15 +336,5 @@ pub fn set_system_theme(theme: String) -> napi::Result<()> {
 /// is disabled until another wallpaper is applied.
 #[napi]
 pub fn set_desktop_background_color(color: String) -> napi::Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        windows_impl::set_desktop_background_color(&color)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = color;
-        Err(napi::Error::from_reason(
-            "Native desktop background color control is only available on Windows",
-        ))
-    }
+    runwa_core::set_desktop_background_color(&color).map_err(to_napi)
 }

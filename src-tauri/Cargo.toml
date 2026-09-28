@@ -1,0 +1,36 @@
+[package]
+name = "runwa-tauri"
+version = "0.1.0"
+description = "Runwa command palette launcher — Tauri shell"
+edition = "2021"
+publish = false
+default-run = "runwa-tauri"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+runwa-core = { path = "../crates/runwa-core" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+base64 = "0.22"
+log = "0.4"
+parking_lot = "0.12"
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps settings keys in the order the JSON file has them,
+# so a write from this shell doesn't reshuffle a file the Electron build
+# also reads.
+serde_json = { version = "1", features = ["preserve_order"] }
+# Already in the tree as Tauri's async runtime; named for its timers.
+tokio = { version = "1", features = ["time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# App icons straight from a bundle's Info.plist + .icns — the path Electron's
+# `nativeImage` covered for the Window Switcher's macOS rows.
+icns = "0.3"
+plist = "1"

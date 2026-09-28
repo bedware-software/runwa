@@ -94,7 +94,7 @@ fn truncate_to_app_bundle(exe_path: &str) -> String {
 pub fn list_windows(
     current_desktop_only: bool,
     hide_system_windows: bool,
-) -> napi::Result<Vec<NativeWindow>> {
+) -> crate::Result<Vec<NativeWindow>> {
     if current_desktop_only {
         // Current-Space via CGWindowList with OnScreenOnly — naturally omits
         // most helper surfaces because they're either off-screen or on higher
@@ -328,7 +328,7 @@ extern "C" {
 /// RAII wrapper around an owned AX reference — CFReleases on drop. AX
 /// elements are CFTypes, so the release call is the same as for any Core
 /// Foundation value. Marked Send so we can stash them in a `Mutex<HashMap>`
-/// (napi-rs calls run on the Node main thread; AX itself is safe to read
+/// (both shells call in from their main thread; AX itself is safe to read
 /// from any thread as long as calls aren't interleaved for the same element).
 struct OwnedAxRef(AXUIElementRef);
 
@@ -367,7 +367,7 @@ unsafe fn ax_copy_attribute(elem: AXUIElementRef, attribute: &CFString) -> Optio
     Some(out)
 }
 
-fn list_windows_all_spaces(hide_system_windows: bool) -> napi::Result<Vec<NativeWindow>> {
+fn list_windows_all_spaces(hide_system_windows: bool) -> crate::Result<Vec<NativeWindow>> {
     // Why CGWindowList here instead of AX:
     //
     // AX's `AXWindows` attribute on modern macOS only reliably returns windows
@@ -623,7 +623,7 @@ pub fn request_accessibility_permission() -> bool {
 
 // ─── Focus ──────────────────────────────────────────────────────────────────
 
-pub fn focus_window(id: &str) -> napi::Result<bool> {
+pub fn focus_window(id: &str) -> crate::Result<bool> {
     // AX-prefixed ids exist for a future iteration that lists windows via AX
     // directly. Kept as a dispatch branch so the id format is stable.
     if let Some(key) = id.strip_prefix("ax:") {
@@ -637,7 +637,7 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
     let pid: u32 = parts
         .next()
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .ok_or_else(|| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let wid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
 
     // Detect whether activating this process will animate a Space switch.
@@ -695,7 +695,7 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
 /// empty string when the list comes back empty (no app windows on the
 /// current Space, transient state during space-switch animations, etc.) —
 /// callers treat that as "no previous focus to restore".
-pub fn get_foreground_window() -> napi::Result<String> {
+pub fn get_foreground_window() -> crate::Result<String> {
     unsafe {
         let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
         let array_ref = CGWindowListCopyWindowInfo(options, kCGNullWindowID);
@@ -839,7 +839,7 @@ fn press_ax_close_button(win: AXUIElementRef) -> bool {
 /// the window is already gone, or the owning app is parked on another Space
 /// with nothing on-screen (AX answers `kAXErrorCannotComplete` for those —
 /// closing cross-Space windows is best-effort).
-pub fn close_window(id: &str) -> napi::Result<bool> {
+pub fn close_window(id: &str) -> crate::Result<bool> {
     // AX-prefixed ids — same future-proofing dispatch branch as focus_window.
     if let Some(key) = id.strip_prefix("ax:") {
         let cache = AX_CACHE.lock().expect("AX_CACHE poisoned");
@@ -853,7 +853,7 @@ pub fn close_window(id: &str) -> napi::Result<bool> {
     let pid: u32 = parts
         .next()
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+        .ok_or_else(|| crate::Error::from_reason(format!("invalid window id: {id}")))?;
     let Some(wid) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
         return Ok(false);
     };
@@ -908,7 +908,7 @@ fn pid_has_onscreen_window(pid: u32) -> bool {
 /// (`ax:…`, which carries no CGWindowID), or a CGWindowList call that fails
 /// all answer `true`, preserving the previous always-restore behavior rather
 /// than silently dropping focus restoration.
-pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
+pub fn is_window_on_current_desktop(id: &str) -> crate::Result<bool> {
     if id.starts_with("ax:") {
         return Ok(true);
     }
@@ -949,7 +949,7 @@ pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
 /// process X to true" logic the focus path has always used. Extracted so
 /// both the old coarse-activate behavior and the new precise-raise path
 /// share a single implementation.
-fn osascript_activate_pid(pid: u32) -> napi::Result<bool> {
+fn osascript_activate_pid(pid: u32) -> crate::Result<bool> {
     let script = format!(
         r#"tell application "System Events"
          try
@@ -965,7 +965,7 @@ fn osascript_activate_pid(pid: u32) -> napi::Result<bool> {
     let output = Command::new("osascript")
         .args(["-e", &script])
         .output()
-        .map_err(|e| napi::Error::from_reason(format!("osascript failed: {e}")))?;
+        .map_err(|e| crate::Error::from_reason(format!("osascript failed: {e}")))?;
 
     Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "ok")
 }
