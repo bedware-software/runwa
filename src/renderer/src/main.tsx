@@ -1,10 +1,19 @@
 import ReactDOM from 'react-dom/client'
 import './lib/electron'
 import './globals.css'
+import { isTauriShell } from './lib/shell'
 import { PaletteApp } from './components/palette/PaletteApp'
 import { SettingsApp } from './components/settings/SettingsApp'
 import { RecorderApp } from './components/recorder/RecorderApp'
 import { DesktopHintApp } from './components/desktop-hint/DesktopHintApp'
+
+// Tauri has no preload script: install the `window.electronAPI` bridge
+// before anything calls it. Loaded on demand, so the Electron bundle doesn't
+// carry @tauri-apps/api.
+if (isTauriShell()) {
+  const { installTauriBridge } = await import('./lib/tauri-bridge')
+  installTauriBridge()
+}
 
 // Hash-based routing so one HTML file / one bundle serves every window.
 // Settings can carry a `?tab=<id>` suffix for deep-linking (e.g. tray →

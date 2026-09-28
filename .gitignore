@@ -20,5 +20,11 @@ native/index.js
 native/index.d.ts
 native/npm/
 
+# Rust workspace (crates/runwa-core + src-tauri)
+/target/
+crates/*/target/
+src-tauri/target/
+src-tauri/gen/
+
 # TS build info
 *.tsbuildinfo

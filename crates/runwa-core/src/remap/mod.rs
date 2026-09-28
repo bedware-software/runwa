@@ -29,7 +29,7 @@ pub mod macos_close_window;
 #[cfg(target_os = "macos")]
 pub mod macos_move_window;
 
-// Active-desktop signal + JS push callback. Used by the inject paths on both
+// Active-desktop signal + shell push callback. Used by the inject paths on both
 // platforms that have virtual desktops; not compiled on Linux (no switching).
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod desktop;

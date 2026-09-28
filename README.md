@@ -122,3 +122,15 @@ npm run dist:win    # Windows installer
 npm run dist:mac    # macOS dmg
 npm run dist:linux  # Linux AppImage
 ```
+
+## Tauri build (in progress)
+
+Runwa is moving from Electron to Tauri: the Rust platform code lives in
+`crates/runwa-core`, the new shell in `src-tauri`, and the same React UI runs
+in both. Only the Window Switcher is ported so far — see
+[docs/tauri-migration.md](docs/tauri-migration.md).
+
+```bash
+npm run tauri:dev     # quit the Electron runwa first: both register the same hotkeys
+npm run tauri:build
+```
