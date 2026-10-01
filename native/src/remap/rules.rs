@@ -501,7 +501,9 @@ pub struct ResolvedRules {
     /// fires a `switch_to_workspace` / `move_to_workspace` action. Must match
     /// the combo bound to Mission Control's "Switch to Desktop N" shortcut.
     /// Sourced from `settings.macos_switch_workspace_modifiers`; defaults to
-    /// `[Ctrl]` (macOS's factory binding). Ignored on other platforms.
+    /// `[Ctrl]` (macOS's factory binding). Ignored on other platforms, but
+    /// still parsed there so a bad `settings` block fails the same everywhere.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub macos_switch_workspace_modifiers: SmallVec<[Modifier; 4]>,
 }
 
