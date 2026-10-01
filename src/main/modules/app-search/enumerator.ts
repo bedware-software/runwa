@@ -453,12 +453,22 @@ async function enumerateCustomPaths(
 //      onAction handler calls `invalidateAppCache()` explicitly.
 // No time-based TTL: installed apps don't change often, and silently
 // re-enumerating every minute is both expensive and unhelpful.
+//
+// The startup prewarm fills this cache in the background, so the first
+// palette open usually lands on a hit. A search that arrives while that
+// walk is still running joins it through `inflight` rather than spawning a
+// second PowerShell.
 
 interface CacheEntry {
   apps: AppEntry[]
 }
 
 let cache: { key: string; entry: CacheEntry } | null = null
+let inflight: { key: string; promise: Promise<AppEntry[]> } | null = null
+// Bumped by `invalidateAppCache`. A walk that started before a Ctrl+R
+// rescan still finishes for whoever awaited it, but mustn't repopulate the
+// cache with the snapshot the user just asked to throw away.
+let generation = 0
 
 function cacheKey(opts: EnumerateOptions): string {
   return [
@@ -475,7 +485,25 @@ export async function enumerateApps(opts: EnumerateOptions): Promise<AppEntry[]>
   if (cache && cache.key === key) {
     return cache.entry.apps
   }
+  if (inflight && inflight.key === key) {
+    return inflight.promise
+  }
 
+  const startedAt = generation
+  const promise = walkAllSources(opts)
+  inflight = { key, promise }
+  try {
+    const apps = await promise
+    if (generation === startedAt) {
+      cache = { key, entry: { apps } }
+    }
+    return apps
+  } finally {
+    if (inflight?.promise === promise) inflight = null
+  }
+}
+
+async function walkAllSources(opts: EnumerateOptions): Promise<AppEntry[]> {
   const collected: AppEntry[] = []
   const isWin = process.platform === 'win32'
   const isMac = process.platform === 'darwin'
@@ -503,8 +531,6 @@ export async function enumerateApps(opts: EnumerateOptions): Promise<AppEntry[]>
 
   const deduped = dedupeByName(collected)
   deduped.sort((a, b) => a.name.localeCompare(b.name))
-
-  cache = { key, entry: { apps: deduped } }
   return deduped
 }
 
@@ -530,4 +556,6 @@ function dedupeByName(apps: AppEntry[]): AppEntry[] {
 
 export function invalidateAppCache(): void {
   cache = null
+  inflight = null
+  generation++
 }

@@ -97,6 +97,16 @@ export interface PaletteModule {
    */
   onAction?(key: string): Promise<void> | void
 
+  /**
+   * Optional: do the expensive first-search work ahead of time. The registry
+   * calls this once in the background at startup for every enabled module,
+   * so the first palette open after a reboot answers from warm caches
+   * instead of paying for them while the user waits. Must be safe to run
+   * concurrently with `search()` — a search that lands mid-prewarm should
+   * join the work in flight, not repeat it. Errors are logged and swallowed.
+   */
+  prewarm?(config: Record<string, ModuleConfigValue>): Promise<void>
+
   /** Optional cleanup, called on app shutdown. */
   dispose?(): Promise<void>
 }

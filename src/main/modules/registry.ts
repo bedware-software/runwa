@@ -211,6 +211,29 @@ class ModuleRegistry {
     }
   }
 
+  /**
+   * Fire every enabled module's `prewarm` hook. Called once at startup,
+   * fire-and-forget — the hooks run alongside whatever else the user does,
+   * and a module whose prewarm fails just pays the cost on first search as
+   * before.
+   */
+  async prewarm(): Promise<void> {
+    await Promise.all(
+      [...this.modules.values()].map(async (m) => {
+        if (!m.prewarm) return
+        const enabled =
+          this.moduleSettingsCache.get(m.manifest.id)?.enabled ??
+          m.manifest.defaultEnabled
+        if (!enabled) return
+        try {
+          await m.prewarm(this.buildConfig(m))
+        } catch (err) {
+          console.warn(`[registry] prewarm failed for ${m.manifest.id}:`, err)
+        }
+      })
+    )
+  }
+
   async dispose(): Promise<void> {
     for (const ctrl of this.activeControllers.values()) ctrl.abort()
     this.activeControllers.clear()

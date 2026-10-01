@@ -465,9 +465,26 @@ export function getIconDataUrlSync(exePath: string | undefined): string | null {
  * Resolves a batch of exe paths in parallel, deduping and skipping anything
  * already in the cache. Safe to call on every search — becomes a no-op once
  * all seen paths are cached.
+ *
+ * `batchSize` is for background warming. Most of a Windows icon resolve is
+ * synchronous native work on the main thread (`readShortcutLink`,
+ * `ExtractIconExW`, PNG encode), so resolving a whole Start Menu in one go
+ * holds the event loop for as long as that takes. That's the right trade
+ * while the user waits on the result, and the wrong one when nobody is:
+ * batching yields between groups so IPC and timers keep running.
  */
-export async function warmIconCache(paths: Array<string | undefined>): Promise<void> {
+export async function warmIconCache(
+  paths: Array<string | undefined>,
+  { batchSize }: { batchSize?: number } = {}
+): Promise<void> {
   const unique = [...new Set(paths.filter((p): p is string => !!p && !cache.has(p)))]
   if (unique.length === 0) return
-  await Promise.all(unique.map((p) => getIconDataUrl(p)))
+  if (!batchSize) {
+    await Promise.all(unique.map((p) => getIconDataUrl(p)))
+    return
+  }
+  for (let i = 0; i < unique.length; i += batchSize) {
+    await Promise.all(unique.slice(i, i + batchSize).map((p) => getIconDataUrl(p)))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
 }

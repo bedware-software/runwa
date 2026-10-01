@@ -271,6 +271,10 @@ app.whenReady().then(async () => {
     })
   )
 
+  // 11. Background prewarm — last, so everything the user can reach is
+  //     already up. Builds the app index and its icons now rather than on
+  //     the first palette open after login; see each module's `prewarm`.
+  void moduleRegistry.prewarm()
 })
 
 // Background launcher: never quit when all windows close.

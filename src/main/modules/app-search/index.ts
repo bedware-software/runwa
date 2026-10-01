@@ -1,7 +1,12 @@
 import Fuse from 'fuse.js'
-import type { ModuleManifest, PaletteItem } from '@shared/types'
+import type { ModuleConfigValue, ModuleManifest, PaletteItem } from '@shared/types'
 import { MAX_RESULTS, type PaletteModule } from '../types'
-import { enumerateApps, invalidateAppCache, type AppEntry } from './enumerator'
+import {
+  enumerateApps,
+  invalidateAppCache,
+  type AppEntry,
+  type EnumerateOptions
+} from './enumerator'
 import { launchApp } from './launcher'
 import { tryFocusRunningInstance } from './focus-running'
 import { getIconDataUrlSync, warmIconCache } from '../../icon-cache'
@@ -111,6 +116,21 @@ function parseCustomPaths(raw: unknown): string[] {
     .filter((s) => s.length > 0)
 }
 
+function enumerateOptions(
+  config: Record<string, ModuleConfigValue>
+): EnumerateOptions {
+  return {
+    includeStartMenu: config.includeStartMenu !== false,
+    includeUwp: config.includeUwp !== false,
+    includeDesktop: config.includeDesktop === true,
+    includeHidden: config.hideHelperApps === false,
+    customPaths: parseCustomPaths(config.customPaths)
+  }
+}
+
+/** Icons per batch when warming in the background — see `warmIconCache`. */
+const PREWARM_ICON_BATCH = 16
+
 /**
  * First app whose stored alias exactly matches the (normalised) query.
  * Aliases are stored lowercased by the main-process setter, so a simple
@@ -185,21 +205,10 @@ export function createAppSearchModule(): PaletteModule {
     async search(query, signal, context) {
       if (signal.aborted) return []
 
-      const includeStartMenu = context.config.includeStartMenu !== false
-      const includeUwp = context.config.includeUwp !== false
-      const includeDesktop = context.config.includeDesktop === true
-      const includeHidden = context.config.hideHelperApps === false
-      const customPaths = parseCustomPaths(context.config.customPaths)
       const aliasMode =
         context.config.aliasMode === 'prioritize' ? 'prioritize' : 'launch'
 
-      const apps = await enumerateApps({
-        includeStartMenu,
-        includeUwp,
-        includeDesktop,
-        includeHidden,
-        customPaths
-      })
+      const apps = await enumerateApps(enumerateOptions(context.config))
       if (signal.aborted) return []
 
       // Refresh the id→entry map for execute().
@@ -329,6 +338,26 @@ export function createAppSearchModule(): PaletteModule {
     // newly-installed apps without waiting for a process restart.
     async onAction(key) {
       if (key === 'rescan') invalidateAppCache()
+    },
+
+    // Startup prewarm. After a reboot the first search used to pay for the
+    // whole index while the palette sat empty — Get-AppxPackage on a cold
+    // machine, the Start Menu walk, then an icon per app — measured at
+    // several seconds. Doing it here, while runwa idles in the tray, turns
+    // the first open into a cache hit. Every icon is warmed, not just the
+    // first page: the empty-query list shows them all.
+    async prewarm(config) {
+      const startedAt = Date.now()
+      const apps = await enumerateApps(enumerateOptions(config))
+      const enumeratedAt = Date.now()
+      await warmIconCache(
+        apps.map((a) => a.iconPath ?? a.filePath),
+        { batchSize: PREWARM_ICON_BATCH }
+      )
+      console.log(
+        `[app-search] prewarm: ${apps.length} apps indexed in ${enumeratedAt - startedAt} ms, ` +
+          `icons warmed in ${Date.now() - enumeratedAt} ms`
+      )
     }
   }
 }
