@@ -97,7 +97,20 @@ try {
 
   Step "2/7 Build $version (Runwa keeps running)"
   # dist:win rebuilds the Rust addon from scratch, so there is no separate build:native step.
-  Invoke-Checked { npm run dist:win }
+  # electron-builder logs "signing with signtool.exe" for every exe even with no certificate
+  # configured, then skips the signing silently. Those lines sit in front of the ~10 s NSIS
+  # pack and read as if signing were the slow part, so drop them and say what is running.
+  $signing = $env:CSC_LINK -or $env:WIN_CSC_LINK
+  Invoke-Checked {
+    npm run dist:win 2>&1 | ForEach-Object {
+      $line = "$_"
+      if (-not $signing -and $line -match 'signing with signtool\.exe') { return }
+      Write-Host $line
+      if ($line -match 'building\s+target=nsis') {
+        Write-Host '  • compressing the app into the installer (~10 s); unsigned, no certificate configured'
+      }
+    }
+  }
 
   Step '3/7 Check build output'
   # electron-builder.yml: artifactName ${productName}-${version}-setup.${ext}
