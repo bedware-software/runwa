@@ -741,11 +741,15 @@ export function createCommandPaletteModule(
         return [{ ...item, autoExecute: true, score: -1 }]
       }
 
+      // The alias takes part in ordinary filtering too, so a row stays in
+      // the list while its alias is still being typed ("re" → "refmt")
+      // instead of vanishing until the last keystroke lands.
       const items: Array<Omit<PaletteItem, 'moduleId'>> = []
       for (const { keywords, ...entry } of entries) {
         const matches =
           !trimmed ||
           entry.title.toLowerCase().includes(normalisedQuery) ||
+          entry.alias?.includes(normalisedQuery) ||
           keywords?.some((k) => k.includes(normalisedQuery))
         if (!matches) continue
         items.push({ ...entry, score: items.length / 10000 })
