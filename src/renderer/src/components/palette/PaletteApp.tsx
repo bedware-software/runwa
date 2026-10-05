@@ -71,6 +71,8 @@ export function PaletteApp() {
   const setSelectedIndex = usePaletteStore((s) => s.setSelectedIndex)
   const activateSecond = usePaletteStore((s) => s.activateSecond)
   const closeSelected = usePaletteStore((s) => s.closeSelected)
+  const userCommandsGlobal = usePaletteStore((s) => s.userCommandsGlobal)
+  const toggleUserCommandsGlobal = usePaletteStore((s) => s.toggleUserCommandsGlobal)
 
   const quiz = usePaletteStore((s) => s.quiz)
   const startQuiz = usePaletteStore((s) => s.startQuiz)
@@ -398,7 +400,7 @@ export function PaletteApp() {
   // palette:show event from main (activation or direct-launch hotkey)
   useEffect(() => {
     const unsub = window.electronAPI.onPaletteShow((payload) => {
-      onPaletteShow(payload.initialModuleId)
+      onPaletteShow(payload.initialModuleId, payload.includeGlobal)
       // Re-focus the input — the window loses focus on hide
       setTimeout(() => inputRef.current?.focus(), 0)
     })
@@ -579,6 +581,20 @@ export function PaletteApp() {
       void setModuleConfig('window-switcher', {
         currentDesktopOnly: !wsCurrentDesktopOnly
       }).then(() => refresh({ preserveSelection: true }))
+      return
+    }
+    // Tab inside user-commands: switch between the focused app's commands
+    // (local, where every session starts) and those plus the global ones.
+    if (
+      e.key === 'Tab' &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      activeModuleId === 'user-commands'
+    ) {
+      e.preventDefault()
+      toggleUserCommandsGlobal()
       return
     }
     // Ctrl/Cmd+D inside window-switcher: close the highlighted window
@@ -806,6 +822,27 @@ export function PaletteApp() {
                   />
                 </div>
               )}
+            {activeModuleId === 'user-commands' && (
+              // Same label + slider as window-switcher's: the label is the
+              // current scope, the footer hint is what Tab switches to.
+              <div
+                className="flex items-center gap-2 shrink-0 px-2 h-7 select-none"
+                title="Tab to switch"
+              >
+                <span className="text-xs font-medium text-muted-foreground">
+                  {userCommandsGlobal ? 'Global' : 'Local'}
+                </span>
+                <Toggle
+                  checked={!userCommandsGlobal}
+                  onChange={toggleUserCommandsGlobal}
+                  ariaLabel={
+                    userCommandsGlobal
+                      ? 'Global (toggle to this app only)'
+                      : 'Local (toggle to include global commands)'
+                  }
+                />
+              </div>
+            )}
             {activeMod && <ModeBadge name={activeMod.name} />}
           </div>
 
@@ -875,6 +912,12 @@ export function PaletteApp() {
                     keys={<Hotkey value={IS_MAC ? 'Cmd+D' : 'Ctrl+D'} />}
                   />
                 </>
+              )}
+              {activeModuleId === 'user-commands' && (
+                <FooterHint
+                  label={userCommandsGlobal ? 'Local' : 'Global'}
+                  keys={<Hotkey value="Tab" />}
+                />
               )}
               {activeModuleId === 'flashcards' &&
                 items[selectedIndex]?.actionKind === 'start-quiz' && (

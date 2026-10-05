@@ -2,14 +2,24 @@ import type { ModuleManifest, PaletteItem, UserCommand } from '@shared/types'
 import { userCommandItemId } from '@shared/command-palette'
 import { USER_COMMANDS_ID } from '@shared/user-commands'
 import type { PaletteModule } from '../types'
-import { appDisplayName, resolveWindow, type FocusedApp } from '../../focus-context'
+import {
+  appDisplayName,
+  focusContext,
+  resolveWindow,
+  type FocusedApp
+} from '../../focus-context'
 import { fuzzyScore } from '../../fuzzy-match'
 import { desktopHintWindow } from '../../desktop-hint-window'
 import { paletteWindow } from '../../palette-window'
 import { getForegroundWindow } from '../window-switcher/native'
 import { formatKeystrokeAction } from './keystroke'
 import { runUserCommandFromPalette } from './palette-run'
-import { commandMatchesFocus, isGlobalCommand } from './scope'
+import {
+  appScopeLabel,
+  commandMatchesFocus,
+  commandsInScope,
+  isGlobalCommand
+} from './scope'
 import { userCommandsStore } from './store'
 
 const MANIFEST: ModuleManifest = {
@@ -18,7 +28,7 @@ const MANIFEST: ModuleManifest = {
   icon: 'terminal',
   kind: 'service',
   description:
-    'Create named actions that appear in the Command Palette — shell commands that run scripts or launch applications with arguments, and keystroke commands that press a shortcut in the app you were just in. Each command is either global or scoped to one application, in which case it is only listed while that app is focused. The hotkey opens a search over just the commands of the app in front, or says there are none.',
+    'Create named actions that appear in the Command Palette — shell commands that run scripts or launch applications with arguments, and keystroke commands that press a shortcut in the app you were just in. Each command is either global or scoped to one application, in which case it is only listed while that app is focused. The hotkey opens a search over the commands of the app in front (Tab adds the global ones) — or over the global ones when the app has none, and says so when there are none at all.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
   defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+U'
@@ -66,8 +76,11 @@ function scoreCommand(query: string, command: UserCommand): number | null {
  *  - its commands are rows of the Command Palette (built there, alongside the
  *    built-ins), and
  *  - its own direct-launch hotkey opens a search over just the commands
- *    scoped to the app in front — the "what can I do in this app" list. Over
- *    an app with no commands, the hotkey shows a Desktop Hint instead of an
+ *    scoped to the app in front — the "what can I do in this app" list. Tab
+ *    widens it to everything runnable here, global commands included; each
+ *    session starts back on the app's own. Over an app with none of its
+ *    own it opens straight on the global ones, and only when there is
+ *    nothing runnable at all does it show a Desktop Hint instead of an
  *    empty palette.
  */
 export function createUserCommandsModule(): PaletteModule {
@@ -76,33 +89,55 @@ export function createUserCommandsModule(): PaletteModule {
 
     handleDirectLaunch(event) {
       if (event !== 'press') return
-      // Second press while our search is up closes it. While the palette is
-      // up for another module the foreground window is runwa itself, so the
-      // app to check is the one the palette was opened over.
+      // While the palette is up the foreground window is runwa itself, so
+      // the app to check is the one the palette was opened over. (A second
+      // press while our own search is up just closes it.)
       const win = paletteWindow.getBrowserWindow()
-      if (win && !win.isDestroyed() && win.isVisible()) {
+      const paletteUp = !!win && !win.isDestroyed() && win.isVisible()
+      const app = paletteUp ? focusContext.get() : foregroundApp()
+
+      if (appCommands(app).length > 0) {
         paletteWindow.toggle(USER_COMMANDS_ID)
         return
       }
-      const app = foregroundApp()
-      if (appCommands(app).length === 0) {
-        desktopHintWindow.show({
-          source: USER_COMMANDS_ID,
-          message: app
-            ? `No user commands for ${appDisplayName(app)}`
-            : 'No user commands for this app',
-          durationMs: NO_COMMANDS_HINT_MS
-        })
+      // Nothing for this app: open on the global commands rather than an
+      // empty Local list.
+      if (userCommandsStore.list().some(isGlobalCommand)) {
+        paletteWindow.toggle(USER_COMMANDS_ID, 'dismiss', { includeGlobal: true })
         return
       }
-      paletteWindow.toggle(USER_COMMANDS_ID)
+      if (paletteUp) {
+        paletteWindow.toggle(USER_COMMANDS_ID)
+        return
+      }
+      desktopHintWindow.show({
+        source: USER_COMMANDS_ID,
+        message: app
+          ? `No user commands for ${appDisplayName(app)}`
+          : 'No user commands for this app',
+        durationMs: NO_COMMANDS_HINT_MS
+      })
     },
 
     async search(query, signal, context) {
       if (signal.aborted) return []
       const app = context.focusedApp
-      const commands = appCommands(app)
-      const group = app ? `${appDisplayName(app)} commands` : 'User Commands'
+      // App's own first, so a shared alias resolves to the app's command.
+      const commands = context.includeGlobal
+        ? commandsInScope(userCommandsStore.list(), app)
+        : appCommands(app)
+      const appGroup = app ? `${appDisplayName(app)} commands` : 'User Commands'
+      const trimmed = query.trim()
+
+      // Mixed lists split into app / global sections only while unfiltered:
+      // ranked results interleave the two, which would repeat the headers,
+      // so the app badge marks the app's rows instead — as in the Command
+      // Palette.
+      const groupOf = (command: UserCommand): string | undefined => {
+        if (!context.includeGlobal) return appGroup
+        if (trimmed) return undefined
+        return isGlobalCommand(command) ? 'Global commands' : appGroup
+      }
 
       const toItem = (
         command: UserCommand,
@@ -117,20 +152,21 @@ export function createUserCommandsModule(): PaletteModule {
             ? `Sends ${formatKeystrokeAction(command.action)}`
             : 'Runs in background',
         iconHint: command.kind === 'keystroke' ? 'keyboard' : 'terminal',
-        group,
+        group: groupOf(command),
         alias: command.alias,
+        badge: context.includeGlobal ? appScopeLabel(command, app) : undefined,
         actionKind: 'user-command',
         action: { kind: 'user-command', commandId: command.id },
         score
       })
 
-      const trimmed = query.trim()
       if (!trimmed) {
         return commands.map((command, i) => toItem(command, i / 10000))
       }
 
       // Typing an alias exactly runs it, as in the Command Palette. Aliases
-      // are unique per app, so at most one row can match.
+      // are unique per app; with global commands listed, one may share an
+      // alias with an app command, and the app's (listed first) wins.
       const normalised = trimmed.toLowerCase()
       const aliased = commands.find((command) => command.alias === normalised)
       if (aliased) {

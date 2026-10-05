@@ -34,6 +34,8 @@ export interface SearchContext {
    * palette.
    */
   focusedApp: FocusedApp | null
+  /** `SearchRequest.includeGlobal` — only User Commands reads it. */
+  includeGlobal: boolean
 }
 
 /**

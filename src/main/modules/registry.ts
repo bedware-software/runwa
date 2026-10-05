@@ -131,7 +131,7 @@ class ModuleRegistry {
   }
 
   async search(req: SearchRequest): Promise<SearchResult> {
-    const { requestId, query, scopeModuleId } = req
+    const { requestId, query, scopeModuleId, includeGlobal } = req
 
     // Belt-and-suspenders: auto-abort older in-flight requests.
     for (const [id, ctrl] of this.activeControllers.entries()) {
@@ -163,7 +163,8 @@ class ModuleRegistry {
           config: this.buildConfig(scopedModule),
           aliases: this.buildAliases(scopedModule),
           elevated: this.buildElevated(scopedModule),
-          focusedApp: focusContext.get()
+          focusedApp: focusContext.get(),
+          includeGlobal: includeGlobal === true
         })
         items = raw.map<PaletteItem>((it) => ({
           ...it,

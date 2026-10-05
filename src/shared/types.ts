@@ -258,6 +258,11 @@ export interface SearchRequest {
   query: string
   /** Force-scope to a single module (direct-launch hotkey, etc.). */
   scopeModuleId?: ModuleId
+  /**
+   * User Commands' Tab toggle: list global commands alongside the focused
+   * app's own. Off (the default) shows just the app's commands.
+   */
+  includeGlobal?: boolean
 }
 
 export interface SearchResult {
@@ -500,7 +505,15 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 export interface PaletteShowPayload {
   initialModuleId?: ModuleId
+  /**
+   * Open User Commands in Global mode instead of Local — main's call when
+   * the app in front has no commands of its own but global ones exist.
+   */
+  includeGlobal?: boolean
 }
+
+/** Per-open options `paletteWindow.show()` forwards to the renderer. */
+export type PaletteShowOptions = Omit<PaletteShowPayload, 'initialModuleId'>
 
 /**
  * Display-ready snapshot of `<userData>/keyboard-rules.yaml` for the settings

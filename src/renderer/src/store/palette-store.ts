@@ -64,6 +64,15 @@ interface PaletteState {
   confirmPending: () => Promise<void>
   cancelPending: () => void
 
+  /**
+   * User Commands' Tab toggle: false lists the focused app's commands
+   * (local), true adds the global ones. Per session — every open starts
+   * local (or global when main says the app has none of its own), unlike
+   * window-switcher's persisted desktop filter.
+   */
+  userCommandsGlobal: boolean
+  toggleUserCommandsGlobal: () => void
+
   setQuery: (query: string) => void
   selectNext: () => void
   selectPrev: () => void
@@ -90,7 +99,7 @@ interface PaletteState {
    */
   closeSelected: () => Promise<void>
   reset: () => void
-  onPaletteShow: (initialModuleId?: ModuleId) => void
+  onPaletteShow: (initialModuleId?: ModuleId, includeGlobal?: boolean) => void
   /**
    * Re-run the current search immediately (no debounce) — used by Ctrl+R
    * in the app-search scope after the rescan IPC has invalidated the main
@@ -143,6 +152,14 @@ export const usePaletteStore = create<PaletteState>()(
     requestId: 0,
     quiz: null,
     pendingConfirm: null,
+    userCommandsGlobal: false,
+
+    toggleUserCommandsGlobal: () => {
+      set((s) => {
+        s.userCommandsGlobal = !s.userCommandsGlobal
+      })
+      get().refresh({ preserveSelection: true })
+    },
 
     setQuery: (query: string) => {
       // Typing means the user is staying in the palette — drop any queued
@@ -316,10 +333,11 @@ export const usePaletteStore = create<PaletteState>()(
         s.resolvedModuleId = undefined
         s.activeModuleId = undefined
         s.isLoading = false
+        s.userCommandsGlobal = false
       })
     },
 
-    onPaletteShow: (initialModuleId?: ModuleId) => {
+    onPaletteShow: (initialModuleId?: ModuleId, includeGlobal = false) => {
       // Cancel any pending debounced search from a previous session.
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer)
@@ -340,6 +358,7 @@ export const usePaletteStore = create<PaletteState>()(
         // Same for a confirmation left open when the palette was dismissed:
         // an OS command must never be one Enter away in the next session.
         s.pendingConfirm = null
+        s.userCommandsGlobal = includeGlobal
       })
 
       // Run the initial search immediately (no debounce) and signal main
@@ -497,7 +516,8 @@ async function runSearch(
     const result = await window.electronAPI.modulesSearch({
       requestId: newId,
       query,
-      scopeModuleId: get().activeModuleId
+      scopeModuleId: get().activeModuleId,
+      includeGlobal: get().userCommandsGlobal
     })
 
     // Drop stale results.

@@ -3,6 +3,7 @@ import path from 'path'
 import type {
   DirectLaunchSecondPress,
   ModuleId,
+  PaletteShowOptions,
   PaletteShowPayload
 } from '@shared/types'
 import { settingsStore } from './settings-store'
@@ -521,7 +522,7 @@ class PaletteWindow {
     console.log(`[palette-bounds] ${reason}: ${line}`)
   }
 
-  show(moduleId: ModuleId): void {
+  show(moduleId: ModuleId, options: PaletteShowOptions = {}): void {
     // Windows virtual-desktop affinity: a BrowserWindow's HWND sticks to the
     // virtual desktop where it was last shown. Hide → switch desktop → show
     // re-reveals the HWND on the *original* desktop, invisibly to the user
@@ -686,7 +687,7 @@ class PaletteWindow {
     }
 
     // Tell the renderer to reset & search.
-    const payload: PaletteShowPayload = { initialModuleId: moduleId }
+    const payload: PaletteShowPayload = { ...options, initialModuleId: moduleId }
     win.webContents.send('palette:show', payload)
 
     const reveal = (): void => {
@@ -695,7 +696,7 @@ class PaletteWindow {
       // don't re-reveal it.
       if (!win.isVisible()) return
       win.setOpacity(1)
-      if (process.platform === 'darwin') this.ensureOnCurrentSpace(moduleId)
+      if (process.platform === 'darwin') this.ensureOnCurrentSpace(moduleId, options)
     }
 
     // Wait for the renderer to signal it has fresh results.
@@ -784,7 +785,8 @@ class PaletteWindow {
    */
   toggle(
     moduleId: ModuleId,
-    secondPress: DirectLaunchSecondPress = 'dismiss'
+    secondPress: DirectLaunchSecondPress = 'dismiss',
+    options: PaletteShowOptions = {}
   ): void {
     if (
       this.window &&
@@ -799,7 +801,7 @@ class PaletteWindow {
       this.hide(true)
       return
     }
-    this.show(moduleId)
+    this.show(moduleId, options)
   }
 
   /**
@@ -818,7 +820,7 @@ class PaletteWindow {
    * the window, so this check reads false synchronously after the show call
    * and true from the next turn onward.
    */
-  private ensureOnCurrentSpace(moduleId: ModuleId): void {
+  private ensureOnCurrentSpace(moduleId: ModuleId, options: PaletteShowOptions): void {
     const win = this.window
     if (!win || win.isDestroyed() || !win.isVisible()) return
 
@@ -854,7 +856,7 @@ class PaletteWindow {
     this.spaceRepairInFlight = true
     win.destroy()
     this.window = null
-    this.show(moduleId)
+    this.show(moduleId, options)
   }
 
   getBrowserWindow(): BrowserWindow | null {
