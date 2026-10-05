@@ -14,6 +14,7 @@ interface NativeAddon {
   stopKeyboardRemap(handle: number): void
   setInputLanguage(code: string): void
   setRemapFullscreenBypass(processNames: string[]): void
+  setWorkspaceBackAndForth(enabled: boolean): void
 }
 
 let addon: NativeAddon | null = null
@@ -92,4 +93,22 @@ export function setRemapFullscreenBypass(processNames: string[]): void {
     return
   }
   mod.setRemapFullscreenBypass(processNames)
+}
+
+/**
+ * Toggle "back and forth" for `switch_to_workspace` rules: when on,
+ * switching to the desktop you're already on jumps to the previous one.
+ * Tolerates a binary built before this export existed, like
+ * `setRemapFullscreenBypass`.
+ */
+export function setWorkspaceBackAndForth(enabled: boolean): void {
+  const mod = loadAddon()
+  if (typeof mod.setWorkspaceBackAndForth !== 'function') {
+    console.warn(
+      '[keyboard-remap] native addon predates setWorkspaceBackAndForth — ' +
+        'the back-and-forth setting will have no effect until it is rebuilt'
+    )
+    return
+  }
+  mod.setWorkspaceBackAndForth(enabled)
 }

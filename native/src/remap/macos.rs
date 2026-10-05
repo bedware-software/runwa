@@ -806,18 +806,19 @@ fn modifier_mask_from_flags(flags: CGEventFlags) -> ModifierMask {
 // ---------------------------------------------------------------------------
 // Virtual-desktop ("Space") switching with an "alternate desktop" toggle.
 //
-// Mirror of the Windows behaviour in `windows.rs`: asking to switch to the
-// Space you're already on jumps to the *alternate* (the one you were on before
-// the last switch) — nvim's `#` buffer — so double-tapping the same hotkey
-// bounces between your two most recent Spaces.
+// Mirror of the Windows behaviour in `windows.rs`: `alternate_workspace` jumps
+// to the *alternate* (the Space you were on before the last switch) — nvim's
+// `#` buffer — so repeated presses bounce between your two most recent Spaces.
+// With the "back and forth" setting on, asking `switch_to_workspace` for the
+// Space you're already on does the same.
 //
 // The catch is that macOS exposes no public Space-ordinal API, so "which Space
 // am I on" is the shadow value `desktop::get()` last recorded — coherent only
 // as long as every switch goes through runwa (system Ctrl+N / trackpad gestures
-// aren't observed; see `desktop.rs`). We therefore only *suppress* a plain
-// switch when we have an alternate to bounce to instead; with no alternate yet
-// we always fire Ctrl+N, which also rescues the stale-shadow case (we think
-// we're on N but a gesture moved us off it — Ctrl+N still lands us there).
+// aren't observed; see `desktop.rs`). We therefore never *suppress* a plain
+// switch: a same-Space request either bounces to the alternate or re-fires
+// Ctrl+N, which also rescues the stale-shadow case (we think we're on N but a
+// gesture moved us off it — Ctrl+N still lands us there).
 
 /// The Space we were on immediately before the most recent switch — the one a
 /// same-Space tap toggles back to. 0-based; `None` until runwa's first switch.
@@ -862,28 +863,33 @@ fn macos_resolve_switch(requested: u32) -> Option<u32> {
     }
     let target = requested - 1; // 0-based
     let current = super::desktop::get(); // 0-based shadow
-    let mut alt = MAC_VD_ALTERNATE.lock();
-    let dest = if current == target {
-        // Same-Space tap: bounce to the alternate — but only if it's a Space we
-        // can still express as Ctrl+N (0-based < 9). Otherwise fall through to a
-        // plain switch to `target`.
-        match *alt {
-            Some(a) if a < 9 => a,
-            _ => target,
-        }
+    let dest = if current == target && super::desktop::back_and_forth() {
+        // Same-Space tap with back-and-forth on: bounce to the alternate — or
+        // fall through to a plain switch to `target` if there is none.
+        alternate_dest().unwrap_or(target)
     } else {
         target
     };
-    // Remember where we came from as the new alternate — but only when we
-    // actually change Spaces (a no-op switch has no "previous" to record).
+    Some(macos_commit_switch(dest, current) + 1)
+}
+
+/// The alternate Space, if there is one we can express as Ctrl+N (0-based
+/// < 9). 0-based.
+fn alternate_dest() -> Option<u32> {
+    MAC_VD_ALTERNATE.lock().filter(|a| *a < 9)
+}
+
+/// Record a Space change from `current` to `dest` (both 0-based): `current`
+/// becomes the new alternate — but only when we actually change Spaces (a
+/// no-op switch has no "previous" to record) — and the destination is
+/// shadow-tracked and pushed to the tray, since this rule action is the only
+/// Space signal macOS gives us. Returns `dest`.
+fn macos_commit_switch(dest: u32, current: u32) -> u32 {
     if dest != current {
-        *alt = Some(current);
+        *MAC_VD_ALTERNATE.lock() = Some(current);
     }
-    drop(alt);
-    // Shadow-track the destination and push it to the tray — this rule action
-    // is the only Space signal macOS gives us. Store 0-based.
     super::desktop::record(dest);
-    Some(dest + 1)
+    dest
 }
 
 // ---------------------------------------------------------------------------
@@ -939,9 +945,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 // via `settings.macos_switch_workspace_modifiers` (see
                 // `switch_workspace_events`) for users who've rebound it.
                 let requested = *n;
-                // Resolve the alternate-desktop toggle: a same-Space tap
-                // bounces to the previous Space instead of re-switching. Also
-                // records the destination for the tray. See `macos_resolve_switch`.
+                // Resolve the back-and-forth toggle (when enabled, a same-Space
+                // tap bounces to the previous Space instead of re-switching).
+                // Also records the destination for the tray. See
+                // `macos_resolve_switch`.
                 let Some(dest) = macos_resolve_switch(requested) else {
                     eprintln!(
                         "[keyboard-remap] switch_to_workspace({requested}) on macOS supports 1-9 only"
@@ -961,8 +968,19 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 let n = *n;
                 super::macos_move_window::move_active_window_to_workspace(n);
                 // Move-to also ends up on the target Space, so track it
-                // the same way we track a plain switch.
-                super::desktop::record(n.saturating_sub(1));
+                // (and the alternate) the same way we track a plain switch.
+                macos_commit_switch(n.saturating_sub(1), super::desktop::get());
+                continue;
+            }
+            SyntheticEvent::AlternateWorkspace => {
+                // Nothing to toggle to before runwa's first switch, and
+                // nowhere to go if the alternate is where we already are.
+                let current = super::desktop::get();
+                let Some(alt) = alternate_dest().filter(|a| *a != current) else {
+                    continue;
+                };
+                let dest = macos_commit_switch(alt, current) + 1;
+                inject(&switch_workspace_events(dest), flags);
                 continue;
             }
             SyntheticEvent::ChangeLanguage(code) => {

@@ -429,6 +429,10 @@ pub enum SyntheticEvent {
     SwitchToWorkspace(u32),
     /// Move the active window to virtual desktop `N` and follow it there.
     MoveToWorkspace(u32),
+    /// Jump to the alternate desktop — the one we were on before the most
+    /// recent runwa switch — so repeated presses flip between the last two
+    /// desktops (nvim's `#` buffer, i3's `workspace back_and_forth`).
+    AlternateWorkspace,
     /// Switch the system input language / keyboard layout to the one
     /// matching this code (e.g. `en`, `ru`). The language must already be
     /// installed as a system input source — we only activate, never add.
@@ -830,7 +834,8 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 
 /// A single rule inside an `on_hold:` list. Exactly one of the action
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
-/// `change_language` / `close_window` / `toggle_capslock`) must be
+/// `alternate_workspace` / `change_language` / `close_window` /
+/// `toggle_capslock`) must be
 /// populated; having zero or
 /// multiple is a parse error — except `to_hotkey` + `toggle_capslock`,
 /// which pair up (see `bake_rule_action`).
@@ -853,6 +858,8 @@ struct HoldRule {
     switch_to_workspace: Option<u32>,
     #[serde(default)]
     move_to_workspace: Option<u32>,
+    #[serde(default)]
+    alternate_workspace: Option<bool>,
     #[serde(default)]
     change_language: Option<YamlToken>,
     #[serde(default)]
@@ -1135,6 +1142,9 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     if rule.move_to_workspace.is_some() {
         provided.push("move_to_workspace");
     }
+    if rule.alternate_workspace.is_some() {
+        provided.push("alternate_workspace");
+    }
     if rule.change_language.is_some() {
         provided.push("change_language");
     }
@@ -1147,7 +1157,7 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, change_language, close_window, toggle_capslock"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, alternate_workspace, change_language, close_window, toggle_capslock"
         )),
         ["to_hotkey", "toggle_capslock"] => {
             if rule.toggle_capslock != Some(true) {
@@ -1185,6 +1195,12 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
                 return Err(format!("rule '{name}': move_to_workspace must be >= 1"));
             }
             Ok(EmitPair::press_only([SyntheticEvent::MoveToWorkspace(n)]))
+        }
+        ["alternate_workspace"] => {
+            if rule.alternate_workspace != Some(true) {
+                return Err(format!("rule '{name}': alternate_workspace only takes `true`"));
+            }
+            Ok(EmitPair::press_only([SyntheticEvent::AlternateWorkspace]))
         }
         ["change_language"] => {
             let token = rule.change_language.as_ref().unwrap();
@@ -1837,6 +1853,36 @@ space:
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn alternate_workspace_action_parses() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: ["`"], alternate_workspace: true }
+"#;
+        let r = parse(src).expect("parse");
+        let grave = parse_trigger_key("`").expect("grave key");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let p = overrides.get(&(ModifierMask::EMPTY, grave)).unwrap();
+                assert_eq!(p.on_press.as_slice(), &[SyntheticEvent::AlternateWorkspace]);
+                assert!(p.on_release.is_empty());
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn alternate_workspace_rejects_false() {
+        let src = r#"
+space:
+  on_hold:
+    - { keys: ["`"], alternate_workspace: false }
+"#;
+        assert!(parse(src).is_err());
     }
 
     #[test]

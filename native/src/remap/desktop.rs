@@ -16,7 +16,7 @@
 //!   - Windows reads the real ordinal from `winvd` for the startup read, but
 //!     live updates still flow through `record` so the tray never polls.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use once_cell::sync::Lazy;
@@ -28,6 +28,22 @@ pub type DesktopChangeFn = ThreadsafeFunction<u32, ErrorStrategy::Fatal>;
 
 static CURRENT: AtomicU32 = AtomicU32::new(0);
 static CALLBACK: Lazy<Mutex<Option<DesktopChangeFn>>> = Lazy::new(|| Mutex::new(None));
+/// "Back and forth": a `switch_to_workspace: N` fired while already on N
+/// jumps to the alternate desktop instead of staying put. Off by default —
+/// the dedicated `alternate_workspace` action covers the toggle without
+/// making the digit keys stateful. Set from the keyboard-remap settings.
+static BACK_AND_FORTH: AtomicBool = AtomicBool::new(false);
+
+/// Turn the same-desktop-tap-goes-to-alternate behavior on or off.
+pub fn set_back_and_forth(enabled: bool) {
+    BACK_AND_FORTH.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether a same-desktop `switch_to_workspace` should bounce to the
+/// alternate desktop. Read by the platform inject paths.
+pub fn back_and_forth() -> bool {
+    BACK_AND_FORTH.load(Ordering::Relaxed)
+}
 
 /// Register (or replace) the JS subscriber notified on every desktop change.
 /// Called once from `set_desktop_change_callback` at startup.

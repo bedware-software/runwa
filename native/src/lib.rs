@@ -443,6 +443,14 @@ pub fn set_remap_fullscreen_bypass(process_names: Vec<String>) {
     remap::set_fullscreen_bypass_processes(process_names);
 }
 
+/// Toggle "back and forth" for `switch_to_workspace` rule actions: when on,
+/// switching to the desktop you're already on jumps to the previous one.
+/// Called at startup and whenever the keyboard-remap setting changes.
+#[napi]
+pub fn set_workspace_back_and_forth(enabled: bool) {
+    remap::set_workspace_back_and_forth(enabled);
+}
+
 /// Read the Windows application appearance preference. Returns `"light"` or
 /// `"dark"`. The TypeScript system-theme driver uses an AppleScript backend on
 /// macOS, so this native API intentionally reports unsupported elsewhere.

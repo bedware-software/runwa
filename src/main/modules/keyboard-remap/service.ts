@@ -2,8 +2,14 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import type { KeyboardRemapRulesView } from '@shared/types'
-import { startKeyboardRemap, stopKeyboardRemap, validateKeyboardRemap } from './native'
+import {
+  setWorkspaceBackAndForth,
+  startKeyboardRemap,
+  stopKeyboardRemap,
+  validateKeyboardRemap
+} from './native'
 import { desktopHintWindow } from '../../desktop-hint-window'
+import { settingsStore } from '../../settings-store'
 import { openPathAsUser } from '../../elevation'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { RULES_TEMPLATE } from './rules-template'
@@ -20,6 +26,11 @@ const ERROR_HINT_DURATION_MS = 6000
 /** Hint surface is 300 px wide — past this the box grows taller than the
  *  glance it is meant to be. The console keeps the untruncated error. */
 const HINT_MESSAGE_MAX_CHARS = 140
+
+/** Module-config toggle: `switch_to_workspace: N` while already on N jumps
+ *  to the previous desktop. Off by default — `alternate_workspace` covers it. */
+export const WORKSPACE_BACK_AND_FORTH_KEY = 'workspaceBackAndForth'
+export const WORKSPACE_BACK_AND_FORTH_DEFAULT = false
 
 /**
  * Lifecycle owner for the native keyboard-remap hook.
@@ -38,6 +49,8 @@ class KeyboardRemapService {
   private activeRulesYaml: string | null = null
   private lastError: string | null = null
   private usingPreviousRules = false
+  private backAndForth: boolean | null = null
+  private readonly onSettingsChange = (): void => this.syncBackAndForth()
 
   rulesFilePath(): string {
     return path.join(app.getPath('userData'), 'keyboard-rules.yaml')
@@ -46,6 +59,9 @@ class KeyboardRemapService {
   start(): void {
     if (this.started) return
     this.started = true
+
+    this.syncBackAndForth()
+    settingsStore.on('change', this.onSettingsChange)
 
     if (process.platform === 'darwin' && !isAccessibilityTrusted()) {
       // Fire the prompt so it at least appears once; the user must grant
@@ -75,9 +91,26 @@ class KeyboardRemapService {
       }
       this.handle = null
     }
+    settingsStore.off('change', this.onSettingsChange)
+    this.backAndForth = null
     this.started = false
     this.activeRulesYaml = null
     this.usingPreviousRules = false
+  }
+
+  /** Mirror the back-and-forth toggle into the addon, only when it changed.
+   * Best-effort: a missing or stale addon shouldn't break settings saves. */
+  private syncBackAndForth(): void {
+    const cfg = settingsStore.get().modules[KEYBOARD_REMAP_ID]?.config
+    const v = cfg?.[WORKSPACE_BACK_AND_FORTH_KEY]
+    const next = typeof v === 'boolean' ? v : WORKSPACE_BACK_AND_FORTH_DEFAULT
+    if (next === this.backAndForth) return
+    try {
+      setWorkspaceBackAndForth(next)
+      this.backAndForth = next
+    } catch (err) {
+      console.warn('[keyboard-remap] failed to push workspace back-and-forth', err)
+    }
   }
 
   async openRulesInEditor(): Promise<void> {

@@ -126,6 +126,17 @@ pub fn set_fullscreen_bypass_processes(process_names: Vec<String>) {
     let _ = process_names;
 }
 
+/// Toggle "back and forth" for `switch_to_workspace`: when on, asking for
+/// the desktop you're already on jumps to the alternate one instead. Off by
+/// default. Independent of hook lifetime, like the fullscreen bypass list.
+pub fn set_workspace_back_and_forth(enabled: bool) {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    desktop::set_back_and_forth(enabled);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = enabled;
+}
+
 pub fn set_input_language(code: &str) -> Result<(), String> {
     let parsed = rules::LanguageCode::parse(code)?;
 

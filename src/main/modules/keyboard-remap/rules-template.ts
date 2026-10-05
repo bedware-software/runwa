@@ -63,6 +63,12 @@
  *                                                  can move it).
  *         switch_to_workspace:  N (1-indexed)      jump to virtual desktop N (Windows + macOS)
  *         move_to_workspace:    N (1-indexed)      move active window to VD N and follow (Windows + macOS)
+ *         alternate_workspace:  true                jump to the desktop you were on before the last
+ *                                                  runwa switch, so repeated presses flip between
+ *                                                  your last two desktops (Windows + macOS). The
+ *                                                  "Switching to the current desktop jumps to the
+ *                                                  previous one" setting makes switch_to_workspace
+ *                                                  do the same when you're already on N.
  *         change_language:      <code>             switch system input language to a code like
  *                                                  `en` or `ru`. Matches the first installed
  *                                                  input source whose language tag starts with
@@ -110,6 +116,7 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   Windows context-menu key; on macOS use [shift, f10])
 #   switch_to_workspace: N          jump to virtual desktop N (1-indexed)
 #   move_to_workspace:   N          move active window to VD N and follow (1-indexed)
+#   alternate_workspace: true       flip back to the previous virtual desktop
 #   change_language:     <code>     switch system input language (e.g. en, ru); the language
 #                                   must already be installed as a system input source
 #   close_window:        true       close the frontmost window (not the whole app): WM_CLOSE on
@@ -186,6 +193,7 @@ space:
     - { keys: [8], switch_to_workspace: 8 }
     - { keys: [9], switch_to_workspace: 9 }
     - { keys: [0], switch_to_workspace: 10 }
+    - { keys: ["\`"], alternate_workspace: true }
 
     - { keys: [shift, 1], move_to_workspace: 1 }
     - { keys: [shift, 2], move_to_workspace: 2 }
@@ -202,6 +210,5 @@ space:
     - { keys: [r], change_language: ru }
 
     - { keys: [q], close_window: true }
-    - { os: windows, keys: ["\`"], to_hotkey: [win, "\`"] }
     - { os: macos, keys: [any], to_hotkey: [cmd] }
 `

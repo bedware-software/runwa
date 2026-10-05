@@ -897,6 +897,7 @@ impl StateMachine {
                             e,
                             SyntheticEvent::ModifierDown(_)
                                 | SyntheticEvent::SwitchToWorkspace(_)
+                                | SyntheticEvent::AlternateWorkspace
                                 | SyntheticEvent::CloseWindow
                                 | SyntheticEvent::ToggleCapsLock
                                 | SyntheticEvent::KeyDown(NamedKey::CapsLock)

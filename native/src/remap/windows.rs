@@ -1001,6 +1001,10 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 vd_move_active_and_follow(*n);
             }
+            SyntheticEvent::AlternateWorkspace => {
+                flush_inputs(&mut inputs);
+                vd_switch_to_alternate();
+            }
             SyntheticEvent::ToggleCapsLock => {
                 // Windows has no separate lock API worth reaching for —
                 // tapping the key IS how the lock flips here. State only,
@@ -1125,13 +1129,14 @@ fn queue_focus_job(job: FocusJob) {
 }
 
 // ---------------------------------------------------------------------------
-// Virtual-desktop switching with an "alternate desktop" toggle.
+// Virtual-desktop switching with an "alternate desktop".
 //
 // We remember the desktop we were on before the most recent switch — the
-// "alternate", nvim's `#` buffer. Asking to switch to the desktop you're
-// already on jumps to that alternate instead, so tapping the same hotkey
-// flips back and forth between your last two desktops. The decision happens
-// on the chord's KeyDown — no delay.
+// "alternate", nvim's `#` buffer. The `alternate_workspace` action jumps
+// there, so repeated presses flip between your last two desktops. With the
+// "back and forth" setting on, asking `switch_to_workspace` for the desktop
+// you're already on does the same; off (the default), it stays put. The
+// decision happens on the chord's KeyDown — no delay.
 //
 // The state machine routes workspace switches through its held path so they
 // fire exactly once per press rather than re-firing on every OS autorepeat.
@@ -1177,8 +1182,9 @@ fn perform_switch(target: u32, from: Option<u32>) {
     queue_focus_job(FocusJob::TopmostOnCurrentDesktop);
 }
 
-/// `switch_to_workspace: n` (1-indexed). Switches to desktop `n`, or — when
-/// you're already on `n` — toggles to the alternate (previous) desktop.
+/// `switch_to_workspace: n` (1-indexed). Switches to desktop `n`. When
+/// you're already on `n`, stays put — unless "back and forth" is on, in
+/// which case it toggles to the alternate (previous) desktop.
 fn vd_switch(n: u32) {
     // winvd is 0-indexed; the user writes 1-indexed in YAML.
     let Some(target) = n.checked_sub(1) else {
@@ -1186,15 +1192,27 @@ fn vd_switch(n: u32) {
     };
     let current = current_desktop_idx();
     if current == Some(target) {
-        // Already here — jump to the alternate, nvim `#`-style. If we've never
-        // switched yet there's nothing to toggle to, so stay put.
-        let alternate = VD_STATE.lock().alternate;
-        if let Some(alt) = alternate {
-            perform_switch(alt, current);
+        if super::desktop::back_and_forth() {
+            vd_switch_to_alternate();
         }
         return;
     }
     perform_switch(target, current);
+}
+
+/// `alternate_workspace: true` — jump to the alternate desktop, nvim
+/// `#`-style. If runwa hasn't switched yet there's nothing to toggle to, and
+/// if the alternate is where we already are (an outside switch landed us
+/// there) there's nowhere to go — stay put either way.
+fn vd_switch_to_alternate() {
+    let Some(alt) = VD_STATE.lock().alternate else {
+        return;
+    };
+    let current = current_desktop_idx();
+    if current == Some(alt) {
+        return;
+    }
+    perform_switch(alt, current);
 }
 
 fn vd_move_active_and_follow(n: u32) {
