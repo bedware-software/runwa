@@ -19,17 +19,15 @@ import {
   runPowerCommand,
   type PowerCommand
 } from './power'
-import {
-  executeUserCommand,
-  sendUserCommandKeystroke
-} from '../user-commands/executor'
 import { formatKeystrokeAction } from '../user-commands/keystroke'
 import {
-  appScopeLabel,
-  commandMatchesFocus,
-  commandsInScope
-} from '../user-commands/scope'
+  FOCUS_HANDOFF_DELAY_MS,
+  runUserCommandFromPalette
+} from '../user-commands/palette-run'
+import { appScopeLabel, commandsInScope } from '../user-commands/scope'
 import { userCommandsStore } from '../user-commands/store'
+import { openPathAsUser } from '../../elevation'
+import { USER_COMMANDS_ID } from '@shared/user-commands'
 import { autoDarkModeService } from '../auto-dark-mode/service'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { keyboardRemapService } from '../keyboard-remap/service'
@@ -70,6 +68,7 @@ type CommandKind =
   | { kind: 'keyboard-remap'; command: KeyboardRemapCommand }
   | { kind: 'power'; command: PowerCommand }
   | { kind: 'create-user-command' }
+  | { kind: 'edit-user-commands' }
 
 /**
  * Identity of a module the Command Palette will surface as a deep-link
@@ -88,21 +87,16 @@ const MODULE_ID = COMMAND_PALETTE_ID
 const MODULE_NAME = 'Command Palette'
 const MODULE_ICON = 'command'
 
-/**
- * How long to wait after hiding the palette before acting on the window the
- * user was in. ~120 ms is long enough on Windows for SetForegroundWindow to
- * settle and the target window to become ready to receive a chord; macOS
- * needs a touch more headroom because Electron's hide() is async to the OS
- * and `osascript` queries the frontmost process at execution time — too
- * short and we act on our own (still-hiding) window. Too long and the user
- * notices the lag.
- */
-const FOCUS_HANDOFF_DELAY_MS = process.platform === 'darwin' ? 200 : 120
-
 /** Id of the contextual "Create user command for <app>" entry. Named so the
  * search builder can place it after the user's own commands rather than in
  * the built-in block where it's declared. */
 const CREATE_USER_COMMAND_ID = 'create-user-command'
+
+/** Built-ins that manage the user's own commands, listed after them. */
+const USER_COMMAND_MANAGEMENT_IDS: ReadonlySet<string> = new Set([
+  CREATE_USER_COMMAND_ID,
+  'edit-user-commands'
+])
 
 interface CommandDef {
   /** Stable id used in the PaletteItem id + action payload. */
@@ -271,6 +265,19 @@ const BUILT_IN_COMMANDS: CommandDef[] = [
       'Offer a "Create user command for <app>" entry naming whichever app the palette was opened over. Fills in the app scope for you, so a per-app command can be captured without a trip to Settings.'
   },
   {
+    id: 'edit-user-commands',
+    title: 'Edit user commands',
+    icon: 'pencil',
+    subtitle: 'Open the user commands JSON in your system editor.',
+    group: 'User Commands',
+    configKey: 'enableEditUserCommands',
+    defaultEnabled: true,
+    action: { kind: 'edit-user-commands' },
+    requiresModuleId: USER_COMMANDS_ID,
+    configDescription:
+      'Open the user commands JSON file in the system editor — the same thing the Edit button in User Commands settings does. Edits apply on the next palette open; malformed entries are skipped.'
+  },
+  {
     id: 'themes-on-schedule',
     title: 'Themes on schedule',
     icon: 'clock',
@@ -425,6 +432,10 @@ interface CreateUserCommandAction {
   kind: 'create-user-command'
 }
 
+interface EditUserCommandsAction {
+  kind: 'edit-user-commands'
+}
+
 type ActionPayload =
   | WindowCommandAction
   | OpenSettingsAction
@@ -433,6 +444,7 @@ type ActionPayload =
   | KeyboardRemapAction
   | PowerAction
   | CreateUserCommandAction
+  | EditUserCommandsAction
 
 function isActionPayload(a: unknown): a is ActionPayload {
   if (typeof a !== 'object' || a === null) return false
@@ -465,6 +477,7 @@ function isActionPayload(a: unknown): a is ActionPayload {
     )
   }
   if (k === 'create-user-command') return true
+  if (k === 'edit-user-commands') return true
   return false
 }
 
@@ -490,12 +503,16 @@ function actionKindFor(action: CommandKind): string {
   if (action.kind === 'keyboard-remap') return 'keyboard-remap'
   if (action.kind === 'power') return 'power'
   if (action.kind === 'create-user-command') return 'create-user-command'
+  if (action.kind === 'edit-user-commands') return 'edit-user-commands'
   return 'window-command'
 }
 
 function actionPayloadFor(action: CommandKind): ActionPayload {
   if (action.kind === 'create-user-command') {
     return { kind: 'create-user-command' } satisfies CreateUserCommandAction
+  }
+  if (action.kind === 'edit-user-commands') {
+    return { kind: 'edit-user-commands' } satisfies EditUserCommandsAction
   }
   if (action.kind === 'open-settings') {
     return {
@@ -677,8 +694,9 @@ export function createCommandPaletteModule(
        * belongs to is carried by its badge chip instead of by a section of
        * its own.
        *
-       * Aliases come from the module's ordinary alias map, keyed by the same
-       * `user-command:<id>` item id the palette's Ctrl+K menu writes.
+       * Aliases live on the command record (the per-app User Commands search
+       * reads the same one); the palette's Ctrl+K menu writes them there via
+       * main's alias handler.
        */
       const appendUserCommands = (): void => {
         if (!userCommandsEnabled()) return
@@ -697,7 +715,7 @@ export function createCommandPaletteModule(
                 : 'Runs in background',
             iconHint: command.kind === 'keystroke' ? 'keyboard' : 'terminal',
             group: 'User Commands',
-            alias: aliases[id],
+            alias: command.alias,
             badge: appScopeLabel(command, focusedApp),
             actionKind: 'user-command',
             action: {
@@ -711,15 +729,15 @@ export function createCommandPaletteModule(
       // Keep user-authored entries above the long generated list of module
       // settings links, while preserving the concise built-in Settings and
       // Windows Control groups at the top. "Create user command for <app>"
-      // shares the User Commands group and trails the commands themselves —
-      // it's the way to add another one, so it reads best at the end of the
-      // list it adds to.
+      // and "Edit user commands" share the User Commands group and trail the
+      // commands themselves — they manage the list, so they read best at its
+      // end.
       appendCommandDefs(
-        STATIC_COMMANDS.filter((c) => c.id !== CREATE_USER_COMMAND_ID)
+        STATIC_COMMANDS.filter((c) => !USER_COMMAND_MANAGEMENT_IDS.has(c.id))
       )
       appendUserCommands()
       appendCommandDefs(
-        STATIC_COMMANDS.filter((c) => c.id === CREATE_USER_COMMAND_ID)
+        STATIC_COMMANDS.filter((c) => USER_COMMAND_MANAGEMENT_IDS.has(c.id))
       )
       appendCommandDefs(dynamicCommands)
 
@@ -767,29 +785,31 @@ export function createCommandPaletteModule(
         if (item.actionKind !== 'user-command' || !userCommandsEnabled()) {
           return { dismissPalette: false }
         }
-        // Re-resolve against the store and re-check the app scope: the item
-        // crossed the IPC boundary, and an app-scoped command must not run
-        // from a stale row belonging to a different app's session.
-        const command = userCommandsStore.find(item.action.commandId)
-        if (!command || !commandMatchesFocus(command, focusContext.get())) {
+        return runUserCommandFromPalette(item.action.commandId)
+      }
+
+      if (item.action.kind === 'edit-user-commands') {
+        const command = COMMANDS.find(
+          (candidate) => `cmd:${candidate.id}` === item.id
+        )
+        if (
+          item.moduleId !== MODULE_ID ||
+          item.actionKind !== 'edit-user-commands' ||
+          !command ||
+          command.action.kind !== 'edit-user-commands' ||
+          !commandIsEnabledNow(command)
+        ) {
           return { dismissPalette: false }
         }
-
-        if (command.kind === 'keystroke') {
-          // Same handoff as the window commands below: hide with
-          // restoreFocus=true so the keys land in the app the user came
-          // from, then synthesise once the OS has honoured the switch.
-          paletteWindow.hide(true)
-          setTimeout(
-            () => sendUserCommandKeystroke(command),
-            FOCUS_HANDOFF_DELAY_MS
-          )
-          return { dismissPalette: false }
+        // Same handoff as "Edit Keyboard Remap rules": the editor is what
+        // should land in front, so hide without restoring focus.
+        paletteWindow.hide()
+        try {
+          await openPathAsUser(userCommandsStore.filePath())
+        } catch (error) {
+          console.warn('[command-palette] opening user commands failed:', error)
         }
-
-        return {
-          dismissPalette: await executeUserCommand(command.id)
-        }
+        return { dismissPalette: false }
       }
 
       if (item.action.kind === 'create-user-command') {

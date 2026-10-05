@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import Store from 'electron-store'
 import type { NewUserCommand, UserCommand, UserCommandKind } from '@shared/types'
+import { COMMAND_PALETTE_ID } from '@shared/command-palette'
+import { settingsStore } from '../../settings-store'
 import { describeKeystrokeError, normaliseKeystrokeAction } from './keystroke'
 
 interface PersistedShape {
@@ -11,7 +13,12 @@ export const MAX_USER_COMMANDS = 200
 export const MAX_USER_COMMAND_NAME_LENGTH = 100
 export const MAX_USER_COMMAND_ACTION_LENGTH = 4096
 export const MAX_USER_COMMAND_SCOPE_LENGTH = 512
+export const MAX_USER_COMMAND_ALIAS_LENGTH = 64
 const MAX_USER_COMMAND_ID_LENGTH = 200
+
+/** Prefix of the palette item ids aliases used to be keyed by, back when a
+ * user command's alias lived in the Command Palette module's alias map. */
+const LEGACY_ALIAS_ITEM_PREFIX = 'user-command:'
 
 /**
  * Seed useful, harmless examples that also document the shell syntax for the
@@ -63,6 +70,25 @@ function parseAppScope(value: unknown): string {
   return scope === '*' ? '' : scope
 }
 
+/** Normalise an alias the way the palette matches it: trimmed, lowercased.
+ * Blank means "no alias". */
+export function parseAlias(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') {
+    throw new Error('Alias must be text.')
+  }
+  const alias = value.trim().toLowerCase()
+  if (!alias) return undefined
+  if (alias.length > MAX_USER_COMMAND_ALIAS_LENGTH) {
+    throw new Error(`Aliases can be at most ${MAX_USER_COMMAND_ALIAS_LENGTH} characters.`)
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(alias)) {
+    throw new Error('Aliases cannot contain control characters.')
+  }
+  return alias
+}
+
 function parseKind(value: unknown): UserCommandKind {
   if (value === undefined || value === null) return 'shell'
   if (value !== 'shell' && value !== 'keystroke') {
@@ -103,11 +129,13 @@ function parseNewCommand(value: unknown): Omit<UserCommand, 'id'> {
     if (problem) throw new Error(problem)
   }
 
+  const alias = parseAlias(candidate.alias)
   return {
     name,
     kind,
     action: kind === 'keystroke' ? normaliseKeystrokeAction(action) : action,
-    appScope: parseAppScope(candidate.appScope)
+    appScope: parseAppScope(candidate.appScope),
+    ...(alias ? { alias } : {})
   }
 }
 
@@ -117,11 +145,16 @@ function parseNewCommand(value: unknown): Omit<UserCommand, 'id'> {
  *
  * Records written before app scoping / keystroke commands existed have no
  * `kind` or `appScope` — those read as a global shell command, which is
- * exactly what they were. */
+ * exactly what they were.
+ *
+ * A broken or clashing alias only costs the command its alias, never the
+ * command itself: the first command in file order keeps a duplicated alias,
+ * the same "first one wins" a hand edit would expect. */
 function sanitiseCommands(value: unknown): UserCommand[] {
   if (!Array.isArray(value)) return []
   const commands: UserCommand[] = []
   const seenIds = new Set<string>()
+  const seenAliases = new Set<string>()
   for (const entry of value) {
     if (commands.length >= MAX_USER_COMMANDS) break
     if (typeof entry !== 'object' || entry === null) continue
@@ -155,15 +188,32 @@ function sanitiseCommands(value: unknown): UserCommand[] {
       continue
     }
     seenIds.add(id)
+    const scope = appScope === '*' ? '' : appScope
+    let alias: string | undefined
+    try {
+      alias = parseAlias(candidate.alias)
+    } catch {
+      alias = undefined
+    }
+    if (alias) {
+      const key = aliasKey(scope, alias)
+      if (seenAliases.has(key)) alias = undefined
+      else seenAliases.add(key)
+    }
     commands.push({
       id,
       name,
       kind,
       action,
-      appScope: appScope === '*' ? '' : appScope
+      appScope: scope,
+      ...(alias ? { alias } : {})
     })
   }
   return commands
+}
+
+function aliasKey(appScope: string, alias: string): string {
+  return `${scopeKey(appScope)}\u0000${alias}`
 }
 
 /** Two commands collide only when they'd be listed together — i.e. when they
@@ -187,11 +237,57 @@ class UserCommandsStore {
       name: 'runwa-user-commands',
       defaults: { commands: starterCommands() }
     })
+    this.migrateLegacyAliases()
   }
 
   private ensureInit(): Store<PersistedShape> {
     if (!this.store) throw new Error('UserCommandsStore used before init()')
     return this.store
+  }
+
+  /** The JSON file the commands live in — what Settings' Edit button opens. */
+  filePath(): string {
+    return this.ensureInit().path
+  }
+
+  /**
+   * One-time move of aliases out of the Command Palette module's alias map
+   * (`aliases['user-command:<id>']`, where Ctrl+K used to write them) onto
+   * the commands themselves. The command record is now the only place an
+   * alias lives, so every surface that lists user commands — the Command
+   * Palette and the per-app User Commands search — reads the same alias,
+   * and uniqueness is checked in one place. An alias that would clash is
+   * dropped rather than carried over.
+   */
+  private migrateLegacyAliases(): void {
+    const legacy = settingsStore.get().modules[COMMAND_PALETTE_ID]?.aliases ?? {}
+    const entries = Object.entries(legacy).filter(([itemId]) =>
+      itemId.startsWith(LEGACY_ALIAS_ITEM_PREFIX)
+    )
+    if (entries.length === 0) return
+
+    const commands = this.list()
+    for (const [itemId, rawAlias] of entries) {
+      const command = commands.find(
+        (candidate) => candidate.id === itemId.slice(LEGACY_ALIAS_ITEM_PREFIX.length)
+      )
+      let alias: string | undefined
+      try {
+        alias = parseAlias(rawAlias)
+      } catch {
+        alias = undefined
+      }
+      if (
+        command &&
+        alias &&
+        !command.alias &&
+        !findAliasClash(commands, command.appScope, alias, command.id)
+      ) {
+        command.alias = alias
+      }
+      settingsStore.patchModuleAlias(COMMAND_PALETTE_ID, itemId, null)
+    }
+    this.ensureInit().store = { commands }
   }
 
   list(): UserCommand[] {
@@ -211,6 +307,7 @@ class UserCommandsStore {
       throw new Error(`You can save up to ${MAX_USER_COMMANDS} user commands.`)
     }
     assertNameIsFree(commands, nextCommand)
+    assertAliasIsFree(commands, nextCommand.appScope, nextCommand.alias)
 
     commands.push({ id: randomUUID(), ...nextCommand })
     this.ensureInit().store = { commands }
@@ -233,10 +330,31 @@ class UserCommandsStore {
       throw new Error('That command no longer exists.')
     }
     assertNameIsFree(commands, nextCommand, id)
+    assertAliasIsFree(commands, nextCommand.appScope, nextCommand.alias, id)
 
     commands[index] = { id, ...nextCommand }
     this.ensureInit().store = { commands }
     return commands.map((command) => ({ ...command }))
+  }
+
+  /**
+   * Set or clear (blank / null) one command's alias, leaving every other
+   * field alone. This is the palette's Ctrl+K "Set alias…" path; it enforces
+   * the same per-app uniqueness as saving the command from Settings.
+   */
+  setAlias(commandId: unknown, value: unknown): UserCommand[] {
+    const id = parseCommandId(commandId)
+    const alias = parseAlias(value)
+    const commands = this.list()
+    const command = commands.find((candidate) => candidate.id === id)
+    if (!command) {
+      throw new Error('That command no longer exists.')
+    }
+    assertAliasIsFree(commands, command.appScope, alias, id)
+    if (alias) command.alias = alias
+    else delete command.alias
+    this.ensureInit().store = { commands }
+    return commands.map((candidate) => ({ ...candidate }))
   }
 
   remove(commandId: unknown): UserCommand[] {
@@ -278,6 +396,40 @@ function assertNameIsFree(
     nextCommand.appScope
       ? `A command named “${nextCommand.name}” already exists for ${nextCommand.appScope}.`
       : `A command named “${nextCommand.name}” already exists.`
+  )
+}
+
+/** The command (other than `exceptId`) in the same app scope that already
+ * uses `alias`, if any. Same scope rule as names: commands for different
+ * apps are never listed together, so they may share an alias. */
+function findAliasClash(
+  commands: UserCommand[],
+  appScope: string,
+  alias: string,
+  exceptId?: string
+): UserCommand | undefined {
+  const scope = scopeKey(appScope)
+  return commands.find(
+    (command) =>
+      command.id !== exceptId &&
+      command.alias === alias &&
+      scopeKey(command.appScope) === scope
+  )
+}
+
+function assertAliasIsFree(
+  commands: UserCommand[],
+  appScope: string,
+  alias: string | undefined,
+  exceptId?: string
+): void {
+  if (!alias) return
+  const clash = findAliasClash(commands, appScope, alias, exceptId)
+  if (!clash) return
+  throw new Error(
+    appScope
+      ? `The alias “${alias}” is already used by “${clash.name}” in ${appScope}.`
+      : `The alias “${alias}” is already used by “${clash.name}”.`
   )
 }
 

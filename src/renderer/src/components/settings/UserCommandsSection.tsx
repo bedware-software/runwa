@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent
+} from 'react'
 import type {
   RunningAppSummary,
   UserCommand,
   UserCommandKind
 } from '@shared/types'
-import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
 import {
   AppWindow,
+  Globe,
   Keyboard,
   Pencil,
   Plus,
@@ -16,12 +23,12 @@ import {
 } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { useSettingsStore } from '@/store/settings-store'
 import { ConfirmDialog } from '../ConfirmDialog'
 
 const MAX_NAME_LENGTH = 100
 const MAX_ACTION_LENGTH = 4096
 const MAX_SCOPE_LENGTH = 512
+const MAX_ALIAS_LENGTH = 64
 
 const SHELL_PLACEHOLDER =
   CURRENT_OS === 'windows'
@@ -54,9 +61,44 @@ interface Draft {
   kind: UserCommandKind
   action: string
   appScope: string
+  alias: string
 }
 
-const EMPTY_DRAFT: Draft = { name: '', kind: 'shell', action: '', appScope: '' }
+// Keystroke first: pressing a shortcut in the app you came from is what most
+// commands are, especially the app-scoped ones.
+const EMPTY_DRAFT: Draft = {
+  name: '',
+  kind: 'keystroke',
+  action: '',
+  appScope: '',
+  alias: ''
+}
+
+interface CommandGroup {
+  /** Lowercased scope — the same key main uses for name/alias uniqueness. */
+  key: string
+  /** Scope as written, or '' for the global group. */
+  scope: string
+  commands: UserCommand[]
+}
+
+/** Commands bucketed by app scope: global first, then apps alphabetically,
+ * each keeping the stored order. Scopes differing only in case are one app,
+ * matching how main checks names and aliases. */
+function groupByApp(commands: UserCommand[]): CommandGroup[] {
+  const groups = new Map<string, CommandGroup>()
+  for (const command of commands) {
+    const key = command.appScope.toLowerCase()
+    const group = groups.get(key)
+    if (group) group.commands.push(command)
+    else groups.set(key, { key, scope: command.appScope, commands: [command] })
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (!a.key) return -1
+    if (!b.key) return 1
+    return a.scope.localeCompare(b.scope, undefined, { sensitivity: 'base' })
+  })
+}
 
 /**
  * Bespoke CRUD surface for User Commands. The generic module-config schema is
@@ -65,10 +107,13 @@ const EMPTY_DRAFT: Draft = { name: '', kind: 'shell', action: '', appScope: '' }
  *
  * Each command carries three things beyond its name: what it does (a shell
  * command line or a keystroke to press) and where it applies (everywhere, or
- * only while one app is focused). Aliases are *not* edited here — a user
- * command is an ordinary Command Palette row, so its alias is set from the
- * palette's Ctrl+K menu like any other row's. We show it read-only for
- * reference.
+ * only while one app is focused), plus an optional alias. The alias can
+ * also be set from the palette's Ctrl+K menu; main keeps it unique among one
+ * app's commands either way.
+ *
+ * The list is grouped by app, and the JSON file behind it can be opened
+ * directly with Edit — the list re-reads it whenever this window regains
+ * focus, so hand edits show up on the way back.
  */
 export function UserCommandsSection() {
   const [commands, setCommands] = useState<UserCommand[] | null>(null)
@@ -81,12 +126,7 @@ export function UserCommandsSection() {
   const [error, setError] = useState<string | null>(null)
   const [pendingRemoval, setPendingRemoval] = useState<UserCommand | null>(null)
   const [removing, setRemoving] = useState(false)
-
-  // Palette aliases live on the Command Palette module, keyed by item id.
-  // Read-only here: this is where the user comes to check what they bound.
-  const paletteAliases = useSettingsStore(
-    (s) => s.modules.find((m) => m.id === COMMAND_PALETTE_ID)?.aliases
-  )
+  const [filePath, setFilePath] = useState('')
 
   const loadCommands = useCallback(async (): Promise<void> => {
     setCommands(null)
@@ -101,6 +141,28 @@ export function UserCommandsSection() {
   useEffect(() => {
     void loadCommands()
   }, [loadCommands])
+
+  // Pick up edits made in the JSON file: coming back to this window is the
+  // moment they matter. Silent — no loading state, a failure keeps the list.
+  useEffect(() => {
+    const onFocus = (): void => {
+      void window.electronAPI
+        .userCommandsList()
+        .then(setCommands)
+        .catch(() => undefined)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  useEffect(() => {
+    void window.electronAPI
+      .userCommandsFilePath()
+      .then(setFilePath)
+      .catch(() => setFilePath(''))
+  }, [])
+
+  const groups = useMemo(() => (commands ? groupByApp(commands) : []), [commands])
 
   // Running apps feed the scope field's suggestion list. Best-effort: an
   // empty list just means the user types the app name themselves.
@@ -120,7 +182,8 @@ export function UserCommandsSection() {
       name: command.name,
       kind: command.kind,
       action: command.action,
-      appScope: command.appScope
+      appScope: command.appScope,
+      alias: command.alias ?? ''
     })
     setError(null)
   }
@@ -137,7 +200,8 @@ export function UserCommandsSection() {
       name: draft.name.trim(),
       kind: draft.kind,
       action: draft.action.trim(),
-      appScope: draft.appScope.trim()
+      appScope: draft.appScope.trim(),
+      alias: draft.alias.trim()
     }
     if (!payload.name || !payload.action || saving) return
 
@@ -154,7 +218,7 @@ export function UserCommandsSection() {
       } else {
         // Keep the app scope and type: adding several commands for the same
         // app in a row is the common case.
-        patchDraft({ name: '', action: '' })
+        patchDraft({ name: '', action: '', alias: '' })
       }
     } catch (err) {
       setError(readableError(err))
@@ -222,18 +286,33 @@ export function UserCommandsSection() {
           </div>
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">Name</span>
-              <input
-                type="text"
-                value={draft.name}
-                maxLength={MAX_NAME_LENGTH}
-                onChange={(event) => patchDraft({ name: event.target.value })}
-                placeholder="e.g. Open project"
-                autoComplete="off"
-                className={INPUT_CLASS}
-              />
-            </label>
+            <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-2">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-foreground">Name</span>
+                <input
+                  type="text"
+                  value={draft.name}
+                  maxLength={MAX_NAME_LENGTH}
+                  onChange={(event) => patchDraft({ name: event.target.value })}
+                  placeholder="e.g. Open project"
+                  autoComplete="off"
+                  className={INPUT_CLASS}
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-foreground">Alias</span>
+                <input
+                  type="text"
+                  value={draft.alias}
+                  maxLength={MAX_ALIAS_LENGTH}
+                  onChange={(event) => patchDraft({ alias: event.target.value })}
+                  placeholder="optional"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className={cn(INPUT_CLASS, 'font-mono')}
+                />
+              </label>
+            </div>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-foreground">
                 {draft.kind === 'keystroke' ? 'Keystroke' : 'Action'}
@@ -265,8 +344,8 @@ export function UserCommandsSection() {
                 }
                 className={INPUT_CLASS}
               >
-                <option value="shell">Shell command</option>
                 <option value="keystroke">Keystroke</option>
+                <option value="shell">Shell command</option>
               </select>
             </label>
 
@@ -326,14 +405,44 @@ export function UserCommandsSection() {
             empty for a command that is always available. Naming an app — its
             process name, or <code className="font-mono">*</code> wildcards such
             as <code className="font-mono">*idea*</code> — lists the command only
-            while that app is the one you came from. To give a command a palette
-            alias, highlight it in Command Palette and press{' '}
-            <span className="font-medium text-foreground">Ctrl+K</span>; because
-            app-scoped commands are only listed for their own app, the same alias
-            can mean different things in different apps.
+            while that app is the one you came from. Typing a command&apos;s{' '}
+            <span className="font-medium text-foreground">Alias</span> in the
+            palette runs it; it can also be set with{' '}
+            <span className="font-medium text-foreground">Ctrl+K</span> on the
+            row. Aliases must be unique within one app, but different apps can
+            reuse the same one.
           </p>
         </form>
       )}
+
+      <div className="flex flex-col gap-2">
+        <div className="text-xs font-medium text-foreground">Commands file</div>
+        <div className="text-xs text-muted-foreground -mt-1">
+          JSON the commands are stored in. Click Edit to open it in your system
+          editor; changes show up here when you come back to this window.
+          Malformed entries are skipped.
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            readOnly
+            value={filePath}
+            onFocus={(event) => event.currentTarget.select()}
+            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+          />
+          <button
+            type="button"
+            onClick={() => void window.electronAPI.userCommandsOpenFile()}
+            className={cn(
+              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
+              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
+            )}
+          >
+            <Pencil size={12} />
+            Edit
+          </button>
+        </div>
+      </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between gap-3">
@@ -374,9 +483,22 @@ export function UserCommandsSection() {
               Palette immediately.
             </div>
           ) : (
-            commands.map((command) => {
+            groups.map((group) => (
+              <Fragment key={group.key}>
+                <div className="flex items-center gap-1.5 px-4 py-1.5 bg-secondary/50 text-[11px] font-medium text-muted-foreground">
+                  {group.scope ? (
+                    <AppWindow size={11} className="shrink-0" />
+                  ) : (
+                    <Globe size={11} className="shrink-0" />
+                  )}
+                  <span className="truncate text-foreground">
+                    {group.scope || 'All apps'}
+                  </span>
+                  <span className="shrink-0">· {group.commands.length}</span>
+                </div>
+                {group.commands.map((command) => {
               const Icon = command.kind === 'keystroke' ? Keyboard : Terminal
-              const alias = paletteAliases?.[userCommandItemId(command.id)]
+              const alias = command.alias
               const isEditing = editingId === command.id
               return (
                 <div
@@ -398,7 +520,7 @@ export function UserCommandsSection() {
                       </span>
                       {alias && (
                         <span
-                          title="Palette alias — change it with Ctrl+K in Command Palette"
+                          title="Palette alias — type it in the palette to run the command"
                           className="shrink-0 px-1.5 py-0.5 rounded border border-input bg-secondary text-[10px] font-mono text-secondary-foreground"
                         >
                           {alias}
@@ -408,12 +530,6 @@ export function UserCommandsSection() {
                     <code className="block mt-0.5 text-xs leading-relaxed text-muted-foreground font-mono break-all">
                       {command.action}
                     </code>
-                    {command.appScope && (
-                      <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                        <AppWindow size={11} className="shrink-0" />
-                        <span className="truncate">Only in {command.appScope}</span>
-                      </div>
-                    )}
                   </div>
                   <button
                     type="button"
@@ -444,7 +560,9 @@ export function UserCommandsSection() {
                   </button>
                 </div>
               )
-            })
+                })}
+              </Fragment>
+            ))
           )}
         </div>
       </div>

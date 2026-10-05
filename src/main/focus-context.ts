@@ -54,7 +54,7 @@ function toFocusedApp(window: NativeWindow): FocusedApp {
  * listing instead, falling back to any window of the same pid — different
  * window, same app, which is all app scoping needs.
  */
-function resolveWindow(windowId: string): FocusedApp | null {
+export function resolveWindow(windowId: string): FocusedApp | null {
   try {
     const described = describeWindow(windowId)
     if (described) return toFocusedApp(described)

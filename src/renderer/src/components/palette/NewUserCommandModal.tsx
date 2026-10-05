@@ -9,10 +9,11 @@ import { cn } from '@/lib/utils'
  *
  * Deliberately smaller than the Settings surface: the app scope is decided
  * by main (it's whatever the palette was opened over — shown here as a chip,
- * not as a field), and there's no alias input, because an alias is set on the
- * finished row with Ctrl+K like any other. What's left is exactly what can't
- * be inferred — a name, whether it's a shell command or a keystroke, and the
- * action itself.
+ * not as a field). What's left is exactly what can't be inferred — a name,
+ * whether it's a keystroke or a shell command (keystroke first: pressing a
+ * shortcut in the app behind the palette is what a per-app command usually
+ * is), the action itself, and an optional alias. Main rejects an alias
+ * another of this app's commands already uses.
  *
  * Keyboard handling mirrors AliasInputModal: Esc closes, Enter submits, and
  * both are captured at the document level so the palette behind doesn't also
@@ -31,6 +32,7 @@ interface Props {
     name: string
     kind: UserCommandKind
     action: string
+    alias: string
   }) => void
   onClose: () => void
 }
@@ -50,8 +52,9 @@ export function NewUserCommandModal({
   onClose
 }: Props) {
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<UserCommandKind>('shell')
+  const [kind, setKind] = useState<UserCommandKind>('keystroke')
   const [action, setAction] = useState('')
+  const [alias, setAlias] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -60,8 +63,9 @@ export function NewUserCommandModal({
   useEffect(() => {
     if (!open) return
     setName('')
-    setKind('shell')
+    setKind('keystroke')
     setAction('')
+    setAlias('')
     setTimeout(() => {
       nameRef.current?.focus()
       nameRef.current?.select()
@@ -98,7 +102,7 @@ export function NewUserCommandModal({
 
   const submit = (): void => {
     if (!canSubmit) return
-    onSubmit({ name: name.trim(), kind, action: action.trim() })
+    onSubmit({ name: name.trim(), kind, action: action.trim(), alias: alias.trim() })
   }
 
   const inputClass =
@@ -133,25 +137,40 @@ export function NewUserCommandModal({
           }}
           className="p-3 flex flex-col gap-3"
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">Name</span>
-            <input
-              ref={nameRef}
-              type="text"
-              value={name}
-              maxLength={100}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Reformat code"
-              className={inputClass}
-            />
-          </label>
+          <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">Name</span>
+              <input
+                ref={nameRef}
+                type="text"
+                value={name}
+                maxLength={100}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Reformat code"
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">Alias</span>
+              <input
+                type="text"
+                value={alias}
+                maxLength={64}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => setAlias(e.target.value)}
+                placeholder="optional"
+                className={cn(inputClass, 'font-mono')}
+              />
+            </label>
+          </div>
 
           <div className="flex flex-col gap-1">
             <span className="text-[11px] text-muted-foreground">Type</span>
             <div className="flex gap-1">
-              {(['shell', 'keystroke'] as const).map((option) => (
+              {(['keystroke', 'shell'] as const).map((option) => (
                 <button
                   key={option}
                   type="button"

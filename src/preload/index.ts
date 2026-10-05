@@ -93,6 +93,10 @@ const api: ElectronAPI = {
     command: NewFocusedAppCommand
   ): Promise<string> =>
     ipcRenderer.invoke('user-commands:create-for-focused-app', command),
+  userCommandsFilePath: (): Promise<string> =>
+    ipcRenderer.invoke('user-commands:file-path'),
+  userCommandsOpenFile: (): Promise<void> =>
+    ipcRenderer.invoke('user-commands:open-file'),
 
   // Palette / settings window control
   paletteHide: (): Promise<void> => ipcRenderer.invoke('palette:hide'),

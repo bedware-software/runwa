@@ -9,14 +9,27 @@ import { useEffect, useRef, useState } from 'react'
  *  - Empty submission REMOVES the alias (standard "clear to none" UX).
  *  - Non-empty is trimmed + lowercased server-side — we don't repeat the
  *    normalisation here so the input stays WYSIWYG while the user types.
+ *  - Main may reject the alias (a user command's alias must be unique among
+ *    its app's commands). The modal stays open with main's message so the
+ *    user can pick another one.
  */
 
 interface Props {
   open: boolean
   itemTitle: string
   initialValue: string
-  onSave: (alias: string) => void
+  /** Resolves once saved; a rejection keeps the modal open with its message. */
+  onSave: (alias: string) => Promise<void>
   onClose: () => void
+}
+
+function readableError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return (
+    message
+      .replace(/^Error invoking remote method '[^']+': Error: /, '')
+      .replace(/^Error: /, '') || 'The alias could not be saved.'
+  )
 }
 
 export function AliasInputModal({
@@ -27,12 +40,16 @@ export function AliasInputModal({
   onClose
 }: Props) {
   const [value, setValue] = useState(initialValue)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     setValue(initialValue)
+    setError(null)
+    setSaving(false)
     // Microtask so the input exists in the DOM before we focus.
     setTimeout(() => {
       inputRef.current?.focus()
@@ -70,7 +87,18 @@ export function AliasInputModal({
   if (!open) return null
 
   const submit = (): void => {
-    onSave(value)
+    if (saving) return
+    setSaving(true)
+    setError(null)
+    onSave(value).then(
+      () => setSaving(false),
+      (err: unknown) => {
+        setSaving(false)
+        setError(readableError(err))
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    )
   }
 
   return (
@@ -100,13 +128,24 @@ export function AliasInputModal({
             spellCheck={false}
             autoComplete="off"
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value)
+              setError(null)
+            }}
             placeholder="e.g. chr"
             className="h-8 px-2 rounded-md border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted-foreground">
-              Leave empty to clear.
+            <span
+              role={error ? 'alert' : undefined}
+              title={error ?? undefined}
+              className={
+                error
+                  ? 'text-[11px] text-destructive min-w-0 truncate'
+                  : 'text-[11px] text-muted-foreground'
+              }
+            >
+              {error ?? 'Leave empty to clear.'}
             </span>
             <div className="flex items-center gap-1">
               <button

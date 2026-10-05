@@ -144,7 +144,8 @@ left_shift:
   on_hold:
     - { keys: [right_shift], to_hotkey: [f18], toggle_capslock: true }
 right_shift:
-  on_tap: [ctrl, opt, cmd, w]
+  # User Commands for the app in front (Window Switcher stays on Space+W).
+  on_tap: [ctrl, opt, cmd, u]
   on_hold:
     - { keys: [left_shift], to_hotkey: [f18], toggle_capslock: true }
 

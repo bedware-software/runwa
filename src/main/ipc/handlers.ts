@@ -22,7 +22,9 @@ import type {
   WindowIgnoreRule,
   WindowIgnoreScope
 } from '@shared/types'
-import { COMMAND_PALETTE_ID, userCommandItemId } from '@shared/command-palette'
+import { COMMAND_PALETTE_ID, userCommandIdFromItemId } from '@shared/command-palette'
+import { USER_COMMANDS_ID } from '@shared/user-commands'
+import { openPathAsUser } from '../elevation'
 import { focusContext } from '../focus-context'
 import { settingsStore } from '../settings-store'
 import { moduleRegistry } from '../modules/registry'
@@ -128,8 +130,21 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'settings:setModuleAlias',
-    async (_e, moduleId: ModuleId, itemId: string, alias: string | null) =>
-      settingsStore.patchModuleAlias(moduleId, itemId, alias)
+    async (_e, moduleId: ModuleId, itemId: string, alias: string | null) => {
+      // A user command's alias lives on the command itself, wherever its row
+      // is listed (Command Palette or the per-app User Commands search), so
+      // the store can hold it unique per app. A clash rejects the call and
+      // the palette shows the store's message.
+      const commandId = userCommandIdFromItemId(itemId)
+      if (
+        commandId !== null &&
+        (moduleId === COMMAND_PALETTE_ID || moduleId === USER_COMMANDS_ID)
+      ) {
+        userCommandsStore.setAlias(commandId, alias)
+        return settingsStore.get()
+      }
+      return settingsStore.patchModuleAlias(moduleId, itemId, alias)
+    }
   )
 
   ipcMain.handle(
@@ -180,20 +195,27 @@ export function registerIpcHandlers(): void {
         settingsWindow.getBrowserWindow(),
         'User Commands management'
       )
-      const commands = userCommandsStore.remove(commandId)
-      // Aliases live in the Command Palette module's per-item map, keyed by
-      // command id. Drop the deleted command's entry so it can't linger and
-      // silently re-attach to a future command that reuses the id.
-      if (typeof commandId === 'string' && commandId.trim()) {
-        settingsStore.patchModuleAlias(
-          COMMAND_PALETTE_ID,
-          userCommandItemId(commandId.trim()),
-          null
-        )
-      }
-      return commands
+      return userCommandsStore.remove(commandId)
     }
   )
+
+  ipcMain.handle('user-commands:file-path', async (event) => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'User Commands management'
+    )
+    return userCommandsStore.filePath()
+  })
+
+  ipcMain.handle('user-commands:open-file', async (event) => {
+    assertSenderWindow(
+      event,
+      settingsWindow.getBrowserWindow(),
+      'User Commands management'
+    )
+    await openPathAsUser(userCommandsStore.filePath())
+  })
 
   // Palette-side creation for the "Create user command for <app>" entry.
   //
@@ -220,6 +242,7 @@ export function registerIpcHandlers(): void {
         name: command?.name,
         action: command?.action,
         kind: command?.kind,
+        alias: command?.alias,
         appScope: focusedApp.processName
       })
       const created = commands.find((c) => !before.has(c.id))

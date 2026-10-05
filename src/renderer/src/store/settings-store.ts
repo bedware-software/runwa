@@ -7,6 +7,7 @@ import type {
   Settings,
   Theme
 } from '@shared/types'
+import { userCommandIdFromItemId } from '@shared/command-palette'
 
 interface SettingsState {
   settings: Settings | null
@@ -143,6 +144,9 @@ export const useSettingsStore = create<SettingsState>()(
       )
       set((s) => {
         s.settings = updated
+        // A user command's alias is stored on the command, not in the
+        // module's alias map — nothing to mirror here.
+        if (userCommandIdFromItemId(itemId) !== null) return
         const idx = s.modules.findIndex((m) => m.id === moduleId)
         if (idx < 0) return
         const mod = s.modules[idx]

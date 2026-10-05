@@ -70,12 +70,24 @@ class ModuleRegistry {
     const aliasesSeed = module.manifest.defaultAliases
       ? { aliases: { ...module.manifest.defaultAliases } }
       : {}
+    const existing = settingsStore.get().modules[id]
     settingsStore.ensureModuleDefaults(id, {
       enabled: module.manifest.defaultEnabled,
       config: defaultConfigFromManifest(module),
       ...directLaunchSeed,
       ...aliasesSeed
     })
+    // A module that gained a direct-launch hotkey in an update (User
+    // Commands) has an entry that has never held one. Clearing a hotkey in
+    // Settings stores '', so `undefined` can only mean "never set" — seeding
+    // it here can't resurrect a binding the user removed.
+    if (
+      existing &&
+      existing.directLaunchHotkey === undefined &&
+      directLaunchSeed.directLaunchHotkey
+    ) {
+      settingsStore.patchModule(id, directLaunchSeed)
+    }
   }
 
   /** Build the effective config for a module by merging defaults with stored values. */

@@ -36,12 +36,13 @@ const SUPPORTS_FULLSCREEN_BYPASS = CURRENT_OS === 'windows'
 const SUPPORTS_RUN_AS_ADMIN = CURRENT_OS === 'windows'
 
 /**
- * Module ids whose entries the user can attach a Ctrl+K alias to. Both
- * modules expose stable per-item ids (app paths, command ids — including
- * user-created commands, keyed `user-command:<id>`) so an alias stored in
- * settings still matches the same row across restarts.
+ * Module ids whose entries the user can attach a Ctrl+K alias to. All of
+ * them expose stable per-item ids (app paths, command ids — including
+ * user-created commands, keyed `user-command:<id>` in both the Command
+ * Palette and the per-app User Commands search) so an alias still matches
+ * the same row across restarts.
  */
-const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette'])
+const ALIAS_CAPABLE_MODULES = new Set(['app-search', 'command-palette', 'user-commands'])
 
 /**
  * True for a live-window row from the Window Switcher — the rows that can be
@@ -451,6 +452,7 @@ export function PaletteApp() {
     name: string
     kind: 'shell' | 'keystroke'
     action: string
+    alias: string
   }): void => {
     setDraftSaving(true)
     setDraftError(null)
@@ -905,16 +907,16 @@ export function PaletteApp() {
           itemTitle={selectedItem.title}
           initialValue={selectedItem.alias ?? ''}
           onClose={() => setAliasModalOpen(false)}
-          onSave={(alias) => {
-            // Main's `patchModuleAlias` handles empty-string = clear, so
-            // we can hand the raw input straight through. refresh() so
-            // the alias chip renders (or disappears) immediately;
-            // preserveSelection keeps the cursor on the just-edited
-            // row instead of snapping back to the top of the list.
-            void setModuleAlias(selectedItem.moduleId, selectedItem.id, alias || null).then(
-              () => refresh({ preserveSelection: true })
-            )
+          onSave={async (alias) => {
+            // Main handles empty-string = clear, so we can hand the raw
+            // input straight through. A rejection (an alias another of this
+            // app's user commands already uses) propagates so the modal
+            // stays open with the reason. refresh() so the alias chip
+            // renders (or disappears) immediately; preserveSelection keeps
+            // the cursor on the just-edited row.
+            await setModuleAlias(selectedItem.moduleId, selectedItem.id, alias || null)
             setAliasModalOpen(false)
+            void refresh({ preserveSelection: true })
           }}
         />
       )}

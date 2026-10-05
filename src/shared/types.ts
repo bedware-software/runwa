@@ -349,20 +349,24 @@ export interface UserCommand {
    * are hidden from the palette while any other app is in front.
    */
   appScope: string
+  /**
+   * Palette alias — typing it exactly runs the command. Lowercase, absent
+   * when unset. Unique among the commands sharing an app scope (so two apps
+   * can reuse the same alias); main rejects a clash wherever it's set —
+   * Settings, the palette's Ctrl+K menu, or the new-command form.
+   */
+  alias?: string
 }
 
 /** Renderer → main payload for creating or editing a command. Main trims,
  * validates, and owns the stable id. Omitted fields fall back to a global
- * shell command.
- *
- * Aliases are deliberately absent: a user command's alias is an ordinary
- * Command Palette item alias (keyed `user-command:<id>`), set from the
- * palette's Ctrl+K menu like any other row's. */
+ * shell command with no alias. */
 export interface NewUserCommand {
   name: string
   action: string
   kind?: UserCommandKind
   appScope?: string
+  alias?: string
 }
 
 /**
@@ -372,7 +376,7 @@ export interface NewUserCommand {
  * palette is standing over, so the palette renderer can't scope a command to
  * an app the user isn't actually in.
  */
-export type NewFocusedAppCommand = Pick<NewUserCommand, 'name' | 'action' | 'kind'>
+export type NewFocusedAppCommand = Pick<NewUserCommand, 'name' | 'action' | 'kind' | 'alias'>
 
 /** Main → palette: open the inline "new user command" form, scoped to the
  * app the palette was opened over. */
@@ -760,6 +764,12 @@ export interface ElectronAPI {
   userCommandsCreateForFocusedApp: (
     command: NewFocusedAppCommand
   ) => Promise<string>
+  /** Path of the JSON file the commands are stored in — shown next to the
+   * Edit button so the user knows what they're about to open. */
+  userCommandsFilePath: () => Promise<string>
+  /** Open the commands JSON in the system editor. Edits are picked up on the
+   * next read; malformed entries are skipped rather than failing the list. */
+  userCommandsOpenFile: () => Promise<void>
 
   // Palette window control
   paletteHide: () => Promise<void>
