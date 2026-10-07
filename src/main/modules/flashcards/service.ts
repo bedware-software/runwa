@@ -7,9 +7,15 @@ import { isDue, isMature } from './srs'
 import { EXAMPLE_DECK, LEGACY_EXAMPLE_DECKS } from './example-deck'
 import { DEFAULT_LLM_PROMPT, LEGACY_LLM_PROMPTS } from './default-prompt'
 import { settingsStore } from '../../settings-store'
+import type { FlashcardsDecksFolderView } from '@shared/types'
+
+/** Module config key holding a user-picked decks folder. Empty / missing
+ * means the default `<userData>/decks`. */
+const CONFIG_DECKS_FOLDER = 'decksFolder'
 
 /**
- * Coordinator for on-disk decks. Owns the `<userData>/decks` folder,
+ * Coordinator for on-disk decks. Owns the decks folder — `<userData>/decks`
+ * unless the user picked another one in settings (e.g. a Dropbox folder),
  * caches parsed decks keyed by file mtime so a hot palette open doesn't
  * re-read every file, and exposes the two queries the IPC layer needs:
  * `listDecks()` (palette home screen) and `loadDeck(id)` (quiz UI).
@@ -59,7 +65,64 @@ class FlashcardsService {
 
   /** Absolute path to the deck folder. Created on demand. */
   decksFolder(): string {
+    return this.customDecksFolder() ?? this.defaultDecksFolder()
+  }
+
+  defaultDecksFolder(): string {
     return path.join(app.getPath('userData'), 'decks')
+  }
+
+  private customDecksFolder(): string | null {
+    try {
+      const v = settingsStore.get().modules['flashcards']?.config?.[CONFIG_DECKS_FOLDER]
+      return typeof v === 'string' && v.trim() ? v : null
+    } catch {
+      return null
+    }
+  }
+
+  decksFolderView(): FlashcardsDecksFolderView {
+    return {
+      folder: this.decksFolder(),
+      defaultFolder: this.defaultDecksFolder(),
+      isDefault: this.customDecksFolder() === null
+    }
+  }
+
+  /** Point decks at `folder`, or back at the default with null. SRS state
+   * is keyed by filename, not path, so decks that keep their names keep
+   * their history across the switch. */
+  setDecksFolder(folder: string | null): void {
+    const value =
+      folder && path.relative(folder, this.defaultDecksFolder()) !== '' ? folder : ''
+    settingsStore.patchModuleConfig('flashcards', { [CONFIG_DECKS_FOLDER]: value })
+    this.cache.clear()
+    this.ensureFolder()
+  }
+
+  /** `.md` filenames directly inside `dir`; empty when it can't be read. */
+  deckFiles(dir: string): string[] {
+    try {
+      return fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md'))
+    } catch {
+      return []
+    }
+  }
+
+  /** Copy every deck file from `from` into `to`, never overwriting one that's
+   * already there. Returns how many were copied. */
+  copyDecks(from: string, to: string): number {
+    fs.mkdirSync(to, { recursive: true })
+    let copied = 0
+    for (const name of this.deckFiles(from)) {
+      try {
+        fs.copyFileSync(path.join(from, name), path.join(to, name), fs.constants.COPYFILE_EXCL)
+        copied++
+      } catch (err) {
+        console.warn(`[flashcards] failed to copy ${name} to ${to}`, err)
+      }
+    }
+    return copied
   }
 
   /** Absolute path to the editable LLM prompt file. Mirrors how
@@ -156,7 +219,8 @@ class FlashcardsService {
 
   /**
    * Make sure the decks folder exists and seed `example.md` if the
-   * folder is empty (fresh install). Also auto-upgrades a previously-
+   * default folder is empty (fresh install). A folder the user picked is
+   * theirs — it never gets an example dropped into it. Also auto-upgrades a previously-
    * shipped untouched seed file to the current EXAMPLE_DECK when its
    * content byte-equals one of the LEGACY_EXAMPLE_DECKS — so users
    * who got the old example before we added topics / new keybindings
@@ -172,12 +236,8 @@ class FlashcardsService {
       console.warn('[flashcards] failed to mkdir decks folder', err)
       return
     }
-    let entries: string[] = []
-    try {
-      entries = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md'))
-    } catch {
-      // ignore
-    }
+    if (this.customDecksFolder() !== null) return
+    const entries = this.deckFiles(dir)
     const examplePath = path.join(dir, 'example.md')
     if (entries.length === 0) {
       try {

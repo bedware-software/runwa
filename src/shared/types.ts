@@ -683,6 +683,15 @@ export interface FlashcardsLlmPromptView {
   content: string
 }
 
+/** Decks folder as shown in the settings panel. */
+export interface FlashcardsDecksFolderView {
+  /** Absolute path decks are read from right now. */
+  folder: string
+  /** `<userData>/decks` — what Reset to default goes back to. */
+  defaultFolder: string
+  isDefault: boolean
+}
+
 /**
  * GitHub Releases-backed auto-update state machine, as observed from
  * the renderer. The main process is the source of truth — the
@@ -864,6 +873,17 @@ export interface ElectronAPI {
    * only the per-card history under `runwa-flashcards.json`. After
    * this, every card in the deck reverts to "new". */
   flashcardsResetDeck: (deckId: string) => Promise<void>
+
+  /** Where decks are read from right now, and whether that's the default. */
+  flashcardsGetDecksFolder: () => Promise<FlashcardsDecksFolderView>
+
+  /** Folder picker for a custom decks folder. Offers to copy the current
+   * decks over when the picked folder has none. Resolves to null when the
+   * user cancels. */
+  flashcardsChooseDecksFolder: () => Promise<FlashcardsDecksFolderView | null>
+
+  /** Drop the custom folder and go back to `<userData>/decks`. */
+  flashcardsResetDecksFolder: () => Promise<FlashcardsDecksFolderView>
 
   // Auto-update: getter + push-update subscription.
   checkForUpdates: () => Promise<void>

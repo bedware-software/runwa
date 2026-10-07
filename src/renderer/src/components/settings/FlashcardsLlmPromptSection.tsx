@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Clipboard, Pencil, RotateCcw } from '@/lib/lucide-icons'
-import type { FlashcardsLlmPromptView } from '@shared/types'
+import {
+  Check,
+  Clipboard,
+  FolderOpen,
+  FolderPen,
+  Pencil,
+  RefreshCw,
+  RotateCcw
+} from '@/lib/lucide-icons'
+import type { FlashcardsDecksFolderView, FlashcardsLlmPromptView } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '../ConfirmDialog'
 
@@ -8,6 +16,13 @@ const MODULE_ID = 'flashcards'
 const ACTION_EDIT = 'editLlmPrompt'
 const ACTION_COPY = 'copyLlmPrompt'
 const ACTION_RESET = 'resetLlmPrompt'
+const ACTION_OPEN_DECKS = 'openDecksFolder'
+const ACTION_RELOAD_DECKS = 'reloadDecks'
+
+const BUTTON_CLASS = cn(
+  'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
+  'bg-secondary text-secondary-foreground border-input hover:bg-accent'
+)
 
 /**
  * Settings section for the LLM prompt file. Same shape as
@@ -77,8 +92,10 @@ export function FlashcardsLlmPromptSection() {
   }, [])
 
   return (
-    <div className="pt-3 border-t border-border flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
+      <DecksFolderSection />
+
+      <div className="pt-3 border-t border-border flex flex-col gap-2">
         <div className="text-xs font-medium text-foreground">
           LLM prompt for generating decks
         </div>
@@ -106,10 +123,7 @@ export function FlashcardsLlmPromptSection() {
             // user's gesture, not a clock.
             onPointerLeave={() => setCopied(false)}
             onBlur={() => setCopied(false)}
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-            )}
+            className={BUTTON_CLASS}
           >
             {copied ? <Check size={12} /> : <Clipboard size={12} />}
             {copied ? 'Copied' : 'Copy'}
@@ -117,10 +131,7 @@ export function FlashcardsLlmPromptSection() {
           <button
             type="button"
             onClick={onEdit}
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-            )}
+            className={BUTTON_CLASS}
           >
             <Pencil size={12} />
             Edit
@@ -129,10 +140,7 @@ export function FlashcardsLlmPromptSection() {
             type="button"
             onClick={() => setResetConfirmOpen(true)}
             title="Overwrite the file with the shipped default prompt."
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-            )}
+            className={BUTTON_CLASS}
           >
             <RotateCcw size={12} />
             Reset
@@ -151,6 +159,92 @@ export function FlashcardsLlmPromptSection() {
         onConfirm={() => void onResetConfirmed()}
         onCancel={() => setResetConfirmOpen(false)}
       />
+    </div>
+  )
+}
+
+/**
+ * Where decks are read from: the default `<userData>/decks`, or a folder
+ * the user picked — typically a Dropbox / OneDrive folder so decks sync
+ * between machines. Picking and the copy-decks-over prompt are native
+ * dialogs owned by main.
+ */
+function DecksFolderSection() {
+  const [view, setView] = useState<FlashcardsDecksFolderView | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.electronAPI.flashcardsGetDecksFolder().then((next) => {
+      if (!cancelled) setView(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onChoose = useCallback(async () => {
+    const next = await window.electronAPI.flashcardsChooseDecksFolder()
+    if (next) setView(next)
+  }, [])
+
+  const onUseDefault = useCallback(async () => {
+    setView(await window.electronAPI.flashcardsResetDecksFolder())
+  }, [])
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs font-medium text-foreground">Decks folder</div>
+      <div className="text-xs text-muted-foreground -mt-1">
+        One <code>.md</code> file per deck — format under <em>Deck files</em>{' '}
+        below. Pick a Dropbox or OneDrive folder to sync decks between
+        machines.
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          readOnly
+          value={view?.folder ?? ''}
+          title={view?.folder}
+          onFocus={(e) => e.currentTarget.select()}
+          className="h-8 flex-1 min-w-0 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+        />
+        <button
+          type="button"
+          onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_OPEN_DECKS)}
+          title="Open the folder in Finder / Explorer."
+          className={BUTTON_CLASS}
+        >
+          <FolderOpen size={12} />
+          Open
+        </button>
+        <button type="button" onClick={() => void onChoose()} className={BUTTON_CLASS}>
+          <FolderPen size={12} />
+          Change…
+        </button>
+        <button
+          type="button"
+          onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_RELOAD_DECKS)}
+          title="Re-read every deck file. Files reload on their own when their mtime changes; this is for tools that preserve mtimes."
+          className={BUTTON_CLASS}
+        >
+          <RefreshCw size={12} />
+          Reload
+        </button>
+      </div>
+      {view && !view.isDefault && (
+        <div className="text-xs text-muted-foreground flex items-center gap-2 min-w-0">
+          <span className="truncate">
+            Default: <span className="font-mono">{view.defaultFolder}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => void onUseDefault()}
+            className="shrink-0 text-xs font-medium text-foreground underline underline-offset-2 hover:text-foreground/80"
+          >
+            Use default
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -267,8 +361,8 @@ function HowReviewWorksSection() {
       </Subsection>
 
       <Subsection title="Deck files">
-        One <code>.md</code> file per deck under the deck folder
-        (Settings → Flashcards → Decks folder). The filename without{' '}
+        One <code>.md</code> file per deck in the decks folder (top of
+        this page). The filename without{' '}
         <code>.md</code> is the deck id and is what SRS state is keyed
         against — renaming the file detaches its history.
         <pre className="mt-1.5 px-2 py-1.5 rounded bg-card border border-input/60 text-[11px] leading-5 font-mono whitespace-pre overflow-x-auto">
@@ -307,7 +401,7 @@ function HowReviewWorksSection() {
       <Subsection title="Live reload">
         Deck files are re-parsed automatically when their mtime
         changes — edit a deck in any editor and the next palette open
-        sees the new version. The Reload action under Decks is for
+        sees the new version. The Reload button next to the decks folder is for
         the rare case of a tool that preserves mtimes (rsync, some
         sync clients).
       </Subsection>

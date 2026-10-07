@@ -71,11 +71,10 @@ function launchUwp(aumid: string): boolean {
   try {
     // detached + unref so our process isn't the parent of the spawned app —
     // if runwa quits, the app keeps running. stdio ignored for the same
-    // reason (no lingering pipes).
+    // reason (no lingering pipes). No `windowsHide` — see openViaExplorer.
     const proc = spawn('explorer.exe', [`shell:AppsFolder\\${aumid}`], {
       detached: true,
-      stdio: 'ignore',
-      windowsHide: true
+      stdio: 'ignore'
     })
     proc.unref()
     return true

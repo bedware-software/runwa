@@ -157,13 +157,18 @@ export async function openPathAsUser(target: string): Promise<void> {
   if (err) console.warn(`[elevation] openPath failed for ${target}: ${err}`)
 }
 
-/** Hand `target` to Explorer. Detached so it outlives runwa. */
+/**
+ * Hand `target` to Explorer. Detached so it outlives runwa.
+ *
+ * No `windowsHide`: Explorer has no console to hide, and it forwards the
+ * SW_HIDE that flag puts in STARTUPINFO to the window it opens — a folder
+ * came up as an invisible File Explorer window.
+ */
 export function openViaExplorer(target: string): boolean {
   try {
     const proc = spawn('explorer.exe', [target], {
       detached: true,
-      stdio: 'ignore',
-      windowsHide: true
+      stdio: 'ignore'
     })
     proc.unref()
     return true

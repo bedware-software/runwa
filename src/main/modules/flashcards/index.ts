@@ -17,16 +17,18 @@ import { openPathAsUser } from '../../elevation'
  * branches on a `flashcards:start-quiz` IPC event from main; no
  * separate BrowserWindow).
  *
- * Decks are plain Markdown files in `<userData>/decks/*.md`; see
+ * Decks are plain Markdown files in the decks folder (`<userData>/decks`
+ * unless overridden in settings); see
  * `parser.ts` for the grammar. SRS state lives in
  * `runwa-flashcards.json` keyed by deckId + cardId.
  */
 
 const CONFIG_OPEN_FOLDER = 'openDecksFolder'
 const CONFIG_RELOAD = 'reloadDecks'
-// LLM-prompt actions are NOT in the manifest's configFields (the
-// section renders its own UI). They're plumbed through onAction so
-// the renderer can `modulesAction('flashcards', 'editLlmPrompt' / 'copyLlmPrompt')`
+// None of these are in the manifest's configFields — the settings
+// section (FlashcardsLlmPromptSection) renders its own UI. They're
+// plumbed through onAction so the renderer can
+// `modulesAction('flashcards', 'openDecksFolder' / 'editLlmPrompt' / …)`
 // without bespoke IPC channels. Mirrors how keyboard-remap exposes
 // 'openRules' as an unlisted action.
 const ACTION_EDIT_PROMPT = 'editLlmPrompt'
@@ -57,30 +59,10 @@ const MANIFEST: ModuleManifest = {
   icon: 'library',
   kind: 'search',
   description:
-    'Quiz yourself on Markdown-defined flashcard decks. Decks live in a folder under your user data directory; one .md file per deck. SuperMemo-style spaced repetition tracks per-card progress so review-due cards bubble up.',
+    'Quiz yourself on Markdown-defined flashcard decks. Decks live in a folder of your choice (under your user data directory by default); one .md file per deck. SuperMemo-style spaced repetition tracks per-card progress so review-due cards bubble up.',
   defaultEnabled: true,
   supportsDirectLaunch: true,
-  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+F',
-  configFields: [
-    {
-      key: CONFIG_OPEN_FOLDER,
-      type: 'action',
-      label: 'Decks folder',
-      description:
-        'Open the folder where deck files live. Drop .md files here (one deck per file). Format: # Deck title (optional), ## Topic (optional), ### Question, - [ ]/[x] options, > optional explanation.',
-      buttonLabel: 'Open in Finder / Explorer',
-      icon: 'folder-open'
-    },
-    {
-      key: CONFIG_RELOAD,
-      type: 'action',
-      label: 'Reload decks from disk',
-      description:
-        'Drops the parsed-deck cache so the next palette open re-reads every file. Files are auto-reloaded when their mtime changes, so you usually only need this if you replaced a file via a tool that preserves mtimes.',
-      buttonLabel: 'Reload now',
-      icon: 'refresh-cw'
-    }
-  ]
+  defaultDirectLaunchHotkey: 'Ctrl+Alt+Super+F'
 }
 
 export function createFlashcardsModule(): PaletteModule {

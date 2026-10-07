@@ -12,6 +12,7 @@ import CornerDownLeft from 'lucide-react/dist/esm/icons/corner-down-left.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
+import FolderPen from 'lucide-react/dist/esm/icons/folder-pen.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import GraduationCap from 'lucide-react/dist/esm/icons/graduation-cap.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
@@ -106,6 +107,7 @@ export {
   Download,
   EyeOff,
   FolderOpen,
+  FolderPen,
   Globe,
   GraduationCap,
   Hash,

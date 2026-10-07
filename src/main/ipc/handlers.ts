@@ -1,4 +1,13 @@
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  type MessageBoxOptions,
+  type OpenDialogOptions
+} from 'electron'
 import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -6,6 +15,7 @@ import type {
   FlashcardAnswerRequest,
   FlashcardCardState,
   FlashcardsDeckMastery,
+  FlashcardsDecksFolderView,
   FlashcardsLlmPromptView,
   SearchRequest,
   PaletteItem,
@@ -526,6 +536,64 @@ export function registerIpcHandlers(): void {
     'flashcards:reset-deck',
     async (_e, deckId: string): Promise<void> => {
       flashcardsStore.clearDeck(deckId)
+    }
+  )
+
+  // Flashcards — decks folder: show it, pick another one (Dropbox etc.),
+  // or go back to the default under userData.
+  ipcMain.handle(
+    'flashcards:get-decks-folder',
+    async (): Promise<FlashcardsDecksFolderView> => flashcardsService.decksFolderView()
+  )
+
+  ipcMain.handle(
+    'flashcards:choose-decks-folder',
+    async (): Promise<FlashcardsDecksFolderView | null> => {
+      const current = flashcardsService.decksFolder()
+      const win = settingsWindow.getBrowserWindow()
+      const options: OpenDialogOptions = {
+        title: 'Choose decks folder',
+        defaultPath: current,
+        properties: ['openDirectory', 'createDirectory']
+      }
+      const picked = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      const target = picked.filePaths[0]
+      if (picked.canceled || !target) return null
+      if (path.relative(current, target) === '') return flashcardsService.decksFolderView()
+
+      // The new folder has no decks of its own: offer to bring the current
+      // ones along. Copy, not move — the old folder stays as it was.
+      const existing = flashcardsService.deckFiles(current)
+      if (existing.length > 0 && flashcardsService.deckFiles(target).length === 0) {
+        const msg: MessageBoxOptions = {
+          type: 'question',
+          title: 'Decks folder',
+          message: `Copy your ${existing.length} ${existing.length === 1 ? 'deck' : 'decks'} to the new folder?`,
+          detail: `${target}\n\nThe current folder is left as it is. Review history carries over for decks that keep their file names.`,
+          buttons: ['Copy decks', 'Start empty', 'Cancel'],
+          defaultId: 0,
+          cancelId: 2,
+          noLink: true
+        }
+        const { response } = win
+          ? await dialog.showMessageBox(win, msg)
+          : await dialog.showMessageBox(msg)
+        if (response === 2) return null
+        if (response === 0) flashcardsService.copyDecks(current, target)
+      }
+
+      flashcardsService.setDecksFolder(target)
+      return flashcardsService.decksFolderView()
+    }
+  )
+
+  ipcMain.handle(
+    'flashcards:reset-decks-folder',
+    async (): Promise<FlashcardsDecksFolderView> => {
+      flashcardsService.setDecksFolder(null)
+      return flashcardsService.decksFolderView()
     }
   )
 

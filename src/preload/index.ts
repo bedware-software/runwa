@@ -6,6 +6,7 @@ import type {
   FlashcardAnswerRequest,
   FlashcardCardState,
   FlashcardsDeckMastery,
+  FlashcardsDecksFolderView,
   FlashcardsLlmPromptView,
   FlashcardsStartQuizPayload,
   KeyboardRemapRulesView,
@@ -171,6 +172,12 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('flashcards:get-deck-mastery', deckId),
   flashcardsResetDeck: (deckId: string): Promise<void> =>
     ipcRenderer.invoke('flashcards:reset-deck', deckId),
+  flashcardsGetDecksFolder: (): Promise<FlashcardsDecksFolderView> =>
+    ipcRenderer.invoke('flashcards:get-decks-folder'),
+  flashcardsChooseDecksFolder: (): Promise<FlashcardsDecksFolderView | null> =>
+    ipcRenderer.invoke('flashcards:choose-decks-folder'),
+  flashcardsResetDecksFolder: (): Promise<FlashcardsDecksFolderView> =>
+    ipcRenderer.invoke('flashcards:reset-decks-folder'),
 
   // Auto-update: trigger a check + poll current state. Push updates
   // stream over the `app:update-status` channel via the subscription
