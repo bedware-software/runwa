@@ -5,7 +5,9 @@
 #   scripts/prod-iter.sh [commit message]
 #
 # The order is deliberate. Commit first: the husky pre-commit hook bumps the patch version,
-# and that number is the only way to tell the new build from the old one. Build while Runwa
+# which is how a new build tells itself apart from the old one. The build also carries the
+# commit it was made from (scripts/build-commit.mjs), so a clean tree still rebuilds when the
+# installed app shares the version but not the commit, e.g. after a rebase. Build while Runwa
 # keeps running (the build only writes to out/ and release/). Stop it only for the few
 # seconds the install takes. Push last, once the new build is running.
 #
@@ -19,6 +21,7 @@ step() { print "\n\e[1m==> $*\e[0m" }
 die()  { print -u2 "\e[31mprod-iter: $*\e[0m"; exit 1 }
 pkg_version() { node -p "require('./package.json').version" }
 bundle_version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" }
+bundle_commit() { node scripts/build-commit.mjs "$1/Contents/Resources/app.asar" }
 runwa_running() { pgrep -x Runwa >/dev/null }
 
 # pgrep -x Runwa matches only the app's main process: helpers are "Runwa Helper ...",
@@ -37,12 +40,18 @@ step "1/7 Commit"
 old_version=$(pkg_version)
 if [[ -z $(git status --porcelain) ]]; then
   installed=$([[ -d $app ]] && bundle_version $app || print none)
-  # A clean tree still has something to ship when the last commit (and its version bump)
-  # never made it into /Applications.
-  if [[ $installed == $old_version ]]; then
-    print "Working tree is clean and $app is already $old_version."
+  installed_commit=$(bundle_commit $app)
+  head=$(git rev-parse HEAD)
+  # A clean tree still has something to ship when the last commit never made it into
+  # /Applications: either its version bump didn't, or the commit itself didn't (a rebase onto
+  # a commit that made the same bump elsewhere leaves the version as it was).
+  if [[ $installed == $old_version && $installed_commit == $head ]]; then
+    print "Working tree is clean and $app is already $old_version (${head[1,7]})."
     [[ -t 0 ]] && read -q "?Rebuild and reinstall $old_version anyway? [y/N] " || { print; exit 0 }
     print
+  elif [[ $installed == $old_version ]]; then
+    print "Working tree is clean, $app is $old_version but built from" \
+      "${${installed_commit[1,7]}:-an unrecorded commit}, shipping ${head[1,7]}."
   else
     print "Working tree is clean, shipping $old_version over the installed $installed."
   fi
@@ -59,23 +68,26 @@ else
     die "the pre-commit hook did not bump the version (still $version). Is husky installed? Run npm install."
   print "$old_version -> $version"
 fi
+commit=$(git rev-parse HEAD)
 
 step "2/7 Build $version for $arch (Runwa keeps running)"
 # Only this Mac's .app: without --<arch> --dir electron-builder also packs a dmg and a zip for
 # both architectures. The Rust addon is built universal either way, and dist:mac rebuilds it
 # from scratch, so there is no separate build:native step.
-npm run dist:mac -- --$arch --dir
+npm run dist:mac -- --$arch --dir -c.extraMetadata.gitCommit=$commit
 
 step "3/7 Check build output"
 [[ -d $built ]] || die "$built not found, did the build fail?"
 built_version=$(bundle_version $built)
 [[ $built_version == $version ]] || die "$built is $built_version, expected $version"
+built_commit=$(bundle_commit $built)
+[[ $built_commit == $commit ]] || die "$built is stamped ${built_commit:-with no commit}, expected $commit"
 # The Accessibility / Input Monitoring grants survive the swap only because
 # scripts/mac-after-sign.mjs pins the designated requirement to the bundle id. A
 # cdhash-bound one would quietly cost every grant, so refuse it while the old app still runs.
 codesign -d -r- $built 2>/dev/null | grep -q '^designated => identifier "dev.dmitr.runwa"' ||
   die "$built lacks the identifier-based designated requirement, did scripts/mac-after-sign.mjs run?"
-print "$built is $built_version"
+print "$built is $built_version (${commit[1,7]})"
 
 step "4/7 Stop Runwa"
 if runwa_running; then
@@ -110,6 +122,7 @@ rm -rf ${parked:h}
 step "6/7 Relaunch"
 installed=$(bundle_version $app)
 [[ $installed == $version ]] || die "the installed app reports $installed, expected $version"
+[[ $(bundle_commit $app) == $commit ]] || die "the installed app is not stamped with $commit"
 open $app
 for i in {1..50}; do runwa_running && break; sleep 0.1; done
 runwa_running || die "Runwa did not start, check $log"

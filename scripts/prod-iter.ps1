@@ -4,7 +4,9 @@
 #   scripts\prod-iter.ps1 [commit message]
 #
 # The order is deliberate. Commit first: the husky pre-commit hook bumps the patch version,
-# and that number is the only way to tell the new build from the old one. Build while Runwa
+# which is how a new build tells itself apart from the old one. The build also carries the
+# commit it was made from (scripts/build-commit.mjs), so a clean tree still rebuilds when the
+# installed app shares the version but not the commit, e.g. after a rebase. Build while Runwa
 # keeps running (the build only writes to out\ and release\). Stop it only for the few
 # seconds the install takes. Push last, once the new build is running.
 #
@@ -34,6 +36,14 @@ function Get-PkgVersion { (Get-Content package.json -Raw | ConvertFrom-Json).ver
 function Get-ExeVersion($Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return 'none' }
   (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion -replace '^(\d+\.\d+\.\d+)\.0$', '$1'
+}
+
+# The commit prod-iter stamped into the app next to $Exe, or '' for none (see build-commit.mjs).
+function Get-ExeCommit($Exe) {
+  $archive = Join-Path (Split-Path $Exe -Parent) 'resources\app.asar'
+  $commit = node scripts/build-commit.mjs $archive
+  if ($LASTEXITCODE -ne 0) { throw "reading the build commit from $archive failed" }
+  "$commit".Trim()
 }
 
 function Test-Elevated {
@@ -69,13 +79,19 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'git status failed' }
   if (-not $status) {
     $installed = Get-ExeVersion $exe
-    # A clean tree still has something to ship when the last commit (and its version bump)
-    # never made it into the install.
-    if ($installed -eq $oldVersion) {
-      Write-Host "Working tree is clean and $exe is already $oldVersion."
+    $installedCommit = Get-ExeCommit $exe
+    $head = (git rev-parse HEAD).Trim()
+    # A clean tree still has something to ship when the last commit never made it into the
+    # install: either its version bump didn't, or the commit itself didn't (a rebase onto a
+    # commit that made the same bump elsewhere leaves the version as it was).
+    if ($installed -eq $oldVersion -and $installedCommit -eq $head) {
+      Write-Host "Working tree is clean and $exe is already $oldVersion ($($head.Substring(0, 7)))."
       if ([Console]::IsInputRedirected) { return }
       $answer = Read-Host "Rebuild and reinstall $oldVersion anyway? [y/N]"
       if ($answer -notmatch '^[yY]') { return }
+    } elseif ($installed -eq $oldVersion) {
+      $from = if ($installedCommit) { $installedCommit.Substring(0, 7) } else { 'an unrecorded commit' }
+      Write-Host "Working tree is clean, $exe is $oldVersion but built from $from, shipping $($head.Substring(0, 7))."
     } else {
       Write-Host "Working tree is clean, shipping $oldVersion over the installed $installed."
     }
@@ -94,6 +110,7 @@ try {
     }
     Write-Host "$oldVersion -> $version"
   }
+  $commit = (git rev-parse HEAD).Trim()
 
   Step "2/7 Build $version (Runwa keeps running)"
   # dist:win rebuilds the Rust addon from scratch, so there is no separate build:native step.
@@ -102,7 +119,8 @@ try {
   # pack and read as if signing were the slow part, so drop them and say what is running.
   $signing = $env:CSC_LINK -or $env:WIN_CSC_LINK
   Invoke-Checked {
-    npm run dist:win 2>&1 | ForEach-Object {
+    # Quoted '--': PowerShell drops a bare one when npm resolves to the npm.ps1 shim.
+    npm run dist:win '--' "-c.extraMetadata.gitCommit=$commit" 2>&1 | ForEach-Object {
       $line = "$_"
       if (-not $signing -and $line -match 'signing with signtool\.exe') { return }
       Write-Host $line
@@ -116,7 +134,12 @@ try {
   # electron-builder.yml: artifactName ${productName}-${version}-setup.${ext}
   $installer = Join-Path $repo "release\Runwa-$version-setup.exe"
   if (-not (Test-Path -LiteralPath $installer)) { throw "$installer not found, did the build fail?" }
-  Write-Host $installer
+  # The installer packs release\win-unpacked, so its stamp is the installer's.
+  $builtCommit = Get-ExeCommit (Join-Path $repo 'release\win-unpacked\Runwa.exe')
+  if ($builtCommit -ne $commit) {
+    throw "the build is stamped $(if ($builtCommit) { $builtCommit } else { 'with no commit' }), expected $commit"
+  }
+  Write-Host "$installer ($($commit.Substring(0, 7)))"
 
   Step '4/7 Stop Runwa'
   if (Get-Process Runwa -ErrorAction SilentlyContinue) {
@@ -148,6 +171,7 @@ try {
   if (-not (Test-Path -LiteralPath $exe)) { throw "$exe not found after install" }
   $installed = Get-ExeVersion $exe
   if ($installed -ne $version) { throw "the installed app reports $installed, expected $version" }
+  if ((Get-ExeCommit $exe) -ne $commit) { throw "the installed app is not stamped with $commit" }
   # Inherits this shell's token: elevated here means elevated Runwa, and a non-elevated shell
   # gets the usual UAC prompt when "Run as administrator" is on.
   Start-Process -FilePath $exe
