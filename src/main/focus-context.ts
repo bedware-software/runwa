@@ -95,6 +95,11 @@ class FocusContext {
     this.resolved = undefined
   }
 
+  /** The raw id of the window behind the palette, without resolving it. */
+  getWindowId(): string | null {
+    return this.windowId
+  }
+
   /** The app behind the palette, or null when it can't be identified. */
   get(): FocusedApp | null {
     if (this.resolved !== undefined) return this.resolved

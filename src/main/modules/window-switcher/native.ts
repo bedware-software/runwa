@@ -41,6 +41,7 @@ export interface NativeWindowIcon {
 interface NativeAddon {
   listWindows(currentDesktopOnly: boolean, hideSystemWindows: boolean): NativeWindow[]
   focusWindow(id: string): boolean
+  focusWindowAsync(id: string): Promise<boolean>
   closeWindow(id: string): boolean
   getForegroundWindow(): string
   forceForegroundWindow(id: string): boolean
@@ -114,6 +115,17 @@ export function listWindowsCached(
 
 export function focusWindow(id: string): boolean {
   return loadAddon().focusWindow(id)
+}
+
+/**
+ * `focusWindow` off the main thread. A cross-Space focus on macOS waits out
+ * the Space-switch animation inside the native call; run synchronously, that
+ * freezes the main process — palette hide included — for the whole switch.
+ * Windows callers stay on `focusWindow`: SetForegroundWindow's foreground
+ * lock depends on the calling thread.
+ */
+export function focusWindowAsync(id: string): Promise<boolean> {
+  return loadAddon().focusWindowAsync(id)
 }
 
 /**

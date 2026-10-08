@@ -4,9 +4,13 @@ import type { PaletteModule } from '../types'
 import {
   listWindowsCached,
   focusWindow as nativeFocus,
+  focusWindowAsync,
   invalidateCache,
   type NativeWindow
 } from './native'
+import { recordFocusedWindow, sortByRecency, startRecencyTracking } from './recency'
+import { focusContext } from '../../focus-context'
+import { paletteWindow } from '../../palette-window'
 import {
   getIconDataUrlSync,
   getWindowIconDataUrl,
@@ -75,6 +79,7 @@ function isFocusAction(a: unknown): a is FocusAction {
 
 export function createWindowSwitcherModule(): PaletteModule {
   const ownPid = process.pid
+  startRecencyTracking()
 
   const toItem = (
     w: NativeWindow,
@@ -129,6 +134,14 @@ export function createWindowSwitcherModule(): PaletteModule {
       // the list reflects the current state of the desktop.
       if (query === '') invalidateCache()
 
+      // macOS all-Spaces mode orders by our own recency record (see
+      // recency.ts); the window the user opened the palette from is the
+      // most recent one by definition, even if no notification said so.
+      const orderByRecency = process.platform === 'darwin' && !currentDesktopOnly
+      if (orderByRecency && query === '') {
+        recordFocusedWindow(focusContext.getWindowId())
+      }
+
       // Title fallback: CGWindowList (both current-Space and all-Spaces
       // paths on macOS) returns blank `title` when Screen Recording
       // permission is absent. Fall back to the process name so the list
@@ -149,7 +162,8 @@ export function createWindowSwitcherModule(): PaletteModule {
       const ignoreRules = windowIgnoreStore.listForMatching()
 
       const seen = new Set<string>()
-      const all = listWindowsCached(currentDesktopOnly, hideSystemWindows)
+      const listed = listWindowsCached(currentDesktopOnly, hideSystemWindows)
+      const all = (orderByRecency ? sortByRecency(listed) : listed)
         .filter((w) => w.pid !== ownPid)
         .map((w) => {
           const trimmed = w.title.trim()
@@ -257,8 +271,28 @@ export function createWindowSwitcherModule(): PaletteModule {
         console.warn('[window-switcher] invalid action', item)
         return { dismissPalette: false }
       }
+      const { nativeId } = item.action
+
+      if (process.platform === 'darwin') {
+        // Hide first, then focus off the main thread. Focusing a window on
+        // another Space switches Spaces and waits out the animation; done
+        // the other way round, the palette (visible on all Spaces) rides
+        // along to the new desktop and only then disappears. App launches
+        // already behave this way — `open` returns before the app comes up.
+        recordFocusedWindow(nativeId)
+        paletteWindow.hide()
+        focusWindowAsync(nativeId)
+          .then((ok) => {
+            if (!ok) invalidateCache()
+          })
+          .catch((err) => console.warn('[window-switcher] focus failed', err))
+        // Already hidden; a second hide from the IPC handler is a no-op at
+        // best.
+        return { dismissPalette: false }
+      }
+
       try {
-        const ok = nativeFocus(item.action.nativeId)
+        const ok = nativeFocus(nativeId)
         if (!ok) {
           // Window probably disappeared between listing and focus. Invalidate
           // cache so the next search reflects the new state.

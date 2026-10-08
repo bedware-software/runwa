@@ -85,6 +85,34 @@ pub fn focus_window(id: String) -> napi::Result<bool> {
     }
 }
 
+pub struct FocusWindowTask {
+    id: String,
+}
+
+impl napi::Task for FocusWindowTask {
+    type Output = bool;
+    type JsValue = bool;
+
+    fn compute(&mut self) -> napi::Result<bool> {
+        focus_window(std::mem::take(&mut self.id))
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: bool) -> napi::Result<bool> {
+        Ok(output)
+    }
+}
+
+/// `focus_window` on a libuv worker thread. On macOS a cross-Space focus
+/// spawns `osascript` and then sleeps through the Space-switch animation
+/// before raising the window — ~0.5 s that, run on the main thread, keeps
+/// Electron from even hiding the palette until the switch is over. Windows
+/// keeps the synchronous call: SetForegroundWindow's foreground-lock rules
+/// care which thread asks.
+#[napi]
+pub fn focus_window_async(id: String) -> napi::bindgen_prelude::AsyncTask<FocusWindowTask> {
+    napi::bindgen_prelude::AsyncTask::new(FocusWindowTask { id })
+}
+
 /// Ask a window to close — equivalent to clicking its close button.
 /// Windows posts `WM_CLOSE`; macOS presses the AX close button (requires
 /// Accessibility permission). The owning app keeps full control: it may
