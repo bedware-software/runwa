@@ -15,7 +15,8 @@ import { getForegroundWindow } from './native'
  *  - app activation and Space changes (NSWorkspace notifications) record the
  *    window that is now in front;
  *  - the palette's own open records the window the user came from;
- *  - the switcher records the window it focuses.
+ *  - the switcher records the window it focuses, and nothing in between
+ *    (see `recordSwitcherFocus`).
  * Windows we never saw in front fall back to CGWindowList order behind the
  * ones we did.
  */
@@ -32,6 +33,31 @@ export function recordFocusedWindow(id: string | null | undefined): void {
   if (index > 0) order.splice(index, 1)
   order.unshift(id)
   if (order.length > MAX_TRACKED) order.length = MAX_TRACKED
+}
+
+/** Switcher focuses still running; see `recordSwitcherFocus`. */
+let focusesInFlight = 0
+
+/**
+ * Record a focus the switcher itself performs, and keep its intermediate
+ * states out of the record. Focusing a back window of an app on another
+ * Space first activates the app, which brings the app's *front* window
+ * forward and fires the activation and Space-change notifications; only then
+ * does the native side raise the chosen window. Recorded as-is, that
+ * transient front window would land between the chosen window and the one
+ * the user came from, and the double-press would bounce to it.
+ */
+export function recordSwitcherFocus(id: string, focus: Promise<boolean>): void {
+  recordFocusedWindow(id)
+  focusesInFlight++
+  void focus
+    .then((ok) => {
+      if (ok) recordFocusedWindow(id)
+    })
+    .catch(() => {})
+    .finally(() => {
+      focusesInFlight--
+    })
 }
 
 /** Stable sort: recorded windows first in recency order, the rest after in
@@ -51,6 +77,7 @@ export function startRecencyTracking(): void {
   tracking = true
 
   const recordFront = (): void => {
+    if (focusesInFlight > 0) return
     try {
       recordFocusedWindow(getForegroundWindow())
     } catch (err) {

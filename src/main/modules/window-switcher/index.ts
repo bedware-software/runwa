@@ -8,7 +8,12 @@ import {
   invalidateCache,
   type NativeWindow
 } from './native'
-import { recordFocusedWindow, sortByRecency, startRecencyTracking } from './recency'
+import {
+  recordFocusedWindow,
+  recordSwitcherFocus,
+  sortByRecency,
+  startRecencyTracking
+} from './recency'
 import { focusContext } from '../../focus-context'
 import { paletteWindow } from '../../palette-window'
 import {
@@ -279,9 +284,10 @@ export function createWindowSwitcherModule(): PaletteModule {
         // the other way round, the palette (visible on all Spaces) rides
         // along to the new desktop and only then disappears. App launches
         // already behave this way — `open` returns before the app comes up.
-        recordFocusedWindow(nativeId)
         paletteWindow.hide()
-        focusWindowAsync(nativeId)
+        const focus = focusWindowAsync(nativeId)
+        recordSwitcherFocus(nativeId, focus)
+        focus
           .then((ok) => {
             if (!ok) invalidateCache()
           })
