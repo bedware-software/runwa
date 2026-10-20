@@ -7,13 +7,11 @@
 //     is how `yabai`, Rectangle, etc. get a fast, accurate window list scoped
 //     to the active macOS Space.
 //
-//  2. All Spaces — uses the Accessibility (AX) API. AX queries each process's
-//     own window list (via `AXUIElementCopyAttributeValue` on `AXWindows`) so
-//     it sees windows on every Space without relying on private CGS SPIs. The
-//     same approach Hammerspoon / yabai / Rectangle use. Requires the user
-//     to grant Accessibility permission (System Settings → Privacy & Security
-//     → Accessibility); without it the AX calls return empty, which the TS
-//     side detects via `is_accessibility_trusted()` and surfaces as a prompt.
+//  2. All Spaces — CGWindowListCopyWindowInfo without OnScreenOnly, which
+//     reports windows on every Space but also ones nobody can see; SkyLight
+//     tells the two apart (see `is_window_reachable`). AX only answers for
+//     windows on the active Space, so it's used for raising, not listing —
+//     see `list_windows_all_spaces`.
 //
 // Two focus paths:
 //
@@ -341,9 +339,13 @@ extern "C" {
 // the user carry a tag instead. A minimized window sits in the Dock, and an
 // app hidden with Cmd+H tags the windows that unhiding brings back.
 //
+// Known gap: an app launched hidden (`open -j`, relaunched hidden at login)
+// queues the windows it shows until it is unhidden, and those carry no tag —
+// WindowServer reports them exactly like the junk above, so they're dropped.
+//
 // Resolved with dlsym rather than linked, so an OS that drops or renames the
 // symbols degrades to the unfiltered list instead of failing to load the
-// addon. yabai, AltTab and Hammerspoon lean on the same SPI.
+// addon. yabai and rift read the same ordered-in state and tag bits.
 
 extern "C" {
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
@@ -358,11 +360,15 @@ const WINDOW_TAG_MINIMIZED: u64 = 1 << 60;
 /// Tag set on each window that was shown when its app was hidden (Cmd+H).
 const WINDOW_TAG_HIDDEN_WITH_APP: u64 = 1 << 39;
 
+type SlsMainConnectionId = unsafe extern "C" fn() -> c_int;
+type SlsWindowIsOrderedIn = unsafe extern "C" fn(c_int, u32, *mut u8) -> c_int;
+/// The size argument is in bits: 64 fills exactly one `u64`.
+type SlsGetWindowTags = unsafe extern "C" fn(c_int, u32, *mut u64, c_int) -> c_int;
+
 struct SkyLight {
     connection: c_int,
-    window_is_ordered_in: unsafe extern "C" fn(c_int, u32, *mut u8) -> c_int,
-    /// The size argument is in bits: 64 fills exactly one `u64`.
-    get_window_tags: unsafe extern "C" fn(c_int, u32, *mut u64, c_int) -> c_int,
+    window_is_ordered_in: SlsWindowIsOrderedIn,
+    get_window_tags: SlsGetWindowTags,
 }
 
 static SKYLIGHT: LazyLock<Option<SkyLight>> = LazyLock::new(|| unsafe {
@@ -380,18 +386,22 @@ static SKYLIGHT: LazyLock<Option<SkyLight>> = LazyLock::new(|| unsafe {
     {
         return None;
     }
-    let main_connection_id: unsafe extern "C" fn() -> c_int =
-        std::mem::transmute(main_connection_id);
+    let main_connection_id =
+        std::mem::transmute::<*mut c_void, SlsMainConnectionId>(main_connection_id);
     Some(SkyLight {
         connection: main_connection_id(),
-        window_is_ordered_in: std::mem::transmute(window_is_ordered_in),
-        get_window_tags: std::mem::transmute(get_window_tags),
+        window_is_ordered_in: std::mem::transmute::<*mut c_void, SlsWindowIsOrderedIn>(
+            window_is_ordered_in,
+        ),
+        get_window_tags: std::mem::transmute::<*mut c_void, SlsGetWindowTags>(get_window_tags),
     })
 });
 
 /// False for a window nobody can see or bring back: ordered out without
-/// being minimized or hidden along with its app. True whenever SkyLight can't
-/// answer, which keeps the window listed as before.
+/// being minimized or hidden along with its app. A window SkyLight no longer
+/// knows (closed since the CGWindowList snapshot) reads as ordered out with no
+/// tags, so it's dropped too. True when SkyLight isn't available or reports an
+/// error, which keeps the window listed as before.
 fn is_window_reachable(wid: u32) -> bool {
     let Some(sls) = SKYLIGHT.as_ref() else {
         return true;
@@ -518,6 +528,11 @@ fn list_windows_all_spaces(hide_system_windows: bool) -> napi::Result<Vec<Native
         // whose windows all have blank titles (apps that legitimately don't
         // set window titles — some Electron apps, low-level frameworks),
         // we leave everything alone.
+        //
+        // Only reachable titled windows count. A titled window the app hid
+        // (a Settings window kept for reuse) is dropped below; counting it
+        // here would also drop the app's real blank-title window, leaving
+        // the app with no row at all.
         let mut pids_with_titled_windows: HashSet<u32> = HashSet::new();
         if hide_system_windows {
             for i in 0..count {
@@ -534,7 +549,12 @@ fn list_windows_all_spaces(hide_system_windows: bool) -> napi::Result<Vec<Native
                 };
                 let title_probe = cf_dict_get_string(dict_ptr, key_name.as_concrete_TypeRef())
                     .unwrap_or_default();
-                if !title_probe.trim().is_empty() {
+                if title_probe.trim().is_empty() {
+                    continue;
+                }
+                let wid_probe =
+                    cf_dict_get_i64(dict_ptr, key_number.as_concrete_TypeRef()).unwrap_or(0);
+                if is_window_reachable(wid_probe as u32) {
                     pids_with_titled_windows.insert(pid_val);
                 }
             }
