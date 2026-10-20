@@ -43,7 +43,7 @@ use core_graphics::window::{
     CGWindowListCopyWindowInfo,
 };
 use std::collections::{HashMap, HashSet};
-use std::os::raw::{c_int, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 use std::process::Command;
 use std::sync::{LazyLock, Mutex};
 
@@ -325,6 +325,93 @@ extern "C" {
     fn CGRequestScreenCaptureAccess() -> u8;
 }
 
+// ─── WindowServer window state via SkyLight ─────────────────────────────────
+//
+// CGWindowList without `OnScreenOnly` reports every window WindowServer holds,
+// and `kCGWindowIsOnscreen` can't tell a window parked on another Space from
+// one nobody can see at all: both answer false. Apps keep plenty of the
+// latter: windows hidden with `orderOut:` (Qt's `hide()`, a closed
+// Preferences window kept for reuse) and windows created but never shown.
+// Ulanzi Studio holds three "Ulanzi Studio" windows with only one of them on
+// screen.
+//
+// SkyLight, the private framework behind CoreGraphics' window server calls,
+// answers it: `SLSWindowIsOrderedIn` holds for a shown window on any Space,
+// including inactive ones. Windows that are ordered out yet still belong to
+// the user carry a tag instead. A minimized window sits in the Dock, and an
+// app hidden with Cmd+H tags the windows that unhiding brings back.
+//
+// Resolved with dlsym rather than linked, so an OS that drops or renames the
+// symbols degrades to the unfiltered list instead of failing to load the
+// addon. yabai, AltTab and Hammerspoon lean on the same SPI.
+
+extern "C" {
+    fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
+
+const RTLD_LAZY: c_int = 0x1;
+const RTLD_LOCAL: c_int = 0x4;
+
+/// Tag set on a minimized window.
+const WINDOW_TAG_MINIMIZED: u64 = 1 << 60;
+/// Tag set on each window that was shown when its app was hidden (Cmd+H).
+const WINDOW_TAG_HIDDEN_WITH_APP: u64 = 1 << 39;
+
+struct SkyLight {
+    connection: c_int,
+    window_is_ordered_in: unsafe extern "C" fn(c_int, u32, *mut u8) -> c_int,
+    /// The size argument is in bits: 64 fills exactly one `u64`.
+    get_window_tags: unsafe extern "C" fn(c_int, u32, *mut u64, c_int) -> c_int,
+}
+
+static SKYLIGHT: LazyLock<Option<SkyLight>> = LazyLock::new(|| unsafe {
+    let handle = dlopen(
+        c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight".as_ptr(),
+        RTLD_LAZY | RTLD_LOCAL,
+    );
+    if handle.is_null() {
+        return None;
+    }
+    let main_connection_id = dlsym(handle, c"SLSMainConnectionID".as_ptr());
+    let window_is_ordered_in = dlsym(handle, c"SLSWindowIsOrderedIn".as_ptr());
+    let get_window_tags = dlsym(handle, c"SLSGetWindowTags".as_ptr());
+    if main_connection_id.is_null() || window_is_ordered_in.is_null() || get_window_tags.is_null()
+    {
+        return None;
+    }
+    let main_connection_id: unsafe extern "C" fn() -> c_int =
+        std::mem::transmute(main_connection_id);
+    Some(SkyLight {
+        connection: main_connection_id(),
+        window_is_ordered_in: std::mem::transmute(window_is_ordered_in),
+        get_window_tags: std::mem::transmute(get_window_tags),
+    })
+});
+
+/// False for a window nobody can see or bring back: ordered out without
+/// being minimized or hidden along with its app. True whenever SkyLight can't
+/// answer, which keeps the window listed as before.
+fn is_window_reachable(wid: u32) -> bool {
+    let Some(sls) = SKYLIGHT.as_ref() else {
+        return true;
+    };
+    unsafe {
+        let mut ordered_in: u8 = 0;
+        if (sls.window_is_ordered_in)(sls.connection, wid, &mut ordered_in) != 0 {
+            return true;
+        }
+        if ordered_in != 0 {
+            return true;
+        }
+        let mut tags: u64 = 0;
+        if (sls.get_window_tags)(sls.connection, wid, &mut tags, 64) != 0 {
+            return true;
+        }
+        tags & (WINDOW_TAG_MINIMIZED | WINDOW_TAG_HIDDEN_WITH_APP) != 0
+    }
+}
+
 /// RAII wrapper around an owned AX reference — CFReleases on drop. AX
 /// elements are CFTypes, so the release call is the same as for any Core
 /// Foundation value. Marked Send so we can stash them in a `Mutex<HashMap>`
@@ -554,6 +641,13 @@ fn list_windows_all_spaces(hide_system_windows: bool) -> napi::Result<Vec<Native
                 // phantoms. Apps with no real-titled windows anywhere (e.g.
                 // Newbro, which just doesn't set titles) fall through untouched.
                 if title.trim().is_empty() && pids_with_titled_windows.contains(&pid) {
+                    continue;
+                }
+
+                // Windows the app holds but nobody can see: hidden with
+                // `orderOut:` or never shown. Each one listed as a duplicate
+                // of the app's real window (see `is_window_reachable`).
+                if !is_window_reachable(win_id as u32) {
                     continue;
                 }
             }
