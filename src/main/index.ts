@@ -15,6 +15,7 @@ import { cleanupStaleCapsLockRemap } from './modules/keyboard-remap/hidutil'
 import { hotstringService } from './modules/hotstrings/service'
 import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { autoDarkModeService } from './modules/auto-dark-mode/service'
+import { ulanziService } from './modules/ulanzi/service'
 import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
 import { fullscreenBypassStore } from './modules/keyboard-remap/fullscreen-bypass-store'
@@ -193,6 +194,9 @@ app.whenReady().then(async () => {
   // its Command Palette actions. Manual mode remains idle; Scheduled mode
   // reconciles immediately and then owns its local-time boundary timers.
   autoDarkModeService.start()
+  // Ulanzi watches Ulanzi Studio's log only while its module is enabled and
+  // follows the toggle live, like Auto Dark Mode.
+  ulanziService.start()
 
   // 6. IPC + settings broadcast
   registerIpcHandlers()
@@ -321,6 +325,13 @@ app.on('will-quit', () => {
     console.log('[shutdown] autoDarkModeService.stop OK')
   } catch (err) {
     console.warn('[shutdown] autoDarkModeService.stop threw:', err)
+  }
+  try {
+    console.log('[shutdown] ulanziService.stop…')
+    ulanziService.stop()
+    console.log('[shutdown] ulanziService.stop OK')
+  } catch (err) {
+    console.warn('[shutdown] ulanziService.stop threw:', err)
   }
   try {
     // Dispose the shared surface only after every service that can publish or

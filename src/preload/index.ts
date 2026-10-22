@@ -30,6 +30,7 @@ import type {
   UserCommandDraftPayload,
   ExecuteResult,
   UpdateStatus,
+  UlanziProfilesView,
   WindowIgnoreRule,
   WindowIgnoreScope
 } from '@shared/types'
@@ -135,6 +136,9 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:list'),
   keyboardRemapRemoveFullscreenBypass: (processName: string): Promise<string[]> =>
     ipcRenderer.invoke('keyboard-remap:fullscreen-bypass:remove', processName),
+
+  ulanziListProfiles: (): Promise<UlanziProfilesView> =>
+    ipcRenderer.invoke('ulanzi:list-profiles'),
 
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>

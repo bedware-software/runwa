@@ -15,8 +15,9 @@
 //
 // Two focus paths:
 //
-//  - CG-sourced ids ("{pid}:{win_number}") use osascript to activate the
-//    owning process — the existing current-Space behavior.
+//  - CG-sourced ids ("{pid}:{win_number}") front just that window through
+//    SkyLight (see `front_single_window`), falling back to osascript, which
+//    activates the owning process with all of its windows; then AXRaise.
 //  - AX-sourced ids ("ax:{cache_key}") use AX directly: set kAXFrontmostAttribute
 //    on the app element (brings it forward, switches Space if cross-Space),
 //    then perform kAXRaiseAction on the window element (raises that specific
@@ -422,6 +423,106 @@ fn is_window_reachable(wid: u32) -> bool {
     }
 }
 
+// ─── Fronting a single window via SkyLight ──────────────────────────────────
+//
+// Activating an app the public way — `set frontmost` through System Events,
+// `SetFrontProcess` — brings *every* window of the app in front of everything
+// else, the way a Dock click does. Picking one of two IntelliJ windows over a
+// terminal left the other IntelliJ window between it and the terminal, and
+// the double-press quick switch bounced there instead of back.
+//
+// WindowServer can front a process by one window instead, which is what a
+// click on that window does: `_SLPSSetFrontProcessWithOptions` with the window
+// id and the user-generated mode orders in only that window (switching Spaces
+// when it lives on another one), and two synthetic event records make it the
+// key window so keystrokes land there. yabai and alt-tab-macos focus windows
+// the same way. Resolved with dlsym like the reachability calls above.
+
+/// `kCPSUserGenerated`: front only the given window, as a user click would.
+/// (`kCPSAllWindows`, 0x100, is the Dock-click behavior we're avoiding.)
+const CPS_USER_GENERATED: u32 = 0x200;
+
+#[repr(C)]
+#[derive(Default)]
+struct ProcessSerialNumber {
+    high: u32,
+    low: u32,
+}
+
+type GetProcessForPid = unsafe extern "C" fn(c_int, *mut ProcessSerialNumber) -> i32;
+type SlpsSetFrontProcessWithOptions =
+    unsafe extern "C" fn(*mut ProcessSerialNumber, u32, u32) -> c_int;
+type SlpsPostEventRecordTo = unsafe extern "C" fn(*mut ProcessSerialNumber, *mut u8) -> c_int;
+
+struct WindowFronting {
+    get_process_for_pid: GetProcessForPid,
+    set_front_process_with_options: SlpsSetFrontProcessWithOptions,
+    post_event_record_to: SlpsPostEventRecordTo,
+}
+
+static WINDOW_FRONTING: LazyLock<Option<WindowFronting>> = LazyLock::new(|| unsafe {
+    let skylight = dlopen(
+        c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight".as_ptr(),
+        RTLD_LAZY | RTLD_LOCAL,
+    );
+    // Deprecated Process Manager call, still the only PID → PSN route.
+    let app_services = dlopen(
+        c"/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices".as_ptr(),
+        RTLD_LAZY | RTLD_LOCAL,
+    );
+    if skylight.is_null() || app_services.is_null() {
+        return None;
+    }
+    let get_process_for_pid = dlsym(app_services, c"GetProcessForPID".as_ptr());
+    let set_front = dlsym(skylight, c"_SLPSSetFrontProcessWithOptions".as_ptr());
+    let post_event = dlsym(skylight, c"SLPSPostEventRecordTo".as_ptr());
+    if get_process_for_pid.is_null() || set_front.is_null() || post_event.is_null() {
+        return None;
+    }
+    Some(WindowFronting {
+        get_process_for_pid: std::mem::transmute::<*mut c_void, GetProcessForPid>(
+            get_process_for_pid,
+        ),
+        set_front_process_with_options: std::mem::transmute::<
+            *mut c_void,
+            SlpsSetFrontProcessWithOptions,
+        >(set_front),
+        post_event_record_to: std::mem::transmute::<*mut c_void, SlpsPostEventRecordTo>(
+            post_event,
+        ),
+    })
+});
+
+/// Bring `pid` forward with `wid` as its only window moved to the front and
+/// made key. False when SkyLight isn't available or refuses, so the caller can
+/// fall back to activating the whole app.
+fn front_single_window(pid: u32, wid: u32) -> bool {
+    let Some(sls) = WINDOW_FRONTING.as_ref() else {
+        return false;
+    };
+    unsafe {
+        let mut psn = ProcessSerialNumber::default();
+        if (sls.get_process_for_pid)(pid as c_int, &mut psn) != 0 {
+            return false;
+        }
+        if (sls.set_front_process_with_options)(&mut psn, wid, CPS_USER_GENERATED) != 0 {
+            return false;
+        }
+        // The key-window event record, as yabai builds it: the same record
+        // posted twice, with the event kind byte at 0x08 set to 1, then 2.
+        let mut record = [0u8; 0xf8];
+        record[0x04] = 0xf8;
+        record[0x3a] = 0x10;
+        record[0x20..0x30].fill(0xff);
+        record[0x3c..0x40].copy_from_slice(&wid.to_ne_bytes());
+        for kind in [0x01, 0x02] {
+            record[0x08] = kind;
+            (sls.post_event_record_to)(&mut psn, record.as_mut_ptr());
+        }
+        true
+    }
+}
+
 /// RAII wrapper around an owned AX reference — CFReleases on drop. AX
 /// elements are CFTypes, so the release call is the same as for any Core
 /// Foundation value. Marked Send so we can stash them in a `Mutex<HashMap>`
@@ -761,11 +862,16 @@ pub fn focus_window(id: &str) -> napi::Result<bool> {
     // silently overridden by macOS's own mid-switch window promotion.
     let cross_space = !pid_has_onscreen_window(pid);
 
-    // Step 1: activate the process via osascript. Brings the app forward
-    // (switching Spaces if needed) AND wakes it up enough that AX queries
-    // start answering — without activation first, AX returns
-    // `kAXErrorCannotComplete` for any app not already on the current Space.
-    let activated = osascript_activate_pid(pid)?;
+    // Step 1: bring the process forward (switching Spaces if needed), which
+    // also wakes it up enough that AX queries start answering — without it,
+    // AX returns `kAXErrorCannotComplete` for any app not already on the
+    // current Space. Front only the chosen window when SkyLight allows (see
+    // `front_single_window`); otherwise activate the whole app via osascript,
+    // which brings all of its windows in front of the one the user left.
+    let activated = match wid {
+        Some(wid) if front_single_window(pid, wid) => true,
+        _ => osascript_activate_pid(pid)?,
+    };
 
     // Step 2: precise raise via AX, matching by CGWindowID (not title —
     // Chromium-family apps rename windows async so AXTitle and

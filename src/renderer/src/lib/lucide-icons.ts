@@ -20,6 +20,7 @@ import Hash from 'lucide-react/dist/esm/icons/hash.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import Keyboard from 'lucide-react/dist/esm/icons/keyboard.js'
 import KeyboardOff from 'lucide-react/dist/esm/icons/keyboard-off.js'
+import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import Library from 'lucide-react/dist/esm/icons/library.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-circle.js'
 import Maximize2 from 'lucide-react/dist/esm/icons/maximize-2.js'
@@ -59,6 +60,7 @@ const ICONS_BY_HINT = {
   info: Info,
   keyboard: Keyboard,
   'keyboard-off': KeyboardOff,
+  layers: Layers,
   library: Library,
   'maximize-2': Maximize2,
   mic: Mic,

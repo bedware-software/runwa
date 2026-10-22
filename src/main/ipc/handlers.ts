@@ -47,6 +47,7 @@ import { userCommandsStore } from '../modules/user-commands/store'
 import { fullscreenBypassStore } from '../modules/keyboard-remap/fullscreen-bypass-store'
 import { windowIgnoreStore } from '../modules/window-switcher/ignore-store'
 import { qualityFromAnswer } from '../modules/flashcards/srs'
+import { listUlanziProfiles } from '../modules/ulanzi/profiles'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
@@ -455,6 +456,11 @@ export function registerIpcHandlers(): void {
       return processes
     }
   )
+
+  ipcMain.handle('ulanzi:list-profiles', async (event) => {
+    assertSenderWindow(event, settingsWindow.getBrowserWindow(), 'Ulanzi profiles')
+    return listUlanziProfiles()
+  })
 
   // Palette / settings window control
   ipcMain.handle('palette:hide', async () => {

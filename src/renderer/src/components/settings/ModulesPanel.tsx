@@ -9,11 +9,18 @@ import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
 import { PermissionSection } from './PermissionSection'
 import { UserCommandsSection } from './UserCommandsSection'
 import { AutoDarkModeSection } from './AutoDarkModeSection'
+import { UlanziSection } from './UlanziSection'
 import { WindowSwitcherIgnoreSection } from './WindowSwitcherIgnoreSection'
 
 interface Props {
   moduleId: string
 }
+
+/**
+ * Modules whose config fields are edited by a purpose-built section below
+ * instead of the generic field list.
+ */
+const CUSTOM_CONFIG_MODULE_IDS = new Set(['auto-dark-mode', 'ulanzi'])
 
 /**
  * Right-pane content for a single module. The sidebar already shows the
@@ -44,7 +51,7 @@ export function ModulePanel({ moduleId }: Props) {
         </div>
       )}
 
-      {module.enabled && module.id !== 'auto-dark-mode' && module.configFields && (() => {
+      {module.enabled && !CUSTOM_CONFIG_MODULE_IDS.has(module.id) && module.configFields && (() => {
         // Drop fields gated to other operating systems — e.g. App
         // Search's "Store / UWP apps" and "Desktop shortcuts" are
         // Windows-only enumeration sources and would just confuse a mac
@@ -109,6 +116,8 @@ export function ModulePanel({ moduleId }: Props) {
       {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
 
       {module.enabled && module.id === 'auto-dark-mode' && <AutoDarkModeSection />}
+
+      {module.enabled && module.id === 'ulanzi' && <UlanziSection />}
 
       {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
 

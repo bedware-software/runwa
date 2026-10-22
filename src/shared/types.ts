@@ -414,6 +414,23 @@ export interface RunningAppSummary {
  * only the rows literally titled "ktalk". A rule with both fields empty would
  * hide everything and is rejected.
  */
+/** One profile read from Ulanzi Studio's own profile manifests. */
+export interface UlanziProfileSummary {
+  name: string
+  /**
+   * The app the profile follows: a bundle/exe path, `default` for the
+   * fallback profile, or null when it follows no app — which is what makes
+   * it a mode profile for `auto`.
+   */
+  app: string | null
+}
+
+export interface UlanziProfilesView {
+  /** False when Ulanzi Studio's data folder does not exist. */
+  installed: boolean
+  profiles: UlanziProfileSummary[]
+}
+
 export interface WindowIgnoreRule {
   id: string
   title: string
@@ -838,6 +855,12 @@ export interface ElectronAPI {
   ) => Promise<boolean | null>
   keyboardRemapListFullscreenBypass: () => Promise<string[]>
   keyboardRemapRemoveFullscreenBypass: (processName: string) => Promise<string[]>
+
+  /**
+   * Ulanzi Studio's profiles, read from its own manifests, for the Ulanzi
+   * module's per-profile table. Settings-window only.
+   */
+  ulanziListProfiles: () => Promise<UlanziProfilesView>
 
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>

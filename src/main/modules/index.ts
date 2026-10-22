@@ -8,6 +8,7 @@ import { createHotstringsModule } from './hotstrings'
 import { createFlashcardsModule } from './flashcards'
 import { createUserCommandsModule } from './user-commands'
 import { createAutoDarkModeModule } from './auto-dark-mode'
+import { createUlanziModule } from './ulanzi'
 
 /**
  * Hard-coded module registration. Adding a new module is a one-file change:
@@ -18,7 +19,7 @@ import { createAutoDarkModeModule } from './auto-dark-mode'
  * settings sidebar show. User-facing launchers first (app-search,
  * window-switcher, command-palette), then the background services
  * (keyboard-remap, hotstrings), then settings-only / hotkey utilities
- * (user-commands, auto-dark-mode, groq-stt) in the Other group.
+ * (user-commands, auto-dark-mode, ulanzi, groq-stt) in the Other group.
  */
 export async function registerModules(): Promise<void> {
   // Instantiate the non-command-palette modules first so we can harvest
@@ -33,6 +34,7 @@ export async function registerModules(): Promise<void> {
   const hotstrings = createHotstringsModule()
   const groqStt = createGroqSttModule()
   const autoDarkMode = createAutoDarkModeModule()
+  const ulanzi = createUlanziModule()
 
   const otherModules = [
     appSearch,
@@ -42,6 +44,7 @@ export async function registerModules(): Promise<void> {
     keyboardRemap,
     hotstrings,
     autoDarkMode,
+    ulanzi,
     groqStt
   ].map((m) => ({
     id: m.manifest.id,
@@ -59,6 +62,7 @@ export async function registerModules(): Promise<void> {
   moduleRegistry.register(keyboardRemap)
   moduleRegistry.register(hotstrings)
   moduleRegistry.register(autoDarkMode)
+  moduleRegistry.register(ulanzi)
   moduleRegistry.register(groqStt)
   // Future: files, calculator, clipboard, web search, …
 }
