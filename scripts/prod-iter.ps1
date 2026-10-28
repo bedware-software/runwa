@@ -119,13 +119,18 @@ try {
   # pack and read as if signing were the slow part, so drop them and say what is running.
   $signing = $env:CSC_LINK -or $env:WIN_CSC_LINK
   Invoke-Checked {
+    # Windows PowerShell 5.1 turns each line a native command writes to a redirected stderr
+    # into an error record, and under 'Stop' the first one (cargo's "Removed N files") aborts
+    # the build. Scoped to this block; a failed build still throws on its exit code.
+    $ErrorActionPreference = 'Continue'
     # Quoted '--': PowerShell drops a bare one when npm resolves to the npm.ps1 shim.
     npm run dist:win '--' "-c.extraMetadata.gitCommit=$commit" 2>&1 | ForEach-Object {
       $line = "$_"
       if (-not $signing -and $line -match 'signing with signtool\.exe') { return }
       Write-Host $line
       if ($line -match 'building\s+target=nsis') {
-        Write-Host '  • compressing the app into the installer (~10 s); unsigned, no certificate configured'
+        # [char] keeps this file ASCII: 5.1 reads a BOM-less script in the ANSI code page.
+        Write-Host "  $([char]0x2022) compressing the app into the installer (~10 s); unsigned, no certificate configured"
       }
     }
   }
