@@ -102,6 +102,11 @@
  *
  *   A rule with keys: [any] + to_hotkey: [<modifier>] sets the
  *   fallback modifier for any <trigger>+X combo that has no explicit rule.
+ *   By default it is pressed only when that next key arrives, so a bare
+ *   hold sends nothing. Add `eager: true` (single modifier only) to press
+ *   it the moment the trigger goes down, like `on_hold: [ctrl]` — a bare
+ *   hold and mouse clicks then see the modifier; it is lifted around the
+ *   layer's explicit rules so they fire as written.
  *   Exact modifier match wins over generic and bare forms: if `[1]`,
  *   `[shift, 1]`, and `[right_shift, 1]` exist, Space+1 fires the first,
  *   Space+LeftShift+1 fires `[shift, 1]`, and Space+RightShift+1 fires
@@ -134,6 +139,11 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   app-search, command-palette, user-commands, flashcards.
 #                                   Also works as a tap: on_tap: { open_module: app-search }
 #   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
+#
+# keys: [any] + to_hotkey: [<modifier>] is the layer's fallback: unmapped keys get that
+# modifier, pressed when the next key arrives. Add `eager: true` to press it the moment
+# the trigger goes down instead (like on_hold: [ctrl], but with your own rules on top):
+#   - { keys: [any], to_hotkey: [ctrl], eager: true }
 
 # Global options. macos_switch_workspace_modifiers must match your macOS
 # Mission Control "Switch to Desktop N" shortcut. This template uses the

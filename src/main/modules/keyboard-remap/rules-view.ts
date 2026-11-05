@@ -197,6 +197,7 @@ function formatRuleAction(
         ? formatTokenList(toHotkey.map(String))
         : null
   if (hotkey && toggleCaps) return `${hotkey} + toggle CapsLock`
+  if (hotkey && entry['eager'] === true) return `${hotkey}, held from press`
   if (hotkey) return hotkey
   if (toggleCaps) return 'toggle CapsLock'
   return '?'

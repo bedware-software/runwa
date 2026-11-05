@@ -566,8 +566,11 @@ impl StateMachine {
                     //     deliberately: when the user holds Cmd and
                     //     taps Shift, we must NOT consume Shift —
                     //     they're reaching for Cmd+Shift+X.
-                    if !t.is_modifier() && matches!(b.on_hold, ResolvedHold::TransparentModifier(_))
-                    {
+                    //
+                    //     An explicit layer whose `[any]` rule is
+                    //     `eager: true` is the same CapsLock-as-Ctrl
+                    //     intent, so it takes this path too.
+                    if !t.is_modifier() && b.on_hold.eager_modifier().is_some() {
                         self.state = State::Pending {
                             trigger: t,
                             suppress_tap: true,
@@ -1190,6 +1193,94 @@ space:
         assert_eq!(
             m.on_event(up(LogicalKey::CapsLock)),
             emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
+        );
+    }
+
+    const CAPS_EAGER_ANY: &str = r#"
+capslock:
+  on_tap: [escape]
+  on_hold:
+    - { keys: [backspace], to_hotkey: [alt, backspace] }
+    - { keys: [any], to_hotkey: [ctrl], eager: true }
+"#;
+
+    const CAPS_LAZY_ANY: &str = r#"
+capslock:
+  on_tap: [escape]
+  on_hold:
+    - { keys: [backspace], to_hotkey: [alt, backspace] }
+    - { keys: [any], to_hotkey: [ctrl] }
+"#;
+
+    #[test]
+    fn eager_any_presses_ctrl_on_trigger_down() {
+        let mut m = sm(CAPS_EAGER_ANY);
+        assert_eq!(
+            m.on_event(down(LogicalKey::CapsLock)),
+            emit(vec![SyntheticEvent::ModifierDown(Modifier::Ctrl)])
+        );
+        // Unmapped key: Ctrl is already down, just stamp it.
+        assert_eq!(
+            m.on_event(down(alpha('C'))),
+            Action::ForwardWithModifiers(ModifierMask::just(Modifier::Ctrl))
+        );
+        assert_eq!(
+            m.on_event(up(LogicalKey::CapsLock)),
+            emit(vec![SyntheticEvent::ModifierUp(Modifier::Ctrl)])
+        );
+    }
+
+    #[test]
+    fn eager_any_tap_releases_ctrl_then_fires_on_tap() {
+        let mut m = sm(CAPS_EAGER_ANY);
+        m.on_event(down(LogicalKey::CapsLock));
+        match m.on_event(up(LogicalKey::CapsLock)) {
+            Action::EmitTap(events) => {
+                assert_eq!(events[0], SyntheticEvent::ModifierUp(Modifier::Ctrl));
+                assert!(events.contains(&SyntheticEvent::KeyDown(NamedKey::Escape)));
+            }
+            other => panic!("expected EmitTap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eager_any_releases_ctrl_before_an_explicit_rule() {
+        let mut m = sm(CAPS_EAGER_ANY);
+        m.on_event(down(LogicalKey::CapsLock));
+        // Backspace has its own rule (Alt+Backspace): Ctrl must come up
+        // first, or the app would see Ctrl+Alt+Backspace.
+        let action = m.on_event(down(named(NamedKey::Delete)));
+        let events = match &action {
+            Action::Emit(e) | Action::EmitThenForwardWithModifiers(e, _) => e.clone(),
+            other => panic!("expected an emit, got {other:?}"),
+        };
+        assert_eq!(events[0], SyntheticEvent::ModifierUp(Modifier::Ctrl));
+        assert!(events.contains(&SyntheticEvent::ModifierDown(Modifier::Alt)));
+    }
+
+    #[test]
+    fn lazy_any_waits_for_the_next_key() {
+        let mut m = sm(CAPS_LAZY_ANY);
+        // Without `eager`, a bare hold sends nothing.
+        assert_eq!(m.on_event(down(LogicalKey::CapsLock)), Action::Suppress);
+    }
+
+    #[test]
+    fn eager_any_stacks_with_held_shift_instead_of_forwarding_capslock() {
+        let mut m = sm(CAPS_EAGER_ANY);
+        let shift = ModifierMask::just(Modifier::Shift);
+        // Forwarding would toggle the real CapsLock; the layer must take it
+        // the way `on_hold: [ctrl]` does.
+        assert_eq!(
+            m.on_event(down_with_mods(LogicalKey::CapsLock, shift)),
+            Action::Suppress
+        );
+        assert_eq!(
+            m.on_event(down_with_mods(alpha('R'), shift)),
+            Action::EmitThenForwardWithModifiers(
+                smallvec::smallvec![SyntheticEvent::ModifierDown(Modifier::Ctrl)],
+                ModifierMask::just(Modifier::Ctrl),
+            )
         );
     }
 

@@ -932,6 +932,11 @@ struct HoldRule {
     open_module: Option<YamlToken>,
     #[serde(default)]
     toggle_capslock: Option<bool>,
+    /// Only on the `keys: [any]` row: press its modifier the instant the
+    /// trigger goes down (like `on_hold: [ctrl]`) instead of waiting for
+    /// the next key. Not an action — it qualifies the fallback.
+    #[serde(default)]
+    eager: Option<bool>,
 }
 
 /// Accepts a YAML scalar that might be a string or a number; normalizes
@@ -1050,6 +1055,7 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
             HoldSpec::Rules(list) => {
                 let mut overrides: HashMap<(ModifierMask, LogicalKey), EmitPair> = HashMap::new();
                 let mut fallback = ModifierMask::EMPTY;
+                let mut fallback_eager: Option<Modifier> = None;
 
                 for rule in &list {
                     // OS gate.
@@ -1112,7 +1118,25 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                                 }
                             }
                         }
+                        if rule.eager == Some(true) {
+                            if to.len() != 1 {
+                                return Err(format!(
+                                    "rule '{}': eager: true needs a single modifier in \
+                                     to_hotkey, got {} — an eager layer presses one key",
+                                    rule.description.as_deref().unwrap_or("<unnamed>"),
+                                    to.len()
+                                ));
+                            }
+                            fallback_eager = parse_modifier(to[0].as_str());
+                        }
                         continue;
+                    }
+
+                    if rule.eager.is_some() {
+                        return Err(format!(
+                            "rule '{}': eager only applies to the keys: [any] rule",
+                            rule.description.as_deref().unwrap_or("<unnamed>"),
+                        ));
                     }
 
                     let mut mods = ModifierMask::EMPTY;
@@ -1161,8 +1185,15 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 // the user capital letters. A hand-written `keys: [any]`
                 // rule means they've chosen their own fallback, so leave
                 // that alone.
+                //
+                // `eager: true` on the `[any]` rule asks for the same
+                // press-on-down behaviour for any trigger (CapsLock → Ctrl
+                // held from the moment of press, so a bare hold or a click
+                // sees Ctrl). The parser above guarantees a single modifier.
                 let eager = if fallback.is_empty() {
                     key_self_modifier(trigger)
+                } else if fallback_eager.is_some() {
+                    fallback_eager
                 } else {
                     None
                 };
@@ -2002,6 +2033,44 @@ space:
             }
             other => panic!("expected explicit overrides, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eager_any_sets_the_eager_modifier() {
+        let src = r#"
+capslock:
+  on_tap: [escape]
+  on_hold:
+    - { keys: [backspace], to_hotkey: [alt, backspace] }
+    - { keys: [any], to_hotkey: [ctrl], eager: true }
+"#;
+        let r = parse(src).expect("parse");
+        assert_eq!(
+            binding(&r, LogicalKey::CapsLock).on_hold.eager_modifier(),
+            Some(Modifier::Ctrl)
+        );
+    }
+
+    #[test]
+    fn eager_rejects_multiple_modifiers() {
+        let src = r#"
+capslock:
+  on_hold:
+    - { keys: [any], to_hotkey: [ctrl, shift], eager: true }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("single modifier"), "got: {err}");
+    }
+
+    #[test]
+    fn eager_rejected_outside_the_any_rule() {
+        let src = r#"
+capslock:
+  on_hold:
+    - { keys: [w], to_hotkey: [ctrl, w], eager: true }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("eager only applies"), "got: {err}");
     }
 
     #[test]
