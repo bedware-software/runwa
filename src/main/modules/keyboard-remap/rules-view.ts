@@ -149,11 +149,15 @@ function readHoldSpec(triggerName: string, raw: unknown): HoldResult {
       : formatTokenList([...modifierPrefix, triggerKey])
     const triggerLabel = `${displayTriggerName(triggerName)}+${chord}`
 
+    const openModule =
+      typeof e['open_module'] === 'string' ? (e['open_module'] as string).trim() : undefined
+
     combos.push({
       trigger: triggerLabel,
       result: resultStr,
       description: desc,
-      os
+      os,
+      openModule
     })
   }
 
@@ -170,6 +174,8 @@ function formatRuleAction(
   if (typeof mv === 'number') return `move to Desktop ${mv}`
   if (entry['alternate_workspace'] === true) return 'switch to previous Desktop'
   if (entry['close_window'] === true) return 'close window'
+  const openModule = entry['open_module']
+  if (typeof openModule === 'string') return `open ${openModule}`
   const lang = entry['change_language']
   if (typeof lang === 'string') return `switch language to ${lang}`
   const toggleCaps = entry['toggle_capslock'] === true

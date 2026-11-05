@@ -450,6 +450,52 @@ pub enum SyntheticEvent {
     /// the latch); Windows taps VK_CAPITAL, hidden from every other hook so
     /// no listener can swallow it.
     ToggleCapsLock,
+    /// Open one of runwa's own modules (`window-switcher`, `app-search`, …)
+    /// exactly as its direct-launch hotkey would. Handed to JS through a
+    /// callback instead of synthesizing that hotkey: a key posted by the
+    /// process that registered it never reaches its own global shortcut on
+    /// macOS, and routing through a spare F-key also burns a key the user
+    /// might want elsewhere.
+    OpenModule(ModuleName),
+}
+
+/// A runwa module id (e.g. `window-switcher`) for `open_module`. Fixed-size
+/// so `SyntheticEvent` stays `Copy`; trailing zeros pad the tail. The id is
+/// not checked against the module list here — the JS side owns that list and
+/// warns when a rule names a module that doesn't exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModuleName([u8; 32]);
+
+impl ModuleName {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("open_module: empty value".into());
+        }
+        let bytes = trimmed.as_bytes();
+        if bytes.len() > 32 {
+            return Err(format!("open_module: '{trimmed}' too long (max 32 chars)"));
+        }
+        if !bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
+        {
+            return Err(format!(
+                "open_module: '{trimmed}' must be a module id like window-switcher"
+            ));
+        }
+        let mut buf = [0u8; 32];
+        for (i, b) in bytes.iter().enumerate() {
+            buf[i] = b.to_ascii_lowercase();
+        }
+        Ok(ModuleName(buf))
+    }
+
+    pub fn as_str(&self) -> &str {
+        let end = self.0.iter().position(|&b| b == 0).unwrap_or(self.0.len());
+        // Safe: `parse` only stores ASCII bytes.
+        std::str::from_utf8(&self.0[..end]).unwrap_or("")
+    }
 }
 
 /// A short ASCII language tag (e.g. `en`, `ru`, `en-us`). Stored as a
@@ -835,7 +881,7 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 /// A single rule inside an `on_hold:` list. Exactly one of the action
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
 /// `alternate_workspace` / `change_language` / `close_window` /
-/// `toggle_capslock`) must be
+/// `open_module` / `toggle_capslock`) must be
 /// populated; having zero or
 /// multiple is a parse error — except `to_hotkey` + `toggle_capslock`,
 /// which pair up (see `bake_rule_action`).
@@ -864,6 +910,8 @@ struct HoldRule {
     change_language: Option<YamlToken>,
     #[serde(default)]
     close_window: Option<bool>,
+    #[serde(default)]
+    open_module: Option<YamlToken>,
     #[serde(default)]
     toggle_capslock: Option<bool>,
 }
@@ -1151,13 +1199,16 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     if rule.close_window.is_some() {
         provided.push("close_window");
     }
+    if rule.open_module.is_some() {
+        provided.push("open_module");
+    }
     if rule.toggle_capslock.is_some() {
         provided.push("toggle_capslock");
     }
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, alternate_workspace, change_language, close_window, toggle_capslock"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, alternate_workspace, change_language, close_window, open_module, toggle_capslock"
         )),
         ["to_hotkey", "toggle_capslock"] => {
             if rule.toggle_capslock != Some(true) {
@@ -1216,6 +1267,12 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
                 return Err(format!("rule '{name}': close_window only takes `true`"));
             }
             Ok(EmitPair::press_only([SyntheticEvent::CloseWindow]))
+        }
+        ["open_module"] => {
+            let token = rule.open_module.as_ref().unwrap();
+            let module = ModuleName::parse(token.as_str())
+                .map_err(|e| format!("rule '{name}': {e}"))?;
+            Ok(EmitPair::press_only([SyntheticEvent::OpenModule(module)]))
         }
         ["toggle_capslock"] => {
             if rule.toggle_capslock != Some(true) {
@@ -1902,6 +1959,52 @@ space:
             }
             other => panic!("expected explicit overrides, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn open_module_action_parses() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [w], open_module: window-switcher }
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let p = overrides.get(&ov(alpha('W'))).unwrap();
+                match p.on_press.as_slice() {
+                    [SyntheticEvent::OpenModule(m)] => assert_eq!(m.as_str(), "window-switcher"),
+                    other => panic!("expected OpenModule(window-switcher), got {other:?}"),
+                }
+                assert!(p.on_release.is_empty());
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_module_rejects_bad_id() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [w], open_module: "window switcher" }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("open_module"), "expected open_module error, got: {err}");
+    }
+
+    #[test]
+    fn open_module_conflicts_with_other_actions() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [w], open_module: window-switcher, to_hotkey: [f13] }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("multiple action fields"), "got: {err}");
     }
 
     #[test]

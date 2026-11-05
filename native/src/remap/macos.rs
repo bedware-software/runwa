@@ -999,6 +999,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 super::macos_close_window::close_focused_window();
                 continue;
             }
+            SyntheticEvent::OpenModule(module) => {
+                super::module_launch::fire(module.as_str());
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;

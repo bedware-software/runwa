@@ -10,6 +10,7 @@
 //! (`state`, `rules`, `synth`). Platform modules only handle the OS glue
 //! (install hook, pump events, inject synthetic keys).
 
+pub mod module_launch;
 pub mod rules;
 pub mod state;
 pub mod synth;

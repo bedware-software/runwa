@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import type { KeyboardRemapRulesView } from '@shared/types'
 import {
+  setOpenModuleCallback,
   setWorkspaceBackAndForth,
   startKeyboardRemap,
   stopKeyboardRemap,
@@ -11,6 +12,7 @@ import {
 import { desktopHintWindow } from '../../desktop-hint-window'
 import { settingsStore } from '../../settings-store'
 import { openPathAsUser } from '../../elevation'
+import { launchModuleFromRemap } from '../../hotkey-manager'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { RULES_TEMPLATE } from './rules-template'
 import { buildRulesView } from './rules-view'
@@ -62,6 +64,11 @@ class KeyboardRemapService {
 
     this.syncBackAndForth()
     settingsStore.on('change', this.onSettingsChange)
+    try {
+      setOpenModuleCallback(launchModuleFromRemap)
+    } catch (err) {
+      console.warn('[keyboard-remap] failed to subscribe to open_module', err)
+    }
 
     if (process.platform === 'darwin' && !isAccessibilityTrusted()) {
       // Fire the prompt so it at least appears once; the user must grant

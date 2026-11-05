@@ -571,6 +571,9 @@ export interface KeyboardRemapComboView {
   description?: string
   /** OS filter from the rule, if any. */
   os?: string
+  /** Module id from an `open_module:` rule, so a module's settings page can
+   *  show that the remapper opens it. */
+  openModule?: string
 }
 
 /**

@@ -15,6 +15,7 @@ interface NativeAddon {
   setInputLanguage(code: string): void
   setRemapFullscreenBypass(processNames: string[]): void
   setWorkspaceBackAndForth(enabled: boolean): void
+  setOpenModuleCallback(cb: (moduleId: string) => void): void
 }
 
 let addon: NativeAddon | null = null
@@ -93,6 +94,24 @@ export function setRemapFullscreenBypass(processNames: string[]): void {
     return
   }
   mod.setRemapFullscreenBypass(processNames)
+}
+
+/**
+ * Subscribe to `open_module` rule actions. The hook pushes the module id
+ * through a threadsafe function, so the callback runs on the main thread.
+ * Register once; a second call replaces the previous subscriber. Tolerates
+ * a binary built before this export existed, like `setRemapFullscreenBypass`.
+ */
+export function setOpenModuleCallback(cb: (moduleId: string) => void): void {
+  const mod = loadAddon()
+  if (typeof mod.setOpenModuleCallback !== 'function') {
+    console.warn(
+      '[keyboard-remap] native addon predates setOpenModuleCallback — ' +
+        '`open_module` rules will do nothing until it is rebuilt'
+    )
+    return
+  }
+  mod.setOpenModuleCallback(cb)
 }
 
 /**

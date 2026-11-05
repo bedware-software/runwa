@@ -46,6 +46,39 @@ function looksModifierOnly(accel: string): boolean {
 }
 
 /**
+ * What a module's direct-launch hotkey does on key-down: its own handler if
+ * it has one, otherwise toggle the palette on it.
+ */
+function pressModule(moduleId: ModuleId): void {
+  const module = moduleRegistry.getModule(moduleId)
+  if (typeof module?.handleDirectLaunch === 'function') {
+    module.handleDirectLaunch('press')
+    return
+  }
+  paletteWindow.toggle(moduleId, module?.manifest.directLaunchSecondPress)
+}
+
+/**
+ * Open a module the way its direct-launch hotkey would, for the
+ * keyboard-remap `open_module` action. Press only — a remap rule has no
+ * key-up for push-to-talk modules, whose press handler then acts as a
+ * toggle. Refuses unknown and disabled modules with a log line, so a typo
+ * in keyboard-rules.yaml is visible in main.log instead of silent.
+ */
+export function launchModuleFromRemap(moduleId: string): void {
+  const module = moduleRegistry.getModule(moduleId as ModuleId)
+  if (!module) {
+    console.warn(`[keyboard-remap] open_module: unknown module "${moduleId}"`)
+    return
+  }
+  if (!settingsStore.get().modules[moduleId as ModuleId]?.enabled) {
+    console.warn(`[keyboard-remap] open_module: module "${moduleId}" is disabled`)
+    return
+  }
+  pressModule(moduleId as ModuleId)
+}
+
+/**
  * Owns all global shortcut registrations. Re-registers everything whenever
  * settings change. Silent on failure (bad hotkeys from user input are common)
  * — logs a warning so the user can fix it in settings.
@@ -85,13 +118,7 @@ class HotkeyManager {
       const wantsKeyUp =
         hasCustomHandler && module?.wantsKeyUpEvents?.() === true
 
-      const onPress = hasCustomHandler
-        ? () => module!.handleDirectLaunch!('press')
-        : () =>
-            paletteWindow.toggle(
-              moduleId as ModuleId,
-              module?.manifest.directLaunchSecondPress
-            )
+      const onPress = (): void => pressModule(moduleId as ModuleId)
 
       // Modifier-only chords (`Ctrl+Super`, `Alt+Shift`, …) are no
       // longer accepted — they used to route through uiohook for

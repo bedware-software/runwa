@@ -437,6 +437,21 @@ pub fn start_keyboard_remap(rules_json: String) -> napi::Result<u32> {
 
 /// Validate keyboard remap rules without installing or replacing the active
 /// hook. Uses the same authoritative Rust parser as `start_keyboard_remap`.
+/// Register a JS callback invoked with a module id (e.g. `window-switcher`)
+/// whenever an `open_module` keyboard-remap rule fires. The hook pushes it
+/// through a threadsafe function, so JS opens the module the same way its
+/// direct-launch hotkey would. Calling again replaces the previous subscriber.
+#[napi]
+pub fn set_open_module_callback(callback: napi::JsFunction) -> napi::Result<()> {
+    use napi::threadsafe_function::ThreadSafeCallContext;
+    let tsfn: remap::module_launch::OpenModuleFn = callback.create_threadsafe_function(
+        0,
+        |ctx: ThreadSafeCallContext<String>| ctx.env.create_string(&ctx.value).map(|s| vec![s]),
+    )?;
+    remap::module_launch::set_callback(tsfn);
+    Ok(())
+}
+
 #[napi]
 pub fn validate_keyboard_remap(rules_json: String) -> napi::Result<()> {
     remap::validate(&rules_json).map_err(napi::Error::from_reason)

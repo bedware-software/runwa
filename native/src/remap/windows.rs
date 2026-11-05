@@ -1026,6 +1026,12 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 close_foreground_window();
             }
+            SyntheticEvent::OpenModule(module) => {
+                // Flush first so a module that grabs focus sees the keys
+                // queued before it in the same burst already delivered.
+                flush_inputs(&mut inputs);
+                super::module_launch::fire(module.as_str());
+            }
         }
     }
     flush_inputs(&mut inputs);

@@ -82,6 +82,13 @@
  *                                                  has no universal shortcut for this (Cmd+Q
  *                                                  quits the app, Cmd+W closes a tab).
  *                                                  (Windows + macOS)
+ *         open_module:          <module id>         open a runwa module exactly like its
+ *                                                  direct-launch hotkey (second press included):
+ *                                                  window-switcher, app-search, command-palette,
+ *                                                  user-commands, flashcards, …. Use this
+ *                                                  instead of to_hotkey: [f13] + binding F13 in
+ *                                                  Settings — on macOS a key runwa posts never
+ *                                                  reaches runwa's own global shortcuts.
  *         toggle_capslock:      true                flip the CapsLock lock (and LED) without
  *                                                  sending the key to anyone. May be paired
  *                                                  with to_hotkey — the one pair allowed —
@@ -121,6 +128,8 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   must already be installed as a system input source
 #   close_window:        true       close the frontmost window (not the whole app): WM_CLOSE on
 #                                   Windows, the window's close button via Accessibility on macOS
+#   open_module:         <id>       open a runwa module like its hotkey would (window-switcher,
+#                                   app-search, command-palette, user-commands, flashcards, …)
 #   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
 
 # Global options. macos_switch_workspace_modifiers must match your macOS

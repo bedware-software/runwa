@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
+import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { useSettingsStore } from '@/store/settings-store'
 import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -23,6 +25,54 @@ interface Props {
 const CUSTOM_CONFIG_MODULE_IDS = new Set(['auto-dark-mode', 'ulanzi'])
 
 /**
+ * Chords from keyboard-rules.yaml whose `open_module` rule opens `moduleId`
+ * on this OS. Read when the module's page opens, so an edit + Reload in the
+ * Keyboard Remap page shows up the next time this page is visited. Empty
+ * while the remap module is off — its rules aren't running then.
+ */
+function useRemapTriggers(moduleId: string): string[] {
+  const remapEnabled = useSettingsStore(
+    (s) => s.modules.find((m) => m.id === KEYBOARD_REMAP_ID)?.enabled === true
+  )
+  const [triggers, setTriggers] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!remapEnabled) {
+      setTriggers([])
+      return
+    }
+    let cancelled = false
+    void window.electronAPI
+      .keyboardRemapGetRules()
+      .then((view) => {
+        if (cancelled) return
+        const found = view.triggers.flatMap((t) =>
+          (t.combos ?? [])
+            .filter((c) => c.openModule === moduleId && (!c.os || osMatches(c.os)))
+            .map((c) => c.trigger)
+        )
+        setTriggers(found)
+      })
+      .catch(() => {
+        if (!cancelled) setTriggers([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [moduleId, remapEnabled])
+
+  return triggers
+}
+
+/** Same aliases the native parser accepts for a rule's `os:` filter. */
+function osMatches(os: string): boolean {
+  const o = os.trim().toLowerCase()
+  if (CURRENT_OS === 'macos') return o === 'macos' || o === 'mac' || o === 'darwin'
+  if (CURRENT_OS === 'windows') return o === 'windows' || o === 'win' || o === 'win32'
+  return o === 'linux'
+}
+
+/**
  * Right-pane content for a single module. The sidebar already shows the
  * module's icon, name, description, and enabled-toggle — so the pane
  * opens directly into hotkeys / config / per-module sections. Dropping
@@ -33,6 +83,7 @@ export function ModulePanel({ moduleId }: Props) {
   const module = useSettingsStore((s) => s.modules.find((m) => m.id === moduleId))
   const setHotkey = useSettingsStore((s) => s.setModuleHotkey)
   const setConfig = useSettingsStore((s) => s.setModuleConfig)
+  const remapTriggers = useRemapTriggers(moduleId)
 
   if (!module) return null
 
@@ -47,6 +98,7 @@ export function ModulePanel({ moduleId }: Props) {
             value={module.directLaunchHotkey ?? ''}
             defaultValue={module.defaultDirectLaunchHotkey}
             onChange={(v) => void setHotkey(module.id, v || undefined)}
+            remapTriggers={remapTriggers}
           />
         </div>
       )}
