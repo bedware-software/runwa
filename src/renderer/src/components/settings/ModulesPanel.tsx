@@ -46,11 +46,12 @@ function useRemapTriggers(moduleId: string): string[] {
       .keyboardRemapGetRules()
       .then((view) => {
         if (cancelled) return
-        const found = view.triggers.flatMap((t) =>
-          (t.combos ?? [])
+        const found = view.triggers.flatMap((t) => [
+          ...(t.onTapOpenModule === moduleId ? [`${t.name} (tap)`] : []),
+          ...(t.combos ?? [])
             .filter((c) => c.openModule === moduleId && (!c.os || osMatches(c.os)))
             .map((c) => c.trigger)
-        )
+        ])
         setTriggers(found)
       })
       .catch(() => {
@@ -98,6 +99,7 @@ export function ModulePanel({ moduleId }: Props) {
             value={module.directLaunchHotkey ?? ''}
             defaultValue={module.defaultDirectLaunchHotkey}
             onChange={(v) => void setHotkey(module.id, v || undefined)}
+            moduleId={module.id}
             remapTriggers={remapTriggers}
           />
         </div>

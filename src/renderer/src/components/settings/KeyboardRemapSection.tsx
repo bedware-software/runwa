@@ -154,7 +154,7 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
             <div className="flex flex-col gap-1 text-xs">
               <LabeledRow label="Tap">
                 {t.onTap ? (
-                  <Hotkey value={t.onTap} />
+                  <ActionDisplay result={t.onTap} />
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}

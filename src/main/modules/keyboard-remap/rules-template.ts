@@ -14,6 +14,7 @@
  *
  *   on_tap:   [key]                press-and-release with no interruption
  *   on_tap:   [mod, ..., key]      combo on tap
+ *   on_tap:   { open_module: <id> } open a runwa module on tap (ids below)
  *
  *   on_tap fires only when the trigger is pressed without any external
  *   modifier already held. So `tab: on_tap: [tab]` doesn't break
@@ -128,8 +129,10 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   must already be installed as a system input source
 #   close_window:        true       close the frontmost window (not the whole app): WM_CLOSE on
 #                                   Windows, the window's close button via Accessibility on macOS
-#   open_module:         <id>       open a runwa module like its hotkey would (window-switcher,
-#                                   app-search, command-palette, user-commands, flashcards, …)
+#   open_module:         <id>       open a runwa module like its hotkey would. The id is shown
+#                                   next to each module's hotkey in Settings: window-switcher,
+#                                   app-search, command-palette, user-commands, flashcards.
+#                                   Also works as a tap: on_tap: { open_module: app-search }
 #   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
 
 # Global options. macos_switch_workspace_modifiers must match your macOS
@@ -149,12 +152,12 @@ capslock:
 # takes it from runwa too, depending on which one hooked the keyboard last.
 # Both blocks keep working as ordinary Shift for everything else.
 left_shift:
-  on_tap: [ctrl, opt, cmd, a]
+  on_tap: { open_module: app-search }
   on_hold:
     - { keys: [right_shift], to_hotkey: [f18], toggle_capslock: true }
 right_shift:
   # User Commands for the app in front (Window Switcher stays on Space+W).
-  on_tap: [ctrl, opt, cmd, u]
+  on_tap: { open_module: user-commands }
   on_hold:
     - { keys: [left_shift], to_hotkey: [f18], toggle_capslock: true }
 
@@ -177,9 +180,9 @@ space:
     - { keys: [\\], to_hotkey: [ctrl, b] }
 
     - { keys: [a], switch_to_workspace: 6 }
-    - { keys: [w], to_hotkey: [ctrl, opt, cmd, w] }
-    - { keys: [p], to_hotkey: [ctrl, opt, cmd, p] }
-    - { keys: [f], to_hotkey: [ctrl, opt, cmd, f] }
+    - { keys: [w], open_module: window-switcher }
+    - { keys: [p], open_module: command-palette }
+    - { keys: [f], open_module: flashcards }
     - { keys: [d], to_hotkey: [ctrl, opt, cmd, d] }
 
     - { keys: [h], to_hotkey: [left] }

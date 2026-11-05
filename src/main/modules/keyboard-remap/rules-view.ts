@@ -50,11 +50,13 @@ function readTriggerBlock(
   block: Record<string, unknown>
 ): KeyboardRemapTriggerView | null {
   const onTap = formatTapSpec(block['on_tap'])
+  const onTapOpenModule = tapOpenModule(block['on_tap'])
   const hold = readHoldSpec(name, block['on_hold'])
 
   return {
     name: displayTriggerName(name),
     onTap,
+    onTapOpenModule,
     onHoldKind: hold.kind,
     onHoldModifier: hold.modifier,
     combos: hold.combos
@@ -87,7 +89,16 @@ function formatTapSpec(raw: unknown): string | undefined {
   if (raw == null) return undefined
   if (typeof raw === 'string') return formatTokenList([raw])
   if (Array.isArray(raw)) return formatTokenList(raw.map(String))
+  const module = tapOpenModule(raw)
+  if (module) return `open ${module}`
   return String(raw)
+}
+
+/** `on_tap: { open_module: <id> }` → the id. */
+function tapOpenModule(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const m = (raw as Record<string, unknown>)['open_module']
+  return typeof m === 'string' ? m.trim() : undefined
 }
 
 interface HoldResult {

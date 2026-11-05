@@ -553,6 +553,8 @@ export interface KeyboardRemapTriggerView {
   name: string
   /** Formatted `on_tap` output (e.g. "Escape", "Ctrl+C"), or undefined. */
   onTap?: string
+  /** Module id when `on_tap` is `{ open_module: <id> }`. */
+  onTapOpenModule?: string
   /** Shape of the `on_hold:` block — determines how the renderer draws it. */
   onHoldKind: 'transparent' | 'explicit' | 'passthrough'
   /** For `transparent` only: the modifier name that is chip-rendered

@@ -806,10 +806,12 @@ impl Settings {
     }
 }
 
-/// Parsed form of `on_tap:` — either a single key name or a combo list.
+/// Parsed form of `on_tap:` — a single key name, a combo list, or an
+/// action mapping (`{ open_module: app-search }`).
 enum TapSpec {
     Single(String),
     Combo(Vec<String>),
+    OpenModule(String),
 }
 
 /// Parsed form of `on_hold:` — either a scalar modifier name (transparent
@@ -834,8 +836,24 @@ fn parse_tap_spec(v: &serde_yml::Value) -> Result<TapSpec, String> {
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(TapSpec::Combo(tokens));
     }
+    if let Some(map) = v.as_mapping() {
+        // Only `open_module` makes sense as a tap action today: the others
+        // are layer actions (workspace, language, window) people bind in
+        // `on_hold`. Keep the mapping strict so a typo isn't a silent no-op.
+        if map.len() == 1 {
+            if let Some(module) = map.get("open_module") {
+                return match module.as_str() {
+                    Some(m) => Ok(TapSpec::OpenModule(m.to_string())),
+                    None => Err(format!("on_tap open_module must be a string, got {module:?}")),
+                };
+            }
+        }
+        return Err(format!(
+            "on_tap mapping supports only {{ open_module: <module id> }}, got {v:?}"
+        ));
+    }
     Err(format!(
-        "on_tap must be a string or a list of strings, got {v:?}"
+        "on_tap must be a string, a list of strings, or {{ open_module: <id> }}, got {v:?}"
     ))
 }
 
@@ -1012,6 +1030,9 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
                 Some(bake_hotkey_tokens(std::slice::from_ref(&s))?.into_flat_tap())
             }
             TapSpec::Combo(items) => Some(bake_hotkey_tokens(items.as_slice())?.into_flat_tap()),
+            TapSpec::OpenModule(m) => Some(vec![SyntheticEvent::OpenModule(
+                ModuleName::parse(&m).map_err(|e| format!("on_tap: {e}"))?,
+            )]),
         },
     };
 
@@ -1981,6 +2002,30 @@ space:
             }
             other => panic!("expected explicit overrides, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn on_tap_accepts_open_module() {
+        let src = r#"
+left_shift:
+  on_tap: { open_module: app-search }
+"#;
+        let r = parse(src).expect("parse");
+        let b = binding(&r, LogicalKey::LeftShift);
+        match b.on_tap.as_deref() {
+            Some([SyntheticEvent::OpenModule(m)]) => assert_eq!(m.as_str(), "app-search"),
+            other => panic!("expected OpenModule(app-search) tap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn on_tap_rejects_unknown_mapping() {
+        let src = r#"
+left_shift:
+  on_tap: { close_window: true }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.contains("open_module"), "got: {err}");
     }
 
     #[test]
