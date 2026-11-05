@@ -141,7 +141,7 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
 #
 # keys: [any] + to_hotkey: [<modifier>] is the layer's fallback: unmapped keys get that
-# modifier, pressed when the next key arrives. Add `eager: true` to press it the moment
+# modifier, pressed when the next key arrives. Add eager: true to press it the moment
 # the trigger goes down instead (like on_hold: [ctrl], but with your own rules on top):
 #   - { keys: [any], to_hotkey: [ctrl], eager: true }
 
