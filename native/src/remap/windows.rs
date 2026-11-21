@@ -1032,6 +1032,10 @@ fn inject(events: &[SyntheticEvent]) {
                 flush_inputs(&mut inputs);
                 super::module_launch::fire(module.as_str());
             }
+            SyntheticEvent::RunShell(cmd) => {
+                flush_inputs(&mut inputs);
+                super::module_launch::fire_shell(cmd.command());
+            }
         }
     }
     flush_inputs(&mut inputs);

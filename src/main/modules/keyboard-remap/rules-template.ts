@@ -15,6 +15,7 @@
  *   on_tap:   [key]                press-and-release with no interruption
  *   on_tap:   [mod, ..., key]      combo on tap
  *   on_tap:   { open_module: <id> } open a runwa module on tap (ids below)
+ *   on_tap:   { shell: <command> }  run a shell command on tap
  *
  *   on_tap fires only when the trigger is pressed without any external
  *   modifier already held. So `tab: on_tap: [tab]` doesn't break
@@ -90,6 +91,13 @@
  *                                                  instead of to_hotkey: [f13] + binding F13 in
  *                                                  Settings — on macOS a key runwa posts never
  *                                                  reaches runwa's own global shortcuts.
+ *         shell:                <command>           run a shell command in the background
+ *                                                  (sh on macOS, cmd.exe on Windows; cwd is the
+ *                                                  home directory, output is discarded). Fires
+ *                                                  once per press, no autorepeat. Quote the
+ *                                                  command when it contains , { } # or ": ".
+ *                                                    shell: open ~            (Finder, macOS)
+ *                                                    shell: explorer          (Windows)
  *         toggle_capslock:      true                flip the CapsLock lock (and LED) without
  *                                                  sending the key to anyone. May be paired
  *                                                  with to_hotkey — the one pair allowed —
@@ -138,6 +146,9 @@ export const RULES_TEMPLATE = `# runwa keyboard rules (YAML).
 #                                   next to each module's hotkey in Settings: window-switcher,
 #                                   app-search, command-palette, user-commands, flashcards.
 #                                   Also works as a tap: on_tap: { open_module: app-search }
+#   shell:               <command>  run a shell command in the background, e.g. Finder on
+#                                   Space+E:  - { os: macos, keys: [e], shell: open ~ }
+#                                   Quote it if it contains , { } # or ": ". Also a tap action.
 #   toggle_capslock:     true       flip the CapsLock lock/LED; may be combined with to_hotkey
 #
 # keys: [any] + to_hotkey: [<modifier>] is the layer's fallback: unmapped keys get that

@@ -31,3 +31,22 @@ pub fn fire(module: &str) {
         None => eprintln!("[keyboard-remap] open_module({module}) fired before JS subscribed"),
     }
 }
+
+/// JS subscriber for `shell:` rules: `(command: string) => void`. Shares
+/// this file because it is the same hand-off — the hook only enqueues.
+static SHELL_CALLBACK: Lazy<Mutex<Option<OpenModuleFn>>> = Lazy::new(|| Mutex::new(None));
+
+pub fn set_shell_callback(cb: OpenModuleFn) {
+    *SHELL_CALLBACK.lock() = Some(cb);
+}
+
+/// Ask JS to run `command` in the background. The command text is kept
+/// out of the log: people put tokens in command lines.
+pub fn fire_shell(command: String) {
+    match SHELL_CALLBACK.lock().as_ref() {
+        Some(cb) => {
+            cb.call(command, ThreadsafeFunctionCallMode::NonBlocking);
+        }
+        None => eprintln!("[keyboard-remap] shell rule fired before JS subscribed"),
+    }
+}

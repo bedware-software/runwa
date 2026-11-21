@@ -91,6 +91,10 @@ function formatTapSpec(raw: unknown): string | undefined {
   if (Array.isArray(raw)) return formatTokenList(raw.map(String))
   const module = tapOpenModule(raw)
   if (module) return `open ${module}`
+  if (typeof raw === 'object') {
+    const shell = (raw as Record<string, unknown>)['shell']
+    if (typeof shell === 'string') return `run ${shell.trim()}`
+  }
   return String(raw)
 }
 
@@ -187,6 +191,8 @@ function formatRuleAction(
   if (entry['close_window'] === true) return 'close window'
   const openModule = entry['open_module']
   if (typeof openModule === 'string') return `open ${openModule}`
+  const shell = entry['shell']
+  if (typeof shell === 'string') return `run ${shell.trim()}`
   const lang = entry['change_language']
   if (typeof lang === 'string') return `switch language to ${lang}`
   const toggleCaps = entry['toggle_capslock'] === true

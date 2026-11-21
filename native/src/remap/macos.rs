@@ -1003,6 +1003,10 @@ pub(super) fn inject(events: &[SyntheticEvent], base_flags: CGEventFlags) {
                 super::module_launch::fire(module.as_str());
                 continue;
             }
+            SyntheticEvent::RunShell(cmd) => {
+                super::module_launch::fire_shell(cmd.command());
+                continue;
+            }
         };
         let Ok(cge) = CGEvent::new_keyboard_event(source.clone(), keycode, down) else {
             continue;

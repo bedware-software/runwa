@@ -16,6 +16,7 @@ interface NativeAddon {
   setRemapFullscreenBypass(processNames: string[]): void
   setWorkspaceBackAndForth(enabled: boolean): void
   setOpenModuleCallback(cb: (moduleId: string) => void): void
+  setShellCommandCallback(cb: (command: string) => void): void
 }
 
 let addon: NativeAddon | null = null
@@ -112,6 +113,22 @@ export function setOpenModuleCallback(cb: (moduleId: string) => void): void {
     return
   }
   mod.setOpenModuleCallback(cb)
+}
+
+/**
+ * Subscribe to `shell` rule actions: the hook pushes the command line and
+ * JS spawns it. Same contract as `setOpenModuleCallback`.
+ */
+export function setShellCommandCallback(cb: (command: string) => void): void {
+  const mod = loadAddon()
+  if (typeof mod.setShellCommandCallback !== 'function') {
+    console.warn(
+      '[keyboard-remap] native addon predates setShellCommandCallback — ' +
+        '`shell` rules will do nothing until it is rebuilt'
+    )
+    return
+  }
+  mod.setShellCommandCallback(cb)
 }
 
 /**

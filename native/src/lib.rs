@@ -452,6 +452,20 @@ pub fn set_open_module_callback(callback: napi::JsFunction) -> napi::Result<()> 
     Ok(())
 }
 
+/// Register a JS callback invoked with the command line whenever a `shell`
+/// keyboard-remap rule fires. JS spawns it; the hook thread only enqueues.
+/// Calling again replaces the previous subscriber.
+#[napi]
+pub fn set_shell_command_callback(callback: napi::JsFunction) -> napi::Result<()> {
+    use napi::threadsafe_function::ThreadSafeCallContext;
+    let tsfn: remap::module_launch::OpenModuleFn = callback.create_threadsafe_function(
+        0,
+        |ctx: ThreadSafeCallContext<String>| ctx.env.create_string(&ctx.value).map(|s| vec![s]),
+    )?;
+    remap::module_launch::set_shell_callback(tsfn);
+    Ok(())
+}
+
 #[napi]
 pub fn validate_keyboard_remap(rules_json: String) -> napi::Result<()> {
     remap::validate(&rules_json).map_err(napi::Error::from_reason)

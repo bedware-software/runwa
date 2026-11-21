@@ -4,6 +4,7 @@ import path from 'path'
 import type { KeyboardRemapRulesView } from '@shared/types'
 import {
   setOpenModuleCallback,
+  setShellCommandCallback,
   setWorkspaceBackAndForth,
   startKeyboardRemap,
   stopKeyboardRemap,
@@ -16,6 +17,7 @@ import { launchModuleFromRemap } from '../../hotkey-manager'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { RULES_TEMPLATE } from './rules-template'
 import { buildRulesView } from './rules-view'
+import { runRemapShellCommand } from './shell'
 import {
   isAccessibilityTrusted,
   requestAccessibilityPermission
@@ -68,6 +70,11 @@ class KeyboardRemapService {
       setOpenModuleCallback(launchModuleFromRemap)
     } catch (err) {
       console.warn('[keyboard-remap] failed to subscribe to open_module', err)
+    }
+    try {
+      setShellCommandCallback(runRemapShellCommand)
+    } catch (err) {
+      console.warn('[keyboard-remap] failed to subscribe to shell rules', err)
     }
 
     if (process.platform === 'darwin' && !isAccessibilityTrusted()) {

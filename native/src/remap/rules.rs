@@ -457,6 +457,47 @@ pub enum SyntheticEvent {
     /// macOS, and routing through a spare F-key also burns a key the user
     /// might want elsewhere.
     OpenModule(ModuleName),
+    /// Run a shell command in the background (`shell: open ~`). Handed to
+    /// JS like `OpenModule`: the main process already launches user
+    /// commands through the platform shell, and spawning there keeps
+    /// fork/exec off the hook thread.
+    RunShell(ShellCommand),
+}
+
+/// A `shell:` command line, interned so `SyntheticEvent` stays `Copy` — a
+/// command has no useful length cap, unlike a module id. The table only
+/// grows by distinct commands across rule reloads, i.e. by what the user
+/// has typed into keyboard-rules.yaml this session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShellCommand(u32);
+
+static SHELL_COMMANDS: once_cell::sync::Lazy<parking_lot::Mutex<Vec<String>>> =
+    once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(Vec::new()));
+
+impl ShellCommand {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("shell: empty command".into());
+        }
+        let mut table = SHELL_COMMANDS.lock();
+        let idx = match table.iter().position(|c| c == trimmed) {
+            Some(i) => i,
+            None => {
+                table.push(trimmed.to_owned());
+                table.len() - 1
+            }
+        };
+        Ok(ShellCommand(idx as u32))
+    }
+
+    pub fn command(&self) -> String {
+        SHELL_COMMANDS
+            .lock()
+            .get(self.0 as usize)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 /// A runwa module id (e.g. `window-switcher`) for `open_module`. Fixed-size
@@ -807,11 +848,12 @@ impl Settings {
 }
 
 /// Parsed form of `on_tap:` — a single key name, a combo list, or an
-/// action mapping (`{ open_module: app-search }`).
+/// action mapping (`{ open_module: app-search }`, `{ shell: open ~ }`).
 enum TapSpec {
     Single(String),
     Combo(Vec<String>),
     OpenModule(String),
+    Shell(String),
 }
 
 /// Parsed form of `on_hold:` — either a scalar modifier name (transparent
@@ -837,10 +879,16 @@ fn parse_tap_spec(v: &serde_yml::Value) -> Result<TapSpec, String> {
         return Ok(TapSpec::Combo(tokens));
     }
     if let Some(map) = v.as_mapping() {
-        // Only `open_module` makes sense as a tap action today: the others
-        // are layer actions (workspace, language, window) people bind in
-        // `on_hold`. Keep the mapping strict so a typo isn't a silent no-op.
+        // Only `open_module` and `shell` make sense as tap actions today: the
+        // others are layer actions (workspace, language, window) people bind
+        // in `on_hold`. Keep the mapping strict so a typo isn't a silent no-op.
         if map.len() == 1 {
+            if let Some(cmd) = map.get("shell") {
+                return match cmd.as_str() {
+                    Some(c) => Ok(TapSpec::Shell(c.to_string())),
+                    None => Err(format!("on_tap shell must be a string, got {cmd:?}")),
+                };
+            }
             if let Some(module) = map.get("open_module") {
                 return match module.as_str() {
                     Some(m) => Ok(TapSpec::OpenModule(m.to_string())),
@@ -849,11 +897,11 @@ fn parse_tap_spec(v: &serde_yml::Value) -> Result<TapSpec, String> {
             }
         }
         return Err(format!(
-            "on_tap mapping supports only {{ open_module: <module id> }}, got {v:?}"
+            "on_tap mapping supports only {{ open_module: <module id> }} or {{ shell: <command> }}, got {v:?}"
         ));
     }
     Err(format!(
-        "on_tap must be a string, a list of strings, or {{ open_module: <id> }}, got {v:?}"
+        "on_tap must be a string, a list of strings, {{ open_module: <id> }} or {{ shell: <command> }}, got {v:?}"
     ))
 }
 
@@ -899,7 +947,7 @@ fn parse_hold_spec(v: &serde_yml::Value) -> Result<HoldSpec, String> {
 /// A single rule inside an `on_hold:` list. Exactly one of the action
 /// fields (`to_hotkey` / `switch_to_workspace` / `move_to_workspace` /
 /// `alternate_workspace` / `change_language` / `close_window` /
-/// `open_module` / `toggle_capslock`) must be
+/// `open_module` / `shell` / `toggle_capslock`) must be
 /// populated; having zero or
 /// multiple is a parse error — except `to_hotkey` + `toggle_capslock`,
 /// which pair up (see `bake_rule_action`).
@@ -930,6 +978,8 @@ struct HoldRule {
     close_window: Option<bool>,
     #[serde(default)]
     open_module: Option<YamlToken>,
+    #[serde(default)]
+    shell: Option<String>,
     #[serde(default)]
     toggle_capslock: Option<bool>,
     /// Only on the `keys: [any]` row: press its modifier the instant the
@@ -1037,6 +1087,9 @@ fn resolve_binding(trigger: LogicalKey, remap: &KeyRemap) -> Result<ResolvedBind
             TapSpec::Combo(items) => Some(bake_hotkey_tokens(items.as_slice())?.into_flat_tap()),
             TapSpec::OpenModule(m) => Some(vec![SyntheticEvent::OpenModule(
                 ModuleName::parse(&m).map_err(|e| format!("on_tap: {e}"))?,
+            )]),
+            TapSpec::Shell(c) => Some(vec![SyntheticEvent::RunShell(
+                ShellCommand::parse(&c).map_err(|e| format!("on_tap: {e}"))?,
             )]),
         },
     };
@@ -1254,13 +1307,16 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
     if rule.open_module.is_some() {
         provided.push("open_module");
     }
+    if rule.shell.is_some() {
+        provided.push("shell");
+    }
     if rule.toggle_capslock.is_some() {
         provided.push("toggle_capslock");
     }
     let name = rule.description.as_deref().unwrap_or("<unnamed>");
     match provided.as_slice() {
         [] => Err(format!(
-            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, alternate_workspace, change_language, close_window, open_module, toggle_capslock"
+            "rule '{name}' needs exactly one of: to_hotkey, switch_to_workspace, move_to_workspace, alternate_workspace, change_language, close_window, open_module, shell, toggle_capslock"
         )),
         ["to_hotkey", "toggle_capslock"] => {
             if rule.toggle_capslock != Some(true) {
@@ -1325,6 +1381,11 @@ fn bake_rule_action(rule: &HoldRule) -> Result<EmitPair, String> {
             let module = ModuleName::parse(token.as_str())
                 .map_err(|e| format!("rule '{name}': {e}"))?;
             Ok(EmitPair::press_only([SyntheticEvent::OpenModule(module)]))
+        }
+        ["shell"] => {
+            let cmd = ShellCommand::parse(rule.shell.as_deref().unwrap())
+                .map_err(|e| format!("rule '{name}': {e}"))?;
+            Ok(EmitPair::press_only([SyntheticEvent::RunShell(cmd)]))
         }
         ["toggle_capslock"] => {
             if rule.toggle_capslock != Some(true) {
@@ -2085,6 +2146,65 @@ left_shift:
             Some([SyntheticEvent::OpenModule(m)]) => assert_eq!(m.as_str(), "app-search"),
             other => panic!("expected OpenModule(app-search) tap, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn shell_action_parses() {
+        let src = r#"
+space:
+  on_tap: [space]
+  on_hold:
+    - { keys: [e], shell: open ~ }
+    - { keys: [t], shell: "open -a Terminal && echo 'a, b'" }
+"#;
+        let r = parse(src).expect("parse");
+        match &binding(&r, LogicalKey::Space).on_hold {
+            ResolvedHold::Explicit { overrides, .. } => {
+                let p = overrides.get(&ov(alpha('E'))).unwrap();
+                match p.on_press.as_slice() {
+                    [SyntheticEvent::RunShell(c)] => assert_eq!(c.command(), "open ~"),
+                    other => panic!("expected RunShell, got {other:?}"),
+                }
+                assert!(p.on_release.is_empty());
+                let p = overrides.get(&ov(alpha('T'))).unwrap();
+                match p.on_press.as_slice() {
+                    [SyntheticEvent::RunShell(c)] => {
+                        assert_eq!(c.command(), "open -a Terminal && echo 'a, b'")
+                    }
+                    other => panic!("expected RunShell, got {other:?}"),
+                }
+            }
+            other => panic!("expected explicit overrides, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn on_tap_accepts_shell() {
+        let src = r#"
+left_shift:
+  on_tap: { shell: open ~ }
+"#;
+        let r = parse(src).expect("parse");
+        match binding(&r, LogicalKey::LeftShift).on_tap.as_deref() {
+            Some([SyntheticEvent::RunShell(c)]) => assert_eq!(c.command(), "open ~"),
+            other => panic!("expected RunShell tap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shell_rejects_empty_and_conflicts() {
+        let empty = r#"
+space:
+  on_hold:
+    - { keys: [e], shell: "  " }
+"#;
+        assert!(parse(empty).unwrap_err().contains("shell: empty"));
+        let both = r#"
+space:
+  on_hold:
+    - { keys: [e], shell: open ~, to_hotkey: [f13] }
+"#;
+        assert!(parse(both).unwrap_err().contains("multiple action fields"));
     }
 
     #[test]

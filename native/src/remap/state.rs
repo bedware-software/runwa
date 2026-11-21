@@ -903,6 +903,7 @@ impl StateMachine {
                                 | SyntheticEvent::AlternateWorkspace
                                 | SyntheticEvent::CloseWindow
                                 | SyntheticEvent::OpenModule(_)
+                                | SyntheticEvent::RunShell(_)
                                 | SyntheticEvent::ToggleCapsLock
                                 | SyntheticEvent::KeyDown(NamedKey::CapsLock)
                         )
