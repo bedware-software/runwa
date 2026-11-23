@@ -51,7 +51,7 @@ function DesktopHintIcon({ name }: { name: DesktopHintIconName }) {
   if (name === 'microphone') {
     return (
       <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-destructive opacity-55 animate-ping" />
+        <span className="absolute inline-flex h-full w-full bg-destructive opacity-55 animate-ping" />
         <Mic size={15} className="relative text-destructive" />
       </span>
     )
