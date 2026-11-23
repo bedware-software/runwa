@@ -64,7 +64,7 @@ export function ResultsList({
   rowRefs.current.length = items.length
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div role="listbox" aria-label="Results" className="flex-1 overflow-y-auto">
       {items.map((item, index) => {
         // Insert a group header before the first item with this group
         // value, and again whenever the group string changes between

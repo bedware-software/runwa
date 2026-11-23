@@ -51,10 +51,10 @@ export function QuizSummary({ quiz }: { quiz: QuizSession }) {
       </div>
 
       <div className="flex items-center gap-4 text-sm">
-        <span className="flex items-center gap-1.5 text-emerald-600">
+        <span className="flex items-center gap-1.5 text-success">
           <CheckCircle2 size={14} /> {correct}
         </span>
-        <span className="flex items-center gap-1.5 text-red-600">
+        <span className="flex items-center gap-1.5 text-destructive">
           <XCircle size={14} /> {incorrect}
         </span>
         {skipped > 0 && (
@@ -116,12 +116,12 @@ function MasteryRow({
         </span>{' '}
         mature of {after.total}
         {gained > 0 && (
-          <span className="ml-1 text-emerald-600">
+          <span className="ml-1 text-success">
             (+{gained})
           </span>
         )}
         {gained < 0 && (
-          <span className="ml-1 text-red-600">({gained})</span>
+          <span className="ml-1 text-destructive">({gained})</span>
         )}
         <span className="ml-2 text-xs text-muted-foreground/80">
           {pctAfter}%

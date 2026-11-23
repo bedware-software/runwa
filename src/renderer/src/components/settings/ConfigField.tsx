@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Button, InputField, Segmented } from '@bedware/ui'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { optionalLucideIconFromHint } from '@/lib/lucide-icons'
@@ -28,18 +29,13 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
             </div>
           )}
         </div>
-        <button
-          type="button"
+        <Button
           onClick={() => onAction?.(field.key)}
-          className={cn(
-            'h-7 px-3 rounded-md text-xs font-medium border transition-colors shrink-0',
-            'bg-secondary text-secondary-foreground border-input hover:bg-accent',
-            ActionIcon && 'flex items-center gap-1.5'
-          )}
+          icon={ActionIcon && <ActionIcon size={12} strokeWidth={2} />}
+          className="shrink-0"
         >
-          {ActionIcon && <ActionIcon size={12} strokeWidth={2} />}
           {field.buttonLabel}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -122,26 +118,13 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
           {field.description}
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        {field.options.map((opt) => {
-          const selected = current === opt.value
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => onChange(opt.value)}
-              className={cn(
-                'h-7 px-3 rounded-md text-xs font-medium border transition-colors',
-                selected
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-              )}
-            >
-              {opt.label}
-            </button>
-          )
-        })}
-      </div>
+      <Segmented
+        label={field.label}
+        value={current}
+        options={field.options}
+        onChange={(next) => onChange(next)}
+        wrap
+      />
     </div>
   )
 }
@@ -205,8 +188,10 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
             className="flex-1 min-h-[4.5rem] px-3 py-2 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono resize-none overflow-hidden whitespace-pre-wrap break-words leading-5"
           />
         ) : (
-          <input
+          <InputField
             type={inputType}
+            size="sm"
+            mono
             value={draft}
             placeholder={field.placeholder}
             onChange={(e) => setDraft(e.target.value)}
@@ -220,17 +205,13 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
             }}
             spellCheck={false}
             autoComplete="off"
-            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono"
+            boxClassName="flex-1"
           />
         )}
         {field.secret && (
-          <button
-            type="button"
-            onClick={() => setRevealed((v) => !v)}
-            className="h-8 px-2 rounded-md text-xs font-medium border bg-secondary text-secondary-foreground border-input hover:bg-accent"
-          >
+          <Button onClick={() => setRevealed((v) => !v)}>
             {revealed ? 'Hide' : 'Show'}
-          </button>
+          </Button>
         )}
       </div>
     </div>

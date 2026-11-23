@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Badge, Button, Panel, PanelRow } from '@bedware/ui'
 import type { PermissionFlags, PermissionName } from '@shared/types'
-import { cn } from '@/lib/utils'
 
 export interface PermissionRowSpec {
   name: PermissionName
@@ -65,45 +65,23 @@ export function PermissionSection({ heading, description, rows }: Props) {
     <div className="flex flex-col gap-2">
       <div className="text-xs font-medium text-foreground">{heading}</div>
       <div className="text-xs text-muted-foreground -mt-1">{description}</div>
-      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+      <Panel>
         {rows.map((row) => {
           const granted = permissions[row.name]
           return (
-            <div
-              key={row.name}
-              className="flex items-center justify-between gap-4 px-4 py-3"
-            >
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">
-                  {row.title}
-                </span>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {row.description}
-                </div>
-              </div>
+            <PanelRow key={row.name} title={row.title} description={row.description}>
               <div className="flex items-center gap-2 shrink-0">
-                <span
-                  className={cn(
-                    'text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded',
-                    granted
-                      ? 'bg-primary/15 text-primary'
-                      : 'bg-destructive/15 text-destructive'
-                  )}
-                >
+                <Badge tone={granted ? 'accent' : 'error'}>
                   {granted ? 'Granted' : 'Not granted'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void handleAction(row.name, granted)}
-                  className="h-7 px-2 rounded-md text-xs font-medium border border-input bg-secondary text-secondary-foreground hover:bg-accent"
-                >
+                </Badge>
+                <Button onClick={() => void handleAction(row.name, granted)}>
                   {granted ? 'Open' : 'Grant'}
-                </button>
+                </Button>
               </div>
-            </div>
+            </PanelRow>
           )
         })}
-      </div>
+      </Panel>
     </div>
   )
 }

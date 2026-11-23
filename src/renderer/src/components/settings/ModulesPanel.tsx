@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Panel } from '@bedware/ui'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { useSettingsStore } from '@/store/settings-store'
@@ -91,7 +92,7 @@ export function ModulePanel({ moduleId }: Props) {
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
       {module.supportsDirectLaunch && module.enabled && (
-        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+        <Panel>
           <HotkeyRow
             title="Direct-launch hotkey"
             scope="Global"
@@ -102,7 +103,7 @@ export function ModulePanel({ moduleId }: Props) {
             moduleId={module.id}
             remapTriggers={remapTriggers}
           />
-        </div>
+        </Panel>
       )}
 
       {module.enabled && !CUSTOM_CONFIG_MODULE_IDS.has(module.id) && module.configFields && (() => {

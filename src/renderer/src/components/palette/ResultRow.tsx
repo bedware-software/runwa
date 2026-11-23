@@ -1,7 +1,7 @@
 import type { Ref } from 'react'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import type { PaletteItem } from '@shared/types'
-import { cn } from '@/lib/utils'
+import { ResultRow as BwResultRow } from '@bedware/ui'
 import { lucideIconFromHint, Square } from '@/lib/lucide-icons'
 import { Tooltip } from '../ui/Tooltip'
 
@@ -46,136 +46,35 @@ export function ResultRow({
   const Icon = showImage ? null : iconFromHint(hint)
   const BadgeIcon = item.iconBadge ? iconFromHint(item.iconBadge) : null
   return (
-    <div
+    <BwResultRow
       ref={ref}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={cn(
-        // `relative` anchors the absolutely-positioned keycap below.
-        // Padding stays at px-4 so the row's content baseline matches
-        // the search input and footer hints (16 px). Selected rows tint
-        // the row bg only — internal chips don't restyle on selection.
-        'relative flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors',
-        isSelected && 'bg-accent text-accent-foreground'
-      )}
-    >
-      {numberHint !== undefined && (
-        // Full keycap, absolutely positioned so it never affects the
-        // row's flex flow — the application icon stays at its fixed
-        // 16 px-from-left spot regardless of whether the keycaps are
-        // active. The chip occupies exactly the row's left padding
-        // gutter: left edge flush against the window border, right
-        // edge flush against the icon. Static styling — no isSelected
-        // variant, no hover — so the eye reads selection from the row
-        // bg only.
-        <kbd
-          aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 -translate-y-1/2',
-            'inline-flex items-center justify-center',
-            'h-[18px] w-4',
-            'rounded-md border border-border bg-popover text-foreground',
-            'font-mono font-medium text-[10px] leading-none',
-            'shadow-[0_0_2px_rgb(0_0_0/0.1)]',
-            'select-none pointer-events-none'
-          )}
-        >
-          {numberHint}
-        </kbd>
-      )}
-      <Tooltip content={item.iconTooltip} className="shrink-0">
-        <div
-          className={cn(
-            'relative h-8 w-8 rounded-md flex items-center justify-center',
-            // Real app icons (PNGs with their own artwork) render on a
-            // transparent tile so the extracted icon isn't boxed into a
-            // coloured square. Lucide glyphs keep the tinted tile so they
-            // still read as framed icons.
-            Icon
-              ? isSelected
-                ? 'bg-accent-foreground/10 text-accent-foreground'
-                : 'bg-secondary text-muted-foreground'
-              : ''
-          )}
-        >
-          {Icon ? (
-            <Icon size={18} />
-          ) : (
-            <img
-              src={hint}
-              alt=""
-              className="h-8 w-8 object-contain"
-              draggable={false}
-            />
-          )}
-          {BadgeIcon && (
-            // Sits on the icon's corner rather than in the row's trailing
-            // chip lane: this qualifies the app, not the result, and the
-            // lane is already spoken for by `badge` and the alias keycap.
-            <span
-              aria-hidden
-              className={cn(
-                'absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border',
-                'flex items-center justify-center',
-                isSelected
-                  ? 'bg-accent text-accent-foreground border-accent-foreground/30'
-                  : 'bg-popover text-muted-foreground border-border'
-              )}
-            >
-              <BadgeIcon size={9} />
-            </span>
-          )}
-        </div>
-      </Tooltip>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium truncate">{item.title}</span>
-          {item.alias && (
-            <kbd
-              className={cn(
-                // `leading-none` + inline-flex keeps the chip's box
-                // height ≤ the title row's `text-sm` line-height (20px),
-                // so adding/removing an alias never changes row height.
-                'shrink-0 inline-flex items-center px-1.5 py-0.5 rounded font-mono text-[11px] leading-none font-medium border',
-                isSelected
-                  ? 'border-accent-foreground/30 text-accent-foreground bg-accent-foreground/10'
-                  : 'border-border text-muted-foreground bg-secondary'
-              )}
-              title={`Alias: ${item.alias}`}
-            >
-              {item.alias}
-            </kbd>
-          )}
-        </div>
-        {item.subtitle && (
-          <div
-            className={cn(
-              'text-xs truncate',
-              isSelected ? 'text-accent-foreground/70' : 'text-muted-foreground'
-            )}
+      title={item.title}
+      subtitle={item.subtitle}
+      // The tooltip trigger fills the 32 px tile, so hovering anywhere on
+      // the tile shows it. Image icons go through `imageSrc`, which leaves
+      // no place for a trigger.
+      icon={
+        Icon ? (
+          <Tooltip
+            content={item.iconTooltip}
+            className="h-full w-full items-center justify-center"
           >
-            {item.subtitle}
-          </div>
-        )}
-      </div>
-      {item.badge && (
-        // Trailing qualifier — the app a User Command is scoped to, today.
-        // Outlined and unfilled so it reads as a hint about the row rather
-        // than as an interactive chip: the alias keycap next to the title is
-        // something you type, this is something you're being told. Sits
-        // outside the `flex-1` block so it hugs the right edge and the title
-        // truncates before the badge is squeezed.
-        <span
-          className={cn(
-            'shrink-0 max-w-[40%] truncate px-2 py-0.5 rounded-md border text-[11px] leading-none',
-            isSelected
-              ? 'border-accent-foreground/30 text-accent-foreground/80'
-              : 'border-border text-muted-foreground'
-          )}
-        >
-          {item.badge}
-        </span>
-      )}
-    </div>
+            <Icon size={18} />
+          </Tooltip>
+        ) : undefined
+      }
+      imageSrc={showImage ? hint : undefined}
+      corner={BadgeIcon ? <BadgeIcon size={9} /> : undefined}
+      alias={
+        item.alias ? (
+          <span title={`Alias: ${item.alias}`}>{item.alias}</span>
+        ) : undefined
+      }
+      note={item.badge}
+      numberHint={numberHint}
+      selected={isSelected}
+    />
   )
 }

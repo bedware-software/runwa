@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Button, Field, Panel, PanelRow } from '@bedware/ui'
 import type { WindowIgnoreRule } from '@shared/types'
 import { EyeOff, Plus, Trash2 } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
@@ -127,32 +128,27 @@ export function WindowSwitcherIgnoreSection() {
             Add rule
           </div>
           <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">Window title</span>
-              <input
-                type="text"
-                value={title}
-                maxLength={MAX_FIELD_LENGTH}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="e.g. ktalk — leave empty for any"
-                spellCheck={false}
-                autoComplete="off"
-                className="h-9 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">Executable</span>
-              <input
-                type="text"
-                value={processName}
-                maxLength={MAX_FIELD_LENGTH}
-                onChange={(event) => setProcessName(event.target.value)}
-                placeholder="e.g. ktalk.exe"
-                spellCheck={false}
-                autoComplete="off"
-                className="h-9 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono"
-              />
-            </label>
+            <Field
+              label="Window title"
+              type="text"
+              value={title}
+              maxLength={MAX_FIELD_LENGTH}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="e.g. ktalk — leave empty for any"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <Field
+              label="Executable"
+              type="text"
+              mono
+              value={processName}
+              maxLength={MAX_FIELD_LENGTH}
+              onChange={(event) => setProcessName(event.target.value)}
+              placeholder="e.g. ktalk.exe"
+              spellCheck={false}
+              autoComplete="off"
+            />
           </div>
 
           <div className="flex items-center justify-between gap-3">
@@ -165,18 +161,15 @@ export function WindowSwitcherIgnoreSection() {
             >
               {error ?? 'A rule needs at least one of the two fields.'}
             </div>
-            <button
+            <Button
               type="submit"
+              variant="primary"
               disabled={!canSubmit}
-              className={cn(
-                'h-8 px-3 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0',
-                'bg-primary text-primary-foreground hover:opacity-90',
-                !canSubmit && 'opacity-50 cursor-not-allowed'
-              )}
+              icon={<Plus size={13} />}
+              className="shrink-0"
             >
-              <Plus size={13} />
               {saving ? 'Adding…' : 'Add rule'}
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -193,34 +186,27 @@ export function WindowSwitcherIgnoreSection() {
           )}
         </div>
 
-        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+        <Panel>
           {rules === null ? (
             loadError ? (
-              <div
-                role="alert"
-                className="px-4 py-4 flex items-center justify-between gap-3 text-xs text-destructive"
-              >
+              <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
                 <span>{loadError}</span>
-                <button
-                  type="button"
-                  onClick={() => void loadRules()}
-                  className="h-7 px-3 rounded-md border border-input bg-secondary text-secondary-foreground hover:bg-accent shrink-0"
-                >
+                <Button onClick={() => void loadRules()} className="shrink-0">
                   Retry
-                </button>
-              </div>
+                </Button>
+              </PanelRow>
             ) : (
-              <div className="px-4 py-5 text-xs text-muted-foreground">
+              <PanelRow className="py-5 text-xs text-muted-foreground">
                 Loading ignore rules…
-              </div>
+              </PanelRow>
             )
           ) : rules.length === 0 ? (
-            <div className="px-4 py-5 text-xs text-muted-foreground">
+            <PanelRow className="py-5 text-xs text-muted-foreground">
               Nothing is ignored. Every open window shows up in the switcher.
-            </div>
+            </PanelRow>
           ) : (
             rules.map((rule) => (
-              <div key={rule.id} className="flex items-start gap-3 px-4 py-3">
+              <PanelRow key={rule.id} className="items-start gap-3">
                 <EyeOff size={15} className="mt-0.5 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-foreground truncate">
@@ -244,10 +230,10 @@ export function WindowSwitcherIgnoreSection() {
                 >
                   <Trash2 size={14} />
                 </button>
-              </div>
+              </PanelRow>
             ))
           )}
-        </div>
+        </Panel>
       </div>
 
       <ConfirmDialog

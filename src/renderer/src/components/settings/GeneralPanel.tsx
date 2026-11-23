@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button, Panel, Segmented, Switch } from '@bedware/ui'
 import { AlertTriangle, Trash2 } from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
@@ -45,23 +46,12 @@ export function GeneralPanel() {
         <p className="text-xs text-muted-foreground mb-3">
           Choose how runwa looks. System follows your OS preference.
         </p>
-        <div className="flex gap-2">
-          {THEMES.map((t) => (
-            <button
-              key={t.value}
-              type="button"
-              onClick={() => void setTheme(t.value)}
-              className={cn(
-                'h-8 px-3 rounded-md text-xs font-medium border transition-colors',
-                theme === t.value
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Theme"
+          value={theme}
+          options={THEMES}
+          onChange={(value) => void setTheme(value)}
+        />
       </section>
 
       <section>
@@ -69,7 +59,7 @@ export function GeneralPanel() {
         <p className="text-xs text-muted-foreground mb-3">
           Tweaks for the palette window's behaviour and shortcuts.
         </p>
-        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+        <Panel>
           <ToggleRow
             title="Use Alt + number to run a result"
             description="The first nine results are always labelled 1–9. By default a plain digit runs that result and Alt+digit types the digit into the search box. Turn this on to swap them: Alt+digit runs the result and plain digits type as normal."
@@ -82,7 +72,7 @@ export function GeneralPanel() {
             checked={paletteSwitchToEnglish}
             onChange={(v) => void setPaletteSwitchToEnglish(v)}
           />
-        </div>
+        </Panel>
       </section>
 
       <StartupSection />
@@ -106,14 +96,14 @@ export function GeneralPanel() {
               installed. This action cannot be undone.
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="danger"
             onClick={() => setWipeConfirmOpen(true)}
-            className="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium bg-destructive text-destructive-foreground hover:opacity-90"
+            icon={<Trash2 size={12} />}
+            className="shrink-0"
           >
-            <Trash2 size={12} />
             Wipe all data
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -175,7 +165,7 @@ function StartupSection() {
       <p className="text-xs text-muted-foreground mb-3">
         Automate how runwa comes up with your system.
       </p>
-      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+      <Panel>
         <ToggleRow
           title="Start at login"
           description="Launch runwa automatically when you sign in. Starts hidden in the tray."
@@ -194,7 +184,7 @@ function StartupSection() {
             onChange={(v) => void setRunAsAdmin(v)}
           />
         )}
-      </div>
+      </Panel>
     </section>
   )
 }
@@ -216,39 +206,23 @@ function ToggleRow({
   disabledHint,
   onChange
 }: ToggleRowProps) {
+  // The design system's panel row, written out by class: PanelRow takes
+  // `title` as its heading, and this row needs the native tooltip.
   return (
     <div
-      className={cn(
-        'flex items-center justify-between gap-4 px-4 py-3',
-        disabled && 'opacity-60'
-      )}
+      className={cn('bw-row', disabled && 'opacity-60')}
       title={disabled ? disabledHint : undefined}
     >
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
+        <span className="bw-row__title">{title}</span>
+        <span className="bw-row__desc">{description}</span>
       </div>
-      <button
-        type="button"
-        onClick={() => {
-          if (disabled) return
-          onChange(!checked)
-        }}
+      <Switch
+        checked={checked}
+        onChange={onChange}
+        label={title}
         disabled={disabled}
-        className={cn(
-          'w-10 h-6 rounded-full transition-colors relative shrink-0',
-          checked ? 'bg-primary' : 'bg-muted',
-          disabled && 'cursor-not-allowed'
-        )}
-        aria-pressed={checked}
-      >
-        <div
-          className={cn(
-            'w-5 h-5 rounded-full bg-background absolute top-0.5 transition-transform',
-            checked ? 'translate-x-[18px]' : 'translate-x-0.5'
-          )}
-        />
-      </button>
+      />
     </div>
   )
 }

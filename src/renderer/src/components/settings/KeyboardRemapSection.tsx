@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button, InputField, Panel, PanelRow } from '@bedware/ui'
 import { Pencil, RefreshCw } from '@/lib/lucide-icons'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -54,37 +55,27 @@ export function KeyboardRemapSection() {
           editor; Reload re-installs the hook from disk — no app restart.
         </div>
         <div className="flex items-center gap-2">
-          <input
+          <InputField
             type="text"
+            size="sm"
+            mono
             readOnly
             value={view?.filePath ?? ''}
             onFocus={(e) => e.currentTarget.select()}
-            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+            boxClassName="flex-1"
+            className="text-xs truncate"
           />
-          <button
-            type="button"
-            onClick={onEdit}
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-            )}
-          >
-            <Pencil size={12} />
+          <Button onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
             Edit
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={() => void onReload()}
             disabled={reloading}
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent',
-              reloading && 'opacity-60 cursor-not-allowed'
-            )}
+            icon={<RefreshCw size={12} className={cn(reloading && 'animate-spin')} />}
+            className="shrink-0"
           >
-            <RefreshCw size={12} className={cn(reloading && 'animate-spin')} />
             Reload
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -147,9 +138,9 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs font-medium text-foreground">Hotkeys</div>
-      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+      <Panel>
         {view.triggers.map((t) => (
-          <div key={t.name} className="flex flex-col gap-2 px-4 py-3">
+          <PanelRow key={t.name} className="flex-col items-stretch gap-2">
             <div className="text-xs font-semibold text-foreground">{t.name}</div>
             <div className="flex flex-col gap-1 text-xs">
               <LabeledRow label="Tap">
@@ -161,9 +152,9 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
               </LabeledRow>
               <HoldBlock trigger={t} />
             </div>
-          </div>
+          </PanelRow>
         ))}
-      </div>
+      </Panel>
     </div>
   )
 }

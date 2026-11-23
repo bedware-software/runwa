@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button, Field, Segmented } from '@bedware/ui'
 import type { UserCommandKind } from '@shared/types'
 import { IS_MAC } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -105,16 +106,13 @@ export function NewUserCommandModal({
     onSubmit({ name: name.trim(), kind, action: action.trim(), alias: alias.trim() })
   }
 
-  const inputClass =
-    'h-8 px-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring'
-
   return (
     <>
       <div className="absolute inset-0 bg-background/60 backdrop-blur-[1px]" />
       <div
         ref={rootRef}
         role="dialog"
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[420px] bg-popover text-popover-foreground border border-border rounded-md shadow-lg overflow-hidden"
+        className="bw-dialog absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[420px]"
       >
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -138,73 +136,59 @@ export function NewUserCommandModal({
           className="p-3 flex flex-col gap-3"
         >
           <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Name</span>
-              <input
-                ref={nameRef}
-                type="text"
-                value={name}
-                maxLength={100}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Reformat code"
-                className={inputClass}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Alias</span>
-              <input
-                type="text"
-                value={alias}
-                maxLength={64}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => setAlias(e.target.value)}
-                placeholder="optional"
-                className={cn(inputClass, 'font-mono')}
-              />
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">Type</span>
-            <div className="flex gap-1">
-              {(['keystroke', 'shell'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setKind(option)}
-                  className={cn(
-                    'h-8 px-3 rounded-md border text-xs transition-colors',
-                    kind === option
-                      ? 'border-ring bg-accent text-accent-foreground'
-                      : 'border-input text-muted-foreground hover:bg-accent/50'
-                  )}
-                >
-                  {option === 'shell' ? 'Shell command' : 'Keystroke'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">
-              {kind === 'keystroke' ? 'Keystroke' : 'Action'}
-            </span>
-            <input
+            <Field
+              ref={nameRef}
+              label="Name"
+              size="sm"
               type="text"
-              value={action}
-              maxLength={4096}
+              value={name}
+              maxLength={100}
               spellCheck={false}
               autoComplete="off"
-              onChange={(e) => setAction(e.target.value)}
-              placeholder={
-                kind === 'keystroke' ? KEYSTROKE_PLACEHOLDER : SHELL_PLACEHOLDER
-              }
-              className={cn(inputClass, 'font-mono')}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Reformat code"
             />
-          </label>
+            <Field
+              label="Alias"
+              size="sm"
+              mono
+              type="text"
+              value={alias}
+              maxLength={64}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setAlias(e.target.value)}
+              placeholder="optional"
+            />
+          </div>
+
+          <div>
+            <span className="bw-label">Type</span>
+            <Segmented
+              label="Type"
+              value={kind}
+              onChange={setKind}
+              options={[
+                { value: 'keystroke', label: 'Keystroke' },
+                { value: 'shell', label: 'Shell command' }
+              ]}
+            />
+          </div>
+
+          <Field
+            label={kind === 'keystroke' ? 'Keystroke' : 'Action'}
+            size="sm"
+            mono
+            type="text"
+            value={action}
+            maxLength={4096}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setAction(e.target.value)}
+            placeholder={
+              kind === 'keystroke' ? KEYSTROKE_PLACEHOLDER : SHELL_PLACEHOLDER
+            }
+          />
 
           <div className="flex items-center justify-between gap-2">
             <span
@@ -221,23 +205,12 @@ export function NewUserCommandModal({
                   : 'Runs in the background, output is not shown.')}
             </span>
             <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-7 px-3 rounded-md text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
-              >
+              <Button variant="ghost" onClick={onClose}>
                 Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className={cn(
-                  'h-7 px-3 rounded-md text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors',
-                  !canSubmit && 'opacity-50 cursor-not-allowed'
-                )}
-              >
+              </Button>
+              <Button variant="primary" type="submit" disabled={!canSubmit}>
                 {saving ? 'Saving…' : 'Create'}
-              </button>
+              </Button>
             </div>
           </div>
         </form>

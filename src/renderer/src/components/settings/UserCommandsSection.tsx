@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent
 } from 'react'
+import { Button, Field, InputField, Panel, PanelRow, Select } from '@bedware/ui'
 import type {
   RunningAppSummary,
   UserCommand,
@@ -52,9 +53,6 @@ function readableError(error: unknown): string {
     .replace(/^Error: /, '')
   return cleaned || 'Something went wrong. Please try again.'
 }
-
-const INPUT_CLASS =
-  'h-9 px-3 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring'
 
 interface Draft {
   name: string
@@ -274,84 +272,75 @@ export function UserCommandsSection() {
               {editingId ? 'Edit command' : 'Add command'}
             </div>
             {editingId && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={cancelEditing}
-                className="h-6 px-2 rounded-md text-[11px] flex items-center gap-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                icon={<X size={11} />}
+                className="h-6 px-2"
               >
-                <X size={11} />
                 Cancel
-              </button>
+              </Button>
             )}
           </div>
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
             <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-2">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-foreground">Name</span>
-                <input
-                  type="text"
-                  value={draft.name}
-                  maxLength={MAX_NAME_LENGTH}
-                  onChange={(event) => patchDraft({ name: event.target.value })}
-                  placeholder="e.g. Open project"
-                  autoComplete="off"
-                  className={INPUT_CLASS}
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-foreground">Alias</span>
-                <input
-                  type="text"
-                  value={draft.alias}
-                  maxLength={MAX_ALIAS_LENGTH}
-                  onChange={(event) => patchDraft({ alias: event.target.value })}
-                  placeholder="optional"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className={cn(INPUT_CLASS, 'font-mono')}
-                />
-              </label>
-            </div>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">
-                {draft.kind === 'keystroke' ? 'Keystroke' : 'Action'}
-              </span>
-              <input
+              <Field
+                label="Name"
                 type="text"
-                value={draft.action}
-                maxLength={MAX_ACTION_LENGTH}
-                onChange={(event) => patchDraft({ action: event.target.value })}
-                placeholder={
-                  draft.kind === 'keystroke'
-                    ? KEYSTROKE_PLACEHOLDER
-                    : SHELL_PLACEHOLDER
-                }
+                value={draft.name}
+                maxLength={MAX_NAME_LENGTH}
+                onChange={(event) => patchDraft({ name: event.target.value })}
+                placeholder="e.g. Open project"
+                autoComplete="off"
+              />
+              <Field
+                label="Alias"
+                type="text"
+                mono
+                value={draft.alias}
+                maxLength={MAX_ALIAS_LENGTH}
+                onChange={(event) => patchDraft({ alias: event.target.value })}
+                placeholder="optional"
                 spellCheck={false}
                 autoComplete="off"
-                className={cn(INPUT_CLASS, 'font-mono')}
               />
-            </label>
+            </div>
+            <Field
+              label={draft.kind === 'keystroke' ? 'Keystroke' : 'Action'}
+              type="text"
+              mono
+              value={draft.action}
+              maxLength={MAX_ACTION_LENGTH}
+              onChange={(event) => patchDraft({ action: event.target.value })}
+              placeholder={
+                draft.kind === 'keystroke'
+                  ? KEYSTROKE_PLACEHOLDER
+                  : SHELL_PLACEHOLDER
+              }
+              spellCheck={false}
+              autoComplete="off"
+            />
           </div>
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">Type</span>
-              <select
+            <div>
+              <span className="bw-label">Type</span>
+              <Select<UserCommandKind>
+                label="Type"
                 value={draft.kind}
-                onChange={(event) =>
-                  patchDraft({ kind: event.target.value as UserCommandKind })
-                }
-                className={INPUT_CLASS}
-              >
-                <option value="keystroke">Keystroke</option>
-                <option value="shell">Shell command</option>
-              </select>
-            </label>
+                onChange={(kind) => patchDraft({ kind })}
+                options={[
+                  { value: 'keystroke', label: 'Keystroke' },
+                  { value: 'shell', label: 'Shell command' }
+                ]}
+                className="w-full h-9"
+              />
+            </div>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-foreground">Applies to</span>
-              <input
+            <div>
+              <Field
+                label="Applies to"
                 type="text"
                 list="user-command-running-apps"
                 value={draft.appScope}
@@ -360,14 +349,13 @@ export function UserCommandsSection() {
                 placeholder={`All apps — ${SCOPE_PLACEHOLDER}`}
                 spellCheck={false}
                 autoComplete="off"
-                className={INPUT_CLASS}
               />
               <datalist id="user-command-running-apps">
                 {runningApps.map((app) => (
                   <option key={app.name} value={app.name} />
                 ))}
               </datalist>
-            </label>
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-3">
@@ -380,16 +368,13 @@ export function UserCommandsSection() {
             >
               {error ?? hint}
             </div>
-            <button
+            <Button
               type="submit"
+              variant="primary"
               disabled={!canSubmit}
-              className={cn(
-                'h-8 px-3 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0',
-                'bg-primary text-primary-foreground hover:opacity-90',
-                !canSubmit && 'opacity-50 cursor-not-allowed'
-              )}
+              icon={editingId ? <Pencil size={13} /> : <Plus size={13} />}
+              className="shrink-0"
             >
-              {editingId ? <Pencil size={13} /> : <Plus size={13} />}
               {saving
                 ? editingId
                   ? 'Saving…'
@@ -397,7 +382,7 @@ export function UserCommandsSection() {
                 : editingId
                   ? 'Save changes'
                   : 'Add command'}
-            </button>
+            </Button>
           </div>
 
           <p className="m-0 text-xs leading-relaxed text-muted-foreground">
@@ -423,24 +408,23 @@ export function UserCommandsSection() {
           Malformed entries are skipped.
         </div>
         <div className="flex items-center gap-2">
-          <input
+          <InputField
             type="text"
+            size="sm"
+            mono
             readOnly
             value={filePath}
             onFocus={(event) => event.currentTarget.select()}
-            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+            boxClassName="flex-1"
+            className="text-xs truncate"
           />
-          <button
-            type="button"
+          <Button
             onClick={() => void window.electronAPI.userCommandsOpenFile()}
-            className={cn(
-              'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-              'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-            )}
+            icon={<Pencil size={12} />}
+            className="shrink-0"
           >
-            <Pencil size={12} />
             Edit
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -456,36 +440,29 @@ export function UserCommandsSection() {
           )}
         </div>
 
-        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+        <Panel>
           {commands === null ? (
             loadError ? (
-              <div
-                role="alert"
-                className="px-4 py-4 flex items-center justify-between gap-3 text-xs text-destructive"
-              >
+              <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
                 <span>{loadError}</span>
-                <button
-                  type="button"
-                  onClick={() => void loadCommands()}
-                  className="h-7 px-3 rounded-md border border-input bg-secondary text-secondary-foreground hover:bg-accent shrink-0"
-                >
+                <Button onClick={() => void loadCommands()} className="shrink-0">
                   Retry
-                </button>
-              </div>
+                </Button>
+              </PanelRow>
             ) : (
-              <div className="px-4 py-5 text-xs text-muted-foreground">
+              <PanelRow className="py-5 text-xs text-muted-foreground">
                 Loading commands…
-              </div>
+              </PanelRow>
             )
           ) : commands.length === 0 ? (
-            <div className="px-4 py-5 text-xs text-muted-foreground">
+            <PanelRow className="py-5 text-xs text-muted-foreground">
               No user commands yet. Add one above and it will appear in Command
               Palette immediately.
-            </div>
+            </PanelRow>
           ) : (
             groups.map((group) => (
               <Fragment key={group.key}>
-                <div className="flex items-center gap-1.5 px-4 py-1.5 bg-secondary/50 text-[11px] font-medium text-muted-foreground">
+                <PanelRow className="justify-start gap-1.5 py-1.5 bg-secondary/50 text-[11px] font-medium text-muted-foreground">
                   {group.scope ? (
                     <AppWindow size={11} className="shrink-0" />
                   ) : (
@@ -495,16 +472,16 @@ export function UserCommandsSection() {
                     {group.scope || 'All apps'}
                   </span>
                   <span className="shrink-0">· {group.commands.length}</span>
-                </div>
+                </PanelRow>
                 {group.commands.map((command) => {
               const Icon = command.kind === 'keystroke' ? Keyboard : Terminal
               const alias = command.alias
               const isEditing = editingId === command.id
               return (
-                <div
+                <PanelRow
                   key={command.id}
                   className={cn(
-                    'flex items-start gap-3 px-4 py-3 group',
+                    'items-start gap-3 group',
                     isEditing && 'bg-accent/40'
                   )}
                 >
@@ -558,13 +535,13 @@ export function UserCommandsSection() {
                   >
                     <Trash2 size={14} />
                   </button>
-                </div>
+                </PanelRow>
               )
                 })}
               </Fragment>
             ))
           )}
-        </div>
+        </Panel>
       </div>
 
       <ConfirmDialog

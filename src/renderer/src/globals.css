@@ -6,6 +6,8 @@
 @import "@bedware/ui/fonts.css";
 @import "@bedware/ui/tokens.css";
 @import "@bedware/ui/tailwind-theme.css";
+/* In the components layer so a Tailwind utility on a bw-* element still wins. */
+@import "@bedware/ui/styles.css" layer(components);
 
 html[data-theme="dark"] {
   color-scheme: dark;

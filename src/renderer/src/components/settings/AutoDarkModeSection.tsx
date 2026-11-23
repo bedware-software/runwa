@@ -10,6 +10,7 @@ import {
   readAutoDarkModeConfig,
   type AutoDarkModeMode
 } from '@shared/auto-dark-mode'
+import { InputField, Panel } from '@bedware/ui'
 import type { ModuleConfigValue } from '@shared/types'
 import { AlertTriangle } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
@@ -147,12 +148,7 @@ export function AutoDarkModeSection() {
         </div>
       </section>
 
-      <section
-        className={cn(
-          'rounded-lg border border-input bg-card overflow-hidden',
-          !supported && 'opacity-55'
-        )}
-      >
+      <Panel className={cn(!supported && 'opacity-55')}>
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">Schedule</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -190,10 +186,10 @@ export function AutoDarkModeSection() {
             {error}
           </div>
         )}
-      </section>
+      </Panel>
 
       {CURRENT_OS === 'windows' && (
-        <section className="overflow-hidden rounded-lg border border-input bg-card">
+        <Panel>
           <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
             <div>
               <h2 className="text-sm font-semibold text-foreground">
@@ -247,7 +243,7 @@ export function AutoDarkModeSection() {
               {backgroundColorError}
             </div>
           )}
-        </section>
+        </Panel>
       )}
     </div>
   )
@@ -271,21 +267,17 @@ function TimeRow({
   return (
     <label className="flex min-h-14 items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0">
       <span className="text-sm font-medium text-foreground">{label}</span>
-      <input
+      <InputField
         type="time"
+        size="sm"
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         step={60}
-        aria-invalid={invalid || undefined}
+        invalid={invalid}
         aria-describedby={describedBy}
-        className={cn(
-          'h-8 w-28 rounded-md border border-input bg-background px-2 text-center text-sm font-medium text-foreground outline-none transition-colors',
-          invalid
-            ? 'border-destructive focus:border-destructive focus:ring-1 focus:ring-destructive/30'
-            : 'focus:border-ring focus:ring-1 focus:ring-ring/30',
-          disabled && 'cursor-not-allowed'
-        )}
+        boxClassName="w-28 px-2"
+        className="text-center text-sm font-medium"
       />
     </label>
   )

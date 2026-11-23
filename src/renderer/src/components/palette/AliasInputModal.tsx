@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button, InputField } from '@bedware/ui'
 
 /**
  * Modal overlay for assigning an alias to the currently-selected palette
@@ -107,7 +108,7 @@ export function AliasInputModal({
       <div
         ref={rootRef}
         role="dialog"
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[360px] bg-popover text-popover-foreground border border-border rounded-md shadow-lg overflow-hidden"
+        className="bw-dialog absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[360px]"
       >
         <div className="px-4 py-3 border-b border-border">
           <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -122,8 +123,11 @@ export function AliasInputModal({
           }}
           className="p-3 flex flex-col gap-3"
         >
-          <input
+          <InputField
             ref={inputRef}
+            size="sm"
+            mono
+            invalid={!!error}
             type="text"
             spellCheck={false}
             autoComplete="off"
@@ -133,7 +137,6 @@ export function AliasInputModal({
               setError(null)
             }}
             placeholder="e.g. chr"
-            className="h-8 px-2 rounded-md border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="flex items-center justify-between gap-2">
             <span
@@ -147,20 +150,13 @@ export function AliasInputModal({
             >
               {error ?? 'Leave empty to clear.'}
             </span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-7 px-3 rounded-md text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
-              >
+            <div className="flex items-center gap-1 shrink-0">
+              <Button variant="ghost" onClick={onClose}>
                 Cancel
-              </button>
-              <button
-                type="submit"
-                className="h-7 px-3 rounded-md text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
+              </Button>
+              <Button variant="primary" type="submit">
                 Save
-              </button>
+              </Button>
             </div>
           </div>
         </form>

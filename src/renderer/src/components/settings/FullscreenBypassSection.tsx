@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button, Panel, PanelRow } from '@bedware/ui'
 import { Keyboard, Trash2 } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
@@ -91,34 +92,27 @@ export function FullscreenBypassSection() {
         </div>
       )}
 
-      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+      <Panel>
         {processes === null ? (
           loadError ? (
-            <div
-              role="alert"
-              className="px-4 py-4 flex items-center justify-between gap-3 text-xs text-destructive"
-            >
+            <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
               <span>{loadError}</span>
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="h-7 px-3 rounded-md border border-input bg-secondary text-secondary-foreground hover:bg-accent shrink-0"
-              >
+              <Button onClick={() => void load()} className="shrink-0">
                 Retry
-              </button>
-            </div>
+              </Button>
+            </PanelRow>
           ) : (
-            <div className="px-4 py-5 text-xs text-muted-foreground">
+            <PanelRow className="py-5 text-xs text-muted-foreground">
               Loading…
-            </div>
+            </PanelRow>
           )
         ) : processes.length === 0 ? (
-          <div className="px-4 py-5 text-xs text-muted-foreground">
+          <PanelRow className="py-5 text-xs text-muted-foreground">
             No apps yet. Remapping stays on everywhere.
-          </div>
+          </PanelRow>
         ) : (
           processes.map((processName) => (
-            <div key={processName} className="flex items-center gap-3 px-4 py-3">
+            <PanelRow key={processName} className="gap-3">
               <Keyboard size={15} className="shrink-0 text-muted-foreground" />
               <code className="flex-1 min-w-0 text-xs text-foreground font-mono truncate">
                 {processName}
@@ -137,10 +131,10 @@ export function FullscreenBypassSection() {
               >
                 <Trash2 size={14} />
               </button>
-            </div>
+            </PanelRow>
           ))
         )}
-      </div>
+      </Panel>
     </div>
   )
 }

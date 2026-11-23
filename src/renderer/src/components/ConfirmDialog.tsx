@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
-import { cn } from '@/lib/utils'
+import { Button, Hint, HintBar } from '@bedware/ui'
 import { formatKey } from '@/lib/hotkey-display'
-import { Kbd } from './ui/Kbd'
 
 interface Props {
   open: boolean
@@ -110,11 +109,7 @@ export function ConfirmDialog({
   if (!open) return null
 
   return (
-    <div
-      role="presentation"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onCancel}
-    >
+    <div role="presentation" className="bw-overlay" onClick={onCancel}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -122,51 +117,40 @@ export function ConfirmDialog({
         aria-labelledby={titleId}
         aria-describedby={messageId}
         tabIndex={-1}
-        className="w-[440px] max-w-[90vw] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-5 focus:outline-none"
+        className="bw-dialog focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 id={titleId} className="text-sm font-semibold text-foreground mb-2">
-          {title}
-        </h3>
-        <p
-          id={messageId}
-          className="text-xs text-muted-foreground leading-relaxed mb-5"
-        >
-          {message}
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            ref={cancelRef}
-            type="button"
-            tabIndex={keyboardDriven ? -1 : undefined}
-            onClick={onCancel}
-            className="inline-flex items-center gap-2 h-8 px-3 rounded-md text-xs font-medium text-muted-foreground hover:bg-accent"
-          >
-            {cancelLabel}
-            {keyboardDriven && <Kbd>{formatKey('Esc')}</Kbd>}
-          </button>
-          <button
-            type="button"
-            tabIndex={keyboardDriven ? -1 : undefined}
-            onClick={onConfirm}
-            className={cn(
-              'inline-flex items-center gap-2 h-8 px-3 rounded-md text-xs font-medium hover:opacity-90',
-              destructive
-                ? 'bg-destructive text-destructive-foreground'
-                : 'bg-primary text-primary-foreground'
-            )}
-          >
-            {confirmLabel}
-            {keyboardDriven && (
-              // The stock chip is a popover-coloured tile, which reads as a
-              // hole punched in a filled button — tint it from the button's
-              // own colours instead.
-              <Kbd className="bg-black/20 border-white/25 text-current shadow-none">
-                {formatKey('Enter')}
-              </Kbd>
-            )}
-          </button>
+        <div className="bw-dialog__body">
+          <h3 id={titleId} className="bw-dialog__title">
+            {title}
+          </h3>
+          <p id={messageId} className="bw-dialog__message">
+            {message}
+          </p>
+          <div className="bw-dialog__actions">
+            <Button
+              ref={cancelRef}
+              variant="ghost"
+              tabIndex={keyboardDriven ? -1 : undefined}
+              onClick={onCancel}
+            >
+              {cancelLabel}
+            </Button>
+            <Button
+              variant={destructive ? 'danger' : 'primary'}
+              tabIndex={keyboardDriven ? -1 : undefined}
+              onClick={onConfirm}
+            >
+              {confirmLabel}
+            </Button>
+          </div>
         </div>
+        {/* Only the keys that really work here: Enter confirms only when
+            keyboard-driven (otherwise it presses whichever button has focus). */}
+        <HintBar>
+          {keyboardDriven && <Hint label={confirmLabel} keys={[formatKey('Enter')]} />}
+          <Hint label={cancelLabel} keys={[formatKey('Esc')]} />
+        </HintBar>
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 import { useState } from 'react'
+import { Badge, PanelRow } from '@bedware/ui'
 import { HotkeyRecorder } from './HotkeyRecorder'
 import { Hotkey } from '../ui/Kbd'
-import { cn } from '@/lib/utils'
 
 /**
  * Reusable row for a single hotkey binding. Drives the per-module
@@ -42,20 +42,11 @@ export function HotkeyRow({
   remapTriggers
 }: Props) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
+    <PanelRow>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground">{title}</span>
-          <span
-            className={cn(
-              'text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded',
-              scope === 'Global'
-                ? 'bg-primary/15 text-primary'
-                : 'bg-secondary text-muted-foreground'
-            )}
-          >
-            {scope}
-          </span>
+          <Badge tone={scope === 'Global' ? 'accent' : 'neutral'}>{scope}</Badge>
           {moduleId && <ModuleIdBadge moduleId={moduleId} />}
         </div>
         <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
@@ -64,9 +55,7 @@ export function HotkeyRow({
             className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs"
             title="An open_module rule in keyboard-rules.yaml opens this module. The hotkey on the right keeps working too."
           >
-            <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">
-              Overridden by remapper
-            </span>
+            <Badge tone="warning">Overridden by remapper</Badge>
             {remapTriggers.map((t) => {
               // "Left Shift (tap)" → chip the key, keep "(tap)" as text.
               const tap = t.endsWith(' (tap)')
@@ -82,7 +71,7 @@ export function HotkeyRow({
         )}
       </div>
       <HotkeyRecorder value={value} defaultValue={defaultValue} onChange={onChange} />
-    </div>
+    </PanelRow>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button, InputField } from '@bedware/ui'
 import {
   Check,
   Clipboard,
@@ -9,7 +10,6 @@ import {
   RotateCcw
 } from '@/lib/lucide-icons'
 import type { FlashcardsDecksFolderView, FlashcardsLlmPromptView } from '@shared/types'
-import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '../ConfirmDialog'
 
 const MODULE_ID = 'flashcards'
@@ -18,11 +18,6 @@ const ACTION_COPY = 'copyLlmPrompt'
 const ACTION_RESET = 'resetLlmPrompt'
 const ACTION_OPEN_DECKS = 'openDecksFolder'
 const ACTION_RELOAD_DECKS = 'reloadDecks'
-
-const BUTTON_CLASS = cn(
-  'h-8 px-3 rounded-md text-xs font-medium border shrink-0 transition-colors flex items-center gap-1.5',
-  'bg-secondary text-secondary-foreground border-input hover:bg-accent'
-)
 
 /**
  * Settings section for the LLM prompt file. Same shape as
@@ -106,15 +101,17 @@ export function FlashcardsLlmPromptSection() {
           clipboard (always fresh from disk).
         </div>
         <div className="flex items-center gap-2">
-          <input
+          <InputField
             type="text"
+            size="sm"
+            mono
             readOnly
             value={view?.filePath ?? ''}
             onFocus={(e) => e.currentTarget.select()}
-            className="h-8 flex-1 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+            boxClassName="flex-1"
+            className="text-xs truncate"
           />
-          <button
-            type="button"
+          <Button
             onClick={() => void onCopy()}
             // Reset "Copied" → "Copy" on the natural end of the
             // interaction: pointer leaves the button, or the button
@@ -123,28 +120,22 @@ export function FlashcardsLlmPromptSection() {
             // user's gesture, not a clock.
             onPointerLeave={() => setCopied(false)}
             onBlur={() => setCopied(false)}
-            className={BUTTON_CLASS}
+            icon={copied ? <Check size={12} /> : <Clipboard size={12} />}
+            className="shrink-0"
           >
-            {copied ? <Check size={12} /> : <Clipboard size={12} />}
             {copied ? 'Copied' : 'Copy'}
-          </button>
-          <button
-            type="button"
-            onClick={onEdit}
-            className={BUTTON_CLASS}
-          >
-            <Pencil size={12} />
+          </Button>
+          <Button onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
             Edit
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={() => setResetConfirmOpen(true)}
             title="Overwrite the file with the shipped default prompt."
-            className={BUTTON_CLASS}
+            icon={<RotateCcw size={12} />}
+            className="shrink-0"
           >
-            <RotateCcw size={12} />
             Reset
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -200,36 +191,40 @@ function DecksFolderSection() {
         machines.
       </div>
       <div className="flex items-center gap-2">
-        <input
+        <InputField
           type="text"
+          size="sm"
+          mono
           readOnly
           value={view?.folder ?? ''}
           title={view?.folder}
           onFocus={(e) => e.currentTarget.select()}
-          className="h-8 flex-1 min-w-0 px-3 rounded-md bg-card border border-input text-xs text-foreground outline-none font-mono truncate"
+          boxClassName="flex-1 min-w-0"
+          className="text-xs truncate"
         />
-        <button
-          type="button"
+        <Button
           onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_OPEN_DECKS)}
           title="Open the folder in Finder / Explorer."
-          className={BUTTON_CLASS}
+          icon={<FolderOpen size={12} />}
+          className="shrink-0"
         >
-          <FolderOpen size={12} />
           Open
-        </button>
-        <button type="button" onClick={() => void onChoose()} className={BUTTON_CLASS}>
-          <FolderPen size={12} />
+        </Button>
+        <Button
+          onClick={() => void onChoose()}
+          icon={<FolderPen size={12} />}
+          className="shrink-0"
+        >
           Change…
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_RELOAD_DECKS)}
           title="Re-read every deck file. Files reload on their own when their mtime changes; this is for tools that preserve mtimes."
-          className={BUTTON_CLASS}
+          icon={<RefreshCw size={12} />}
+          className="shrink-0"
         >
-          <RefreshCw size={12} />
           Reload
-        </button>
+        </Button>
       </div>
       {view && !view.isDefault && (
         <div className="text-xs text-muted-foreground flex items-center gap-2 min-w-0">

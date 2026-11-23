@@ -7,6 +7,7 @@ import {
   XCircle
 } from '@/lib/lucide-icons'
 import type { FlashcardCard } from '@shared/types'
+import { RowKey } from '@bedware/ui'
 import { cn } from '@/lib/utils'
 import type { QuizSession } from '@/store/palette-store'
 import { QuizSummary } from './QuizSummary'
@@ -136,7 +137,7 @@ function QuizHeader({
         <>
           <span className="opacity-50">·</span>
           <span
-            className="inline-flex items-center gap-1 text-amber-500"
+            className="inline-flex items-center gap-1 text-warning"
             title={`${warnings} parse warning${warnings === 1 ? '' : 's'} in this deck`}
           >
             <AlertTriangle size={12} strokeWidth={2} />
@@ -188,27 +189,23 @@ function OptionRow({
       className={cn(
         'flex items-center gap-3 rounded-md border px-3 py-2 transition-colors',
         state === 'idle' && 'border-border bg-popover',
-        isCorrect && 'border-emerald-500/60 bg-emerald-500/10',
-        isWrongPick && 'border-red-500/60 bg-red-500/10',
+        isCorrect && 'border-success/60 bg-success/10',
+        isWrongPick && 'border-destructive/60 bg-destructive/10',
         state === 'unpicked-revealed' && 'border-border bg-popover opacity-60'
       )}
     >
-      <kbd
-        aria-hidden
+      <RowKey
         className={cn(
-          'inline-flex items-center justify-center h-5 w-5 shrink-0',
-          'rounded-md border font-mono font-medium text-[11px] leading-none',
-          'shadow-[0_0_2px_rgb(0_0_0/0.1)]',
-          isCorrect && 'border-emerald-500/60 text-emerald-600',
-          isWrongPick && 'border-red-500/60 text-red-600',
-          !isCorrect && !isWrongPick && 'border-border bg-popover text-foreground'
+          'h-5 w-5 text-[11px]',
+          isCorrect && 'border-success/60 bg-transparent text-success',
+          isWrongPick && 'border-destructive/60 bg-transparent text-destructive'
         )}
       >
         {index + 1}
-      </kbd>
+      </RowKey>
       <span className="flex-1 text-sm whitespace-pre-wrap">{text}</span>
-      {isCorrect && <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />}
-      {isWrongPick && <XCircle size={16} className="text-red-500 shrink-0" />}
+      {isCorrect && <CheckCircle2 size={16} className="text-success shrink-0" />}
+      {isWrongPick && <XCircle size={16} className="text-destructive shrink-0" />}
       {state === 'unpicked-revealed' && (
         <Circle size={16} className="text-muted-foreground shrink-0" />
       )}

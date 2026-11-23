@@ -1,53 +1,26 @@
 import { type ReactNode } from 'react'
+import { Kbd as BwKbd } from '@bedware/ui'
 import { cn } from '@/lib/utils'
 import { tokenizeHotkey } from '@/lib/hotkey-display'
 
 /**
- * One key chip. Thin wrapper around `<kbd>` so we can centralize the look
- * (bg, font, radius) and keep every hotkey surface — palette footer,
- * HotkeyRecorder, keyboard-remap rules list — visually identical.
- *
- * Accepts either a string (single key token) or ReactNode (icons — used
- * by the palette footer's "Navigate" arrow hints).
+ * One key chip — the design system's Kbd, so every hotkey surface (palette
+ * footer, HotkeyRecorder, keyboard-remap rules list) looks the same.
+ * `on`: "field" for a chip on a text field, "button" on a filled button.
  */
 export function Kbd({
   children,
-  className
+  className,
+  on
 }: {
   children: ReactNode
   className?: string
+  on?: 'field' | 'button'
 }) {
   return (
-    <kbd
-      className={cn(
-        // Horizontal 3 px padding — tight chip hugging the glyph,
-        // matching the denser PT Command Palette look. Vertical
-        // padding is asymmetric (+1 px on top, -1 px on bottom of the
-        // 3 px base): monospace bold glyphs with `line-height: 1` sit
-        // ~1 px above the line-box centre because the ascender is
-        // taller than the descender, and `leading-none` gives the
-        // font no vertical compensation. The 4/2 split pulls the
-        // glyph down to the geometric centre of the chip.
-        //
-        // `min-w-[17px]` = chip height (4 + 11 font + 2 = 17 px) so
-        // single-character chips render as squares; multi-character
-        // chips ("Ctrl", "Esc") outgrow the min-width and become
-        // rectangles naturally.
-        'inline-flex items-center justify-center pt-[4px] pb-[2px] px-[3px] rounded-md min-w-[17px]',
-        // Popover bg sits slightly above the toolbar for surface
-        // contrast. Regular weight keeps the chip quiet; 11 px font
-        // is one step below the 12 px hint label so the chip feels
-        // subordinate rather than shouting.
-        'bg-popover text-foreground font-mono font-normal text-[11px] leading-none',
-        // Visible border + a whisper of even glow (no vertical
-        // offset) — the glow lifts the chip just enough to read as a
-        // discrete surface without the bottom-heavy 3D-button look.
-        'border border-border shrink-0 shadow-[0_0_2px_rgb(0_0_0/0.1)]',
-        className
-      )}
-    >
+    <BwKbd on={on} className={cn('shrink-0', className)}>
       {children}
-    </kbd>
+    </BwKbd>
   )
 }
 

@@ -1,3 +1,4 @@
+import { Switch } from '@bedware/ui'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import {
@@ -179,6 +180,7 @@ function ModuleGroup({ label, modules, current, onChange, onToggle }: ModuleGrou
                 {m.name}
               </span>
               <SidebarToggle
+                label={m.name}
                 checked={m.enabled}
                 onChange={(v) => onToggle(m.id, v)}
               />
@@ -191,31 +193,19 @@ function ModuleGroup({ label, modules, current, onChange, onToggle }: ModuleGrou
 }
 
 function SidebarToggle({
+  label,
   checked,
   onChange
 }: {
+  label: string
   checked: boolean
   onChange: (v: boolean) => void
 }) {
+  // The wrapper keeps the click from reaching the row, which would open the
+  // module's page.
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation()
-        onChange(!checked)
-      }}
-      className={cn(
-        'w-7 h-4 rounded-full transition-colors relative shrink-0',
-        checked ? 'bg-primary' : 'bg-muted'
-      )}
-      aria-pressed={checked}
-    >
-      <div
-        className={cn(
-          'w-3 h-3 rounded-full bg-background absolute top-0.5 transition-transform',
-          checked ? 'translate-x-[14px]' : 'translate-x-0.5'
-        )}
-      />
-    </button>
+    <span className="flex shrink-0" onClick={(e) => e.stopPropagation()}>
+      <Switch checked={checked} onChange={onChange} label={label} />
+    </span>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button, Panel, PanelRow } from '@bedware/ui'
 import { Download, RefreshCw } from '@/lib/lucide-icons'
 import type { AppInfo, UpdateStatus } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -28,14 +29,13 @@ export function AboutPanel() {
         <p className="text-xs text-muted-foreground mb-3">
           A cross-platform command palette launcher.
         </p>
-        <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="text-sm font-medium text-foreground">Version</div>
+        <Panel>
+          <PanelRow title="Version">
             <div className="text-sm text-muted-foreground tabular-nums">
               {info ? `v${info.version}` : '…'}
             </div>
-          </div>
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
+          </PanelRow>
+          <PanelRow>
             <div className="text-sm font-medium text-foreground shrink-0">
               Settings folder
             </div>
@@ -53,8 +53,8 @@ export function AboutPanel() {
             ) : (
               <div className="text-xs text-muted-foreground">…</div>
             )}
-          </div>
-        </div>
+          </PanelRow>
+        </Panel>
       </section>
 
       <UpdateSection />
@@ -105,35 +105,25 @@ function UpdateSection() {
         runwa checks the GitHub releases on launch and every few hours.
         The button below triggers a manual check.
       </p>
-      <div className="flex items-start gap-4 px-4 py-3 border border-input rounded-md bg-card">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">{label}</p>
-          {description && (
-            <p className="text-[11px] text-muted-foreground mt-1">
-              {description}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={action === 'install' ? onInstall : onCheck}
-          disabled={busy}
-          className={cn(
-            'shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border transition-colors',
-            action === 'install'
-              ? 'bg-primary text-primary-foreground border-primary hover:opacity-90'
-              : 'bg-secondary text-secondary-foreground border-input hover:bg-accent',
-            busy && 'opacity-60 cursor-not-allowed hover:bg-secondary'
-          )}
-        >
-          {action === 'install' ? (
-            <Download size={12} />
-          ) : (
-            <RefreshCw size={12} className={cn(spin && 'animate-spin')} />
-          )}
-          {buttonLabel}
-        </button>
-      </div>
+      <Panel>
+        <PanelRow title={label} description={description} className="items-start">
+          <Button
+            variant={action === 'install' ? 'primary' : 'secondary'}
+            onClick={action === 'install' ? onInstall : onCheck}
+            disabled={busy}
+            icon={
+              action === 'install' ? (
+                <Download size={12} />
+              ) : (
+                <RefreshCw size={12} className={cn(spin && 'animate-spin')} />
+              )
+            }
+            className="shrink-0"
+          >
+            {buttonLabel}
+          </Button>
+        </PanelRow>
+      </Panel>
     </section>
   )
 }

@@ -1,4 +1,5 @@
 import type { Ref } from 'react'
+import { InputField } from '@bedware/ui'
 import { useWindowDrag } from '@/lib/use-window-drag'
 
 interface Props {
@@ -14,18 +15,17 @@ export function SearchInput({ value, onChange, placeholder, ref }: Props) {
   const { onPointerDown } = useWindowDrag()
 
   return (
-    <div className="flex-[5] min-w-0 flex items-center h-8 [-webkit-app-region:no-drag]">
-      <input
-        ref={ref}
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onPointerDown={onPointerDown}
-        placeholder={placeholder}
-        autoFocus
-        spellCheck={false}
-        className="flex-1 h-full bg-transparent border-none text-sm text-foreground outline-none"
-      />
-    </div>
+    <InputField
+      ref={ref}
+      size="lg"
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onPointerDown={onPointerDown}
+      placeholder={placeholder}
+      autoFocus
+      spellCheck={false}
+      boxClassName="flex-[5] [-webkit-app-region:no-drag]"
+    />
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button, InputField, Panel, PanelRow, Select } from '@bedware/ui'
 import type { UlanziProfileSummary } from '@shared/types'
 import {
   ULANZI_ID,
@@ -14,9 +15,6 @@ import {
 import { RefreshCw, Trash2 } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
-
-const INPUT_CLASS =
-  'h-8 px-2.5 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring'
 
 const DISPLAY_LABELS: Record<Exclude<UlanziProfileDisplay, 'auto'>, string> = {
   brief: 'Brief',
@@ -104,15 +102,14 @@ export function UlanziSection() {
         <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
           Profiles
         </div>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => void load()}
-          className="h-7 px-2.5 rounded-md text-xs text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-1.5"
           title="Read the profile list from Ulanzi Studio again"
+          icon={<RefreshCw size={12} />}
         >
-          <RefreshCw size={12} />
           Refresh
-        </button>
+        </Button>
       </div>
       <p className="m-0 text-xs leading-relaxed text-muted-foreground">
         <span className="text-foreground">Brief</span> hints disappear after a
@@ -123,32 +120,27 @@ export function UlanziSection() {
         replaces the profile name in the hint.
       </p>
 
-      <div className="flex flex-col divide-y divide-border border border-input rounded-md bg-card overflow-hidden">
+      <Panel>
         {loadError ? (
-          <div
-            role="alert"
-            className="px-4 py-4 flex items-center justify-between gap-3 text-xs text-destructive"
-          >
+          <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
             <span>{loadError}</span>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="h-7 px-3 rounded-md border border-input bg-secondary text-secondary-foreground hover:bg-accent shrink-0"
-            >
+            <Button onClick={() => void load()} className="shrink-0">
               Retry
-            </button>
-          </div>
+            </Button>
+          </PanelRow>
         ) : profiles === null ? (
-          <div className="px-4 py-5 text-xs text-muted-foreground">Loading profiles…</div>
+          <PanelRow className="py-5 text-xs text-muted-foreground">
+            Loading profiles…
+          </PanelRow>
         ) : !installed ? (
-          <div className="px-4 py-5 text-xs text-muted-foreground">
+          <PanelRow className="py-5 text-xs text-muted-foreground">
             Ulanzi Studio isn’t installed for this user. Hints start working
             once it is.
-          </div>
+          </PanelRow>
         ) : rows.length === 0 ? (
-          <div className="px-4 py-5 text-xs text-muted-foreground">
+          <PanelRow className="py-5 text-xs text-muted-foreground">
             Ulanzi Studio has no profiles yet.
-          </div>
+          </PanelRow>
         ) : (
           rows.map((row) => (
             <ProfileRow
@@ -160,7 +152,7 @@ export function UlanziSection() {
             />
           ))
         )}
-      </div>
+      </Panel>
     </div>
   )
 }
@@ -192,7 +184,7 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
   )
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
+    <PanelRow className="gap-3 py-2.5">
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-foreground truncate">{row.name}</div>
         <div
@@ -204,8 +196,9 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
           {describeApp(row.profile)}
         </div>
       </div>
-      <input
+      <InputField
         type="text"
+        size="sm"
         value={label}
         placeholder={row.name}
         onChange={(event) => setLabel(event.target.value)}
@@ -216,21 +209,20 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
         aria-label={`Hint label for ${row.name}`}
         spellCheck={false}
         autoComplete="off"
-        className={cn(INPUT_CLASS, 'w-40')}
+        boxClassName="w-40"
       />
-      <select
+      <Select<UlanziProfileDisplay>
         value={rule.display}
-        onChange={(event) =>
-          onPatch({ display: event.target.value as UlanziProfileDisplay })
-        }
-        aria-label={`Hint behaviour for ${row.name}`}
-        className={cn(INPUT_CLASS, 'w-36')}
-      >
-        <option value="auto">Auto ({DISPLAY_LABELS[autoResolved].toLowerCase()})</option>
-        <option value="brief">{DISPLAY_LABELS.brief}</option>
-        <option value="sticky">{DISPLAY_LABELS.sticky}</option>
-        <option value="hidden">{DISPLAY_LABELS.hidden}</option>
-      </select>
+        onChange={(display) => onPatch({ display })}
+        label={`Hint behaviour for ${row.name}`}
+        options={[
+          { value: 'auto', label: `Auto (${DISPLAY_LABELS[autoResolved].toLowerCase()})` },
+          { value: 'brief', label: DISPLAY_LABELS.brief },
+          { value: 'sticky', label: DISPLAY_LABELS.sticky },
+          { value: 'hidden', label: DISPLAY_LABELS.hidden }
+        ]}
+        className="w-36 shrink-0"
+      />
       {!row.profile && (
         <button
           type="button"
@@ -242,6 +234,6 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
           <Trash2 size={14} />
         </button>
       )}
-    </div>
+    </PanelRow>
   )
 }

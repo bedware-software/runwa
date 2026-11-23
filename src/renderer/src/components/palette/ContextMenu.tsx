@@ -8,7 +8,7 @@ import {
   Tag
 } from '@/lib/lucide-icons'
 import type { LucideIcon } from '@/lib/lucide-icons'
-import { cn } from '@/lib/utils'
+import { Menu, MenuItem } from '@bedware/ui'
 
 /**
  * Ctrl+K context menu for the currently-selected palette row. One-option
@@ -117,38 +117,27 @@ export function ContextMenu({ open, onClose, actions }: Props) {
       {/* Scrim — catches pointer events so the palette behind doesn't
           receive them, plus dims the row list slightly for focus. */}
       <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] pointer-events-none" />
-      <div
+      <Menu
         ref={rootRef}
-        role="menu"
-        className="absolute bottom-12 right-3 z-10 min-w-[220px] bg-popover text-popover-foreground border border-border rounded-md shadow-lg overflow-hidden"
+        className="absolute bottom-12 right-3 z-10"
       >
         {actions.map((action, idx) => (
-          <button
+          <MenuItem
             key={action.id}
-            type="button"
-            role="menuitem"
             disabled={action.disabled}
             onClick={() => {
               if (action.disabled) return
               action.onActivate()
               onClose()
             }}
-            className={cn(
-              'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
-              action.disabled
-                ? 'opacity-50 cursor-not-allowed'
-                : action.destructive
-                  ? idx === selected
-                    ? 'bg-destructive text-destructive-foreground'
-                    : 'text-destructive hover:bg-destructive/10'
-                  : idx === selected && 'bg-accent text-accent-foreground'
-            )}
+            icon={<action.Icon size={14} />}
+            selected={idx === selected}
+            danger={action.destructive}
           >
-            <action.Icon size={14} className="shrink-0" />
-            <span className="flex-1 truncate">{action.label}</span>
-          </button>
+            {action.label}
+          </MenuItem>
         ))}
-      </div>
+      </Menu>
     </>
   )
 }
