@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Panel, Segmented, Switch } from '@bedware/ui'
+import { Button, ConfirmDialog, Panel, Segmented, Switch } from '@bedware/ui'
 import { AlertTriangle, Trash2 } from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { ConfirmDialog } from '../ConfirmDialog'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: 'system', label: 'System' },
@@ -112,7 +111,7 @@ export function GeneralPanel() {
         title="Wipe all runwa data?"
         message="This will permanently delete every setting, hotkey, module configuration, keyboard remap rule, and cache, then relaunch the app. This cannot be undone."
         confirmLabel="Wipe everything"
-        destructive
+        initialFocus="cancel"
         onConfirm={handleWipeAllData}
         onCancel={() => setWipeConfirmOpen(false)}
       />

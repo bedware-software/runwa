@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent
 } from 'react'
-import { Button, Field, InputField, Panel, PanelRow, Select } from '@bedware/ui'
+import { Button, ConfirmDialog, Field, InputField, Kbd, Panel, PanelRow, Select } from '@bedware/ui'
 import type {
   RunningAppSummary,
   UserCommand,
@@ -24,7 +24,6 @@ import {
 } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { ConfirmDialog } from '../ConfirmDialog'
 
 const MAX_NAME_LENGTH = 100
 const MAX_ACTION_LENGTH = 4096
@@ -496,12 +495,12 @@ export function UserCommandsSection() {
                         {command.name}
                       </span>
                       {alias && (
-                        <span
+                        <Kbd
                           title="Palette alias — type it in the palette to run the command"
-                          className="shrink-0 px-1.5 py-0.5 rounded border border-input bg-secondary text-[10px] font-mono text-secondary-foreground"
+                          className="shrink-0"
                         >
                           {alias}
-                        </span>
+                        </Kbd>
                       )}
                     </div>
                     <code className="block mt-0.5 text-xs leading-relaxed text-muted-foreground font-mono break-all">
@@ -553,7 +552,7 @@ export function UserCommandsSection() {
             : ''
         }
         confirmLabel="Remove command"
-        destructive
+        initialFocus="cancel"
         onConfirm={() => void removePending()}
         onCancel={() => setPendingRemoval(null)}
       />

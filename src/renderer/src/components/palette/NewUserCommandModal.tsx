@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Field, Segmented } from '@bedware/ui'
+import { Badge, Button, Field, Segmented } from '@bedware/ui'
 import type { UserCommandKind } from '@shared/types'
 import { IS_MAC } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -123,9 +123,9 @@ export function NewUserCommandModal({
               Only shown in this app
             </div>
           </div>
-          <span className="shrink-0 max-w-[45%] truncate px-2 py-0.5 rounded-md border border-border text-[11px] leading-none text-muted-foreground">
-            {appLabel}
-          </span>
+          <Badge className="shrink-0 max-w-[45%]" title={appLabel}>
+            <span className="truncate">{appLabel}</span>
+          </Badge>
         </div>
 
         <form

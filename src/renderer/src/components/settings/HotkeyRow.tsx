@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Badge, PanelRow } from '@bedware/ui'
 import { HotkeyRecorder } from './HotkeyRecorder'
-import { Hotkey } from '../ui/Kbd'
+import { Hotkey } from '../ui/Hotkey'
 
 /**
  * Reusable row for a single hotkey binding. Drives the per-module

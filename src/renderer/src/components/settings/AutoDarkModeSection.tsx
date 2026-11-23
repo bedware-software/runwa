@@ -10,7 +10,7 @@ import {
   readAutoDarkModeConfig,
   type AutoDarkModeMode
 } from '@shared/auto-dark-mode'
-import { InputField, Panel } from '@bedware/ui'
+import { InputField, Panel, PanelRow } from '@bedware/ui'
 import type { ModuleConfigValue } from '@shared/types'
 import { AlertTriangle } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
@@ -149,13 +149,10 @@ export function AutoDarkModeSection() {
       </section>
 
       <Panel className={cn(!supported && 'opacity-55')}>
-        <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Schedule</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Uses your computer&apos;s local time. Changes take effect while Runwa
-            is running and are reconciled after wake.
-          </p>
-        </div>
+        <PanelRow
+          title="Schedule"
+          description="Uses your computer's local time. Changes take effect while Runwa is running and are reconciled after wake."
+        />
         <TimeRow
           label="Light theme starts"
           value={config.lightTime}
@@ -190,15 +187,10 @@ export function AutoDarkModeSection() {
 
       {CURRENT_OS === 'windows' && (
         <Panel>
-          <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">
-                Desktop background
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Use a solid color that follows the active light or dark theme.
-              </p>
-            </div>
+          <PanelRow
+            title="Desktop background"
+            description="Use a solid color that follows the active light or dark theme."
+          >
             <Toggle
               checked={config.manageWindowsBackground}
               onChange={(checked) =>
@@ -209,7 +201,7 @@ export function AutoDarkModeSection() {
               ariaLabel="Change the Windows desktop background with the theme"
               size="sm"
             />
-          </div>
+          </PanelRow>
           <ColorRow
             label="Light theme background"
             value={config.lightBackgroundColor}
@@ -265,9 +257,9 @@ function TimeRow({
   onChange: (value: string) => void
 }) {
   return (
-    <label className="flex min-h-14 items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+    <PanelRow title={label}>
       <InputField
+        aria-label={label}
         type="time"
         size="sm"
         value={value}
@@ -279,7 +271,7 @@ function TimeRow({
         boxClassName="w-28 px-2"
         className="text-center text-sm font-medium"
       />
-    </label>
+    </PanelRow>
   )
 }
 
@@ -299,14 +291,14 @@ function ColorRow({
   const pickerValue = isHexColor(value) ? value : '#000000'
 
   return (
-    <label className="flex min-h-14 items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+    <PanelRow title={label}>
       <span className="flex items-center gap-2">
         <span className="w-[4.5rem] font-mono text-xs uppercase text-muted-foreground">
           {value}
         </span>
         <input
           type="color"
+          aria-label={label}
           value={pickerValue}
           onChange={(event) => onChange(event.target.value.toUpperCase())}
           aria-invalid={invalid || undefined}
@@ -319,6 +311,6 @@ function ColorRow({
           )}
         />
       </span>
-    </label>
+    </PanelRow>
   )
 }

@@ -2,7 +2,7 @@ import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'reac
 import { Keyboard, RotateCcw, X } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import { keyEventToAccelerator } from '@/lib/hotkey'
-import { Hotkey } from '../ui/Kbd'
+import { Hotkey } from '../ui/Hotkey'
 
 interface Props {
   value: string

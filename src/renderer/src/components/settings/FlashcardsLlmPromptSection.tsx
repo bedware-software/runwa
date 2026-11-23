@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, InputField } from '@bedware/ui'
+import { Button, ConfirmDialog, InputField } from '@bedware/ui'
 import {
   Check,
   Clipboard,
@@ -10,7 +10,6 @@ import {
   RotateCcw
 } from '@/lib/lucide-icons'
 import type { FlashcardsDecksFolderView, FlashcardsLlmPromptView } from '@shared/types'
-import { ConfirmDialog } from '../ConfirmDialog'
 
 const MODULE_ID = 'flashcards'
 const ACTION_EDIT = 'editLlmPrompt'
@@ -146,7 +145,7 @@ export function FlashcardsLlmPromptSection() {
         title="Reset prompt to default?"
         message="The current prompt file will be overwritten with the shipped default. Any edits you made will be lost — this can't be undone."
         confirmLabel="Reset to default"
-        destructive
+        initialFocus="cancel"
         onConfirm={() => void onResetConfirmed()}
         onCancel={() => setResetConfirmOpen(false)}
       />

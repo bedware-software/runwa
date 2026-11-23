@@ -44,8 +44,7 @@ button, [role="button"], a, select, label[for], summary, [onclick] { cursor: poi
 
 /*
  * No global `kbd { ... }` rule — the `Kbd` React component
- * (`components/ui/Kbd.tsx`) owns the chip look end-to-end via Tailwind
- * classes. A global element-selector rule here was previously fighting
+ * (from `@bedware/ui`) owns the chip look end-to-end. A global element-selector rule here was previously fighting
  * with those utilities (shorthand `border:` declarations overrode the
  * Tailwind border-color opacity modifier), so the classes reported as
  * "no change" in the UI. Any raw `<kbd>` that bypasses the component

@@ -7,7 +7,7 @@ import {
   XCircle
 } from '@/lib/lucide-icons'
 import type { FlashcardCard } from '@shared/types'
-import { RowKey } from '@bedware/ui'
+import { Badge, RowKey } from '@bedware/ui'
 import { cn } from '@/lib/utils'
 import type { QuizSession } from '@/store/palette-store'
 import { QuizSummary } from './QuizSummary'
@@ -78,10 +78,10 @@ export function QuizView({ quiz }: { quiz: QuizSession }) {
       <div className="px-6 py-5 flex-1 flex flex-col gap-5">
         <div className="flex flex-col gap-2">
           {card.topic && (
-            <div className="inline-flex items-center gap-1 self-start rounded-md border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              <Hash size={11} strokeWidth={2} />
+            <Badge className="self-start gap-1">
+              <Hash size={10} strokeWidth={2} />
               {card.topic}
-            </div>
+            </Badge>
           )}
           <div className="text-base leading-relaxed whitespace-pre-wrap">
             {card.question}

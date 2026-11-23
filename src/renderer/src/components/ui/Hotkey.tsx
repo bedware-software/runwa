@@ -1,28 +1,6 @@
-import { type ReactNode } from 'react'
-import { Kbd as BwKbd } from '@bedware/ui'
+import { Kbd } from '@bedware/ui'
 import { cn } from '@/lib/utils'
 import { tokenizeHotkey } from '@/lib/hotkey-display'
-
-/**
- * One key chip — the design system's Kbd, so every hotkey surface (palette
- * footer, HotkeyRecorder, keyboard-remap rules list) looks the same.
- * `on`: "field" for a chip on a text field, "button" on a filled button.
- */
-export function Kbd({
-  children,
-  className,
-  on
-}: {
-  children: ReactNode
-  className?: string
-  on?: 'field' | 'button'
-}) {
-  return (
-    <BwKbd on={on} className={cn('shrink-0', className)}>
-      {children}
-    </BwKbd>
-  )
-}
 
 /**
  * Renders a full hotkey as a row of Kbd chips — one chip per key.
@@ -47,7 +25,9 @@ export function Hotkey({
   return (
     <span className={cn('inline-flex items-center gap-1', className)}>
       {tokens.map((t, i) => (
-        <Kbd key={`${t}-${i}`}>{t}</Kbd>
+        <Kbd key={`${t}-${i}`} className="shrink-0">
+          {t}
+        </Kbd>
       ))}
     </span>
   )

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Button, Field, Panel, PanelRow } from '@bedware/ui'
+import { Button, ConfirmDialog, Field, Panel, PanelRow } from '@bedware/ui'
 import type { WindowIgnoreRule } from '@shared/types'
 import { EyeOff, Plus, Trash2 } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
-import { ConfirmDialog } from '../ConfirmDialog'
 
 const MAX_FIELD_LENGTH = 512
 
@@ -245,6 +244,8 @@ export function WindowSwitcherIgnoreSection() {
             : ''
         }
         confirmLabel="Remove rule"
+        tone="primary"
+        initialFocus="cancel"
         onConfirm={() => void removePending()}
         onCancel={() => setPendingRemoval(null)}
       />

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, InputField, Panel, PanelRow } from '@bedware/ui'
+import { Badge, Button, InputField, Panel, PanelRow } from '@bedware/ui'
 import { Pencil, RefreshCw } from '@/lib/lucide-icons'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { Hotkey } from '../ui/Kbd'
+import { Hotkey } from '../ui/Hotkey'
 import { PermissionSection } from './PermissionSection'
 import { FullscreenBypassSection } from './FullscreenBypassSection'
 import { CURRENT_OS } from '@/lib/platform'
@@ -218,9 +218,7 @@ function HoldBlock({ trigger }: { trigger: KeyboardRemapTriggerView }) {
                 <span className="text-muted-foreground">→</span>
                 <ActionDisplay result={c.result} />
                 {c.os && (
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {`${c.os}-only`}
-                  </span>
+                  <Badge>{`${c.os}-only`}</Badge>
                 )}
               </div>
               {c.description && (

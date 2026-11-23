@@ -4,7 +4,6 @@ import { usePaletteStore } from '@/store/palette-store'
 import { useSettingsStore } from '@/store/settings-store'
 import { SearchInput } from './SearchInput'
 import { ResultsList } from './ResultsList'
-import { ModeBadge } from './ModeBadge'
 import {
   ContextMenu,
   fullscreenBypassAction,
@@ -15,12 +14,11 @@ import {
   runAsAdminAction,
   setAliasAction
 } from './ContextMenu'
-import { ConfirmDialog } from '../ConfirmDialog'
 import { Toggle } from '../ui/Toggle'
 import { AliasInputModal } from './AliasInputModal'
 import { NewUserCommandModal } from './NewUserCommandModal'
-import { FooterHint } from './FooterHint'
-import { Kbd, Hotkey } from '../ui/Kbd'
+import { Badge, ConfirmDialog, Hint, HintBar } from '@bedware/ui'
+import { tokenizeHotkey as hotkey } from '@/lib/hotkey-display'
 import { QuizView } from './QuizView'
 import { IS_MAC } from '@/lib/platform'
 import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
@@ -843,7 +841,7 @@ export function PaletteApp() {
                 />
               </div>
             )}
-            {activeMod && <ModeBadge name={activeMod.name} />}
+            {activeMod && <Badge className="shrink-0">{activeMod.name}</Badge>}
           </div>
 
           <ResultsList
@@ -855,88 +853,72 @@ export function PaletteApp() {
         </>
       )}
 
-      <div className="h-10 px-2 flex items-center justify-between border-t border-border bg-toolbar text-[12px] font-medium text-muted-foreground shrink-0">
-        <div className="flex items-center gap-1">
-          {quiz ? (
-            quiz.finished ? (
-              <>
-                <FooterHint label="Revisit last" keys={<Hotkey value="Left" />} />
-                <FooterHint label="Back to decks" keys={<Hotkey value="Esc" />} />
-              </>
-            ) : (
-              <>
-                <FooterHint
-                  label="Answer"
-                  keys={<span className="font-mono text-[11px]">1-9</span>}
-                />
-                <FooterHint label="Reveal" keys={<Hotkey value="Enter" />} />
-                <FooterHint
-                  label="Next"
-                  keys={
-                    <span className="inline-flex items-center gap-1">
-                      <Hotkey value="Space" />
-                      <span className="text-[11px] opacity-60">/</span>
-                      <Hotkey value="Right" />
-                      <span className="text-[11px] opacity-60">/</span>
-                      <Hotkey value="W" />
-                    </span>
-                  }
-                />
-                <FooterHint label="Back to decks" keys={<Hotkey value="Esc" />} />
-              </>
-            )
+      {/* Left-aligned with the version at the right edge, as before the
+          design system: its HintBar centres hints by default. */}
+      <HintBar className="justify-start">
+        {quiz ? (
+          quiz.finished ? (
+            <>
+              <Hint label="Revisit last" keys={hotkey('Left')} />
+              <Hint label="Back to decks" keys={hotkey('Esc')} />
+            </>
           ) : (
             <>
-              <FooterHint
-                label="Navigate"
-                keys={<Kbd><ArrowUpDown size={12} strokeWidth={1.5} /></Kbd>}
+              <Hint label="Answer" keys={['1-9']} />
+              <Hint label="Reveal" keys={hotkey('Enter')} />
+              <Hint
+                label="Next"
+                keys={[...hotkey('Space'), ...hotkey('Right'), ...hotkey('W')]}
               />
-              <FooterHint
-                label="Select"
-                keys={<Kbd><CornerDownLeft size={12} strokeWidth={1.5} /></Kbd>}
-              />
-              {canOpenMenu && (
-                <FooterHint label="Context menu" keys={<Hotkey value="Ctrl+K" />} />
-              )}
-              {activeModuleId === 'app-search' && (
-                <FooterHint label="Rescan" keys={<Hotkey value="Ctrl+R" />} />
-              )}
-              {activeModuleId === 'window-switcher' && (
-                <>
-                  <FooterHint
-                    label={wsCurrentDesktopOnly ? 'All desktops' : 'This desktop'}
-                    keys={<Hotkey value="Tab" />}
-                  />
-                  <FooterHint
-                    label="Close"
-                    keys={<Hotkey value={IS_MAC ? 'Cmd+D' : 'Ctrl+D'} />}
-                  />
-                </>
-              )}
-              {activeModuleId === 'user-commands' && (
-                <FooterHint
-                  label={userCommandsGlobal ? 'Local' : 'Global'}
-                  keys={<Hotkey value="Tab" />}
-                />
-              )}
-              {activeModuleId === 'flashcards' &&
-                items[selectedIndex]?.actionKind === 'start-quiz' && (
-                  <FooterHint label="Cram" keys={<Hotkey value="Ctrl+Enter" />} />
-                )}
-              <FooterHint label="Dismiss" keys={<Hotkey value="Esc" />} />
+              <Hint label="Back to decks" keys={hotkey('Esc')} />
             </>
-          )}
-        </div>
+          )
+        ) : (
+          <>
+            <Hint
+              label="Navigate"
+              keys={[<ArrowUpDown key="nav" size={12} strokeWidth={1.5} />]}
+            />
+            <Hint
+              label="Select"
+              keys={[<CornerDownLeft key="sel" size={12} strokeWidth={1.5} />]}
+            />
+            {canOpenMenu && <Hint label="Context menu" keys={hotkey('Ctrl+K')} />}
+            {activeModuleId === 'app-search' && (
+              <Hint label="Rescan" keys={hotkey('Ctrl+R')} />
+            )}
+            {activeModuleId === 'window-switcher' && (
+              <>
+                <Hint
+                  label={wsCurrentDesktopOnly ? 'All desktops' : 'This desktop'}
+                  keys={hotkey('Tab')}
+                />
+                <Hint label="Close" keys={hotkey(IS_MAC ? 'Cmd+D' : 'Ctrl+D')} />
+              </>
+            )}
+            {activeModuleId === 'user-commands' && (
+              <Hint
+                label={userCommandsGlobal ? 'Local' : 'Global'}
+                keys={hotkey('Tab')}
+              />
+            )}
+            {activeModuleId === 'flashcards' &&
+              items[selectedIndex]?.actionKind === 'start-quiz' && (
+                <Hint label="Cram" keys={hotkey('Ctrl+Enter')} />
+              )}
+            <Hint label="Dismiss" keys={hotkey('Esc')} />
+          </>
+        )}
 
         {appVersion && activeModuleId === 'command-palette' && (
           <span
-            className="px-2 text-[11px] text-muted-foreground/60 tabular-nums select-none [-webkit-app-region:no-drag]"
+            className="ml-auto tabular-nums select-none"
             title={`runwa v${appVersion}`}
           >
             v{appVersion}
           </span>
         )}
-      </div>
+      </HintBar>
 
       <ContextMenu
         open={menuOpen}
@@ -978,7 +960,6 @@ export function PaletteApp() {
         title="Reset deck data?"
         message="This wipes all review history for this deck — every card reverts to “new” and the next session starts from scratch. The deck file itself is not touched. This can't be undone."
         confirmLabel="Reset deck"
-        destructive
         onConfirm={() => void confirmReset()}
         onCancel={() => setResetDeckId(null)}
       />
@@ -988,8 +969,6 @@ export function PaletteApp() {
         title={pendingConfirm?.confirm?.title ?? ''}
         message={pendingConfirm?.confirm?.message ?? ''}
         confirmLabel={pendingConfirm?.confirm?.confirmLabel}
-        destructive
-        keyboardDriven
         onConfirm={() => void confirmPending()}
         onCancel={cancelPending}
       />
