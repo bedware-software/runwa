@@ -1,6 +1,5 @@
-import { Switch } from '@bedware/ui'
+import { Nav, NavGroup, NavItem, Switch } from '@bedware/ui'
 import type { LucideIcon } from '@/lib/lucide-icons'
-import { cn } from '@/lib/utils'
 import {
   Info,
   lucideIconFromHint,
@@ -45,21 +44,15 @@ export function Sidebar({ current, onChange }: Props) {
 
   return (
     <aside className="w-56 bg-card border-r border-border p-3 flex flex-col shrink-0">
-      <nav className="flex flex-col gap-1">
-        <button
-          type="button"
+      <Nav>
+        <NavItem
+          icon={<SlidersHorizontal size={16} />}
+          current={current === 'general'}
           onClick={() => onChange('general')}
-          className={cn(
-            'flex items-center gap-2 h-8 px-2 rounded-md text-sm text-left transition-colors',
-            current === 'general'
-              ? 'bg-accent text-accent-foreground'
-              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-          )}
         >
-          <SlidersHorizontal size={16} />
           General
-        </button>
-      </nav>
+        </NavItem>
+      </Nav>
 
       {modules.length > 0 && (
         <div className="border-t border-border mt-3 pt-3 pr-1 -mr-1 flex-1 min-h-0 overflow-y-auto flex flex-col gap-3">
@@ -106,21 +99,15 @@ export function Sidebar({ current, onChange }: Props) {
         </div>
       )}
 
-      <nav className="mt-auto pt-3 border-t border-border flex flex-col gap-1">
-        <button
-          type="button"
+      <Nav className="mt-auto pt-3 border-t border-border">
+        <NavItem
+          icon={<Info size={16} />}
+          current={current === 'about'}
           onClick={() => onChange('about')}
-          className={cn(
-            'flex items-center gap-2 h-8 px-2 rounded-md text-sm text-left transition-colors',
-            current === 'about'
-              ? 'bg-accent text-accent-foreground'
-              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-          )}
         >
-          <Info size={16} />
           About
-        </button>
-      </nav>
+        </NavItem>
+      </Nav>
     </aside>
   )
 }
@@ -136,59 +123,30 @@ interface ModuleGroupProps {
 function ModuleGroup({ label, modules, current, onChange, onToggle }: ModuleGroupProps) {
   if (modules.length === 0) return null
   return (
-    <div>
-      <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider px-2 mb-2">
-        {label}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        {modules.map((m) => {
-          const Icon = iconFromHint(m.icon)
-          const active = current === `module:${m.id}`
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onChange(`module:${m.id}`)}
-              className={cn(
-                'flex items-center gap-2 h-8 px-2 rounded-md transition-colors',
-                active
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent/50'
-              )}
-            >
-              <Icon
-                size={14}
-                className={cn(
-                  'shrink-0 transition-colors',
-                  active
-                    ? 'text-accent-foreground'
-                    : m.enabled
-                      ? 'text-muted-foreground'
-                      : 'text-muted-foreground/40'
-                )}
-              />
-              <span
-                className={cn(
-                  'flex-1 text-left text-sm truncate transition-colors',
-                  active
-                    ? 'text-accent-foreground'
-                    : m.enabled
-                      ? 'text-muted-foreground'
-                      : 'text-muted-foreground/40'
-                )}
-              >
-                {m.name}
-              </span>
+    <Nav>
+      <NavGroup>{label}</NavGroup>
+      {modules.map((m) => {
+        const Icon = iconFromHint(m.icon)
+        return (
+          <NavItem
+            key={m.id}
+            icon={<Icon size={14} />}
+            current={current === `module:${m.id}`}
+            off={!m.enabled}
+            onClick={() => onChange(`module:${m.id}`)}
+            side={
               <SidebarToggle
                 label={m.name}
                 checked={m.enabled}
                 onChange={(v) => onToggle(m.id, v)}
               />
-            </button>
-          )
-        })}
-      </div>
-    </div>
+            }
+          >
+            {m.name}
+          </NavItem>
+        )
+      })}
+    </Nav>
   )
 }
 
@@ -201,11 +159,15 @@ function SidebarToggle({
   checked: boolean
   onChange: (v: boolean) => void
 }) {
-  // The wrapper keeps the click from reaching the row, which would open the
-  // module's page.
+  // Stopping the click keeps it from reaching the row, which would open the
+  // module's page; the Switch still toggles.
   return (
-    <span className="flex shrink-0" onClick={(e) => e.stopPropagation()}>
-      <Switch checked={checked} onChange={onChange} label={label} />
-    </span>
+    <Switch
+      size="xs"
+      checked={checked}
+      onChange={onChange}
+      label={label}
+      onClick={(e) => e.stopPropagation()}
+    />
   )
 }

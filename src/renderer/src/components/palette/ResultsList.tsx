@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef } from 'react'
+import { GroupTitle } from '@bedware/ui'
 import { Loader2 } from '@/lib/lucide-icons'
 import type { PaletteItem } from '@shared/types'
 import { usePaletteStore } from '@/store/palette-store'
@@ -75,9 +76,7 @@ export function ResultsList({
         return (
           <Fragment key={item.id}>
             {showHeader && (
-              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
-                {item.group}
-              </div>
+              <GroupTitle>{item.group}</GroupTitle>
             )}
             <ResultRow
               ref={(el) => {

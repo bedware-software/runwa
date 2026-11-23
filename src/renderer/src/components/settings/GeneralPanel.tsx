@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button, ConfirmDialog, Panel, Segmented, Switch } from '@bedware/ui'
-import { AlertTriangle, Trash2 } from '@/lib/lucide-icons'
+import { Button, ConfirmDialog, Panel, PanelRow, SectionTitle, Segmented, Switch } from '@bedware/ui'
+import { Trash2 } from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
 import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -41,10 +41,10 @@ export function GeneralPanel() {
   return (
     <div className="flex flex-col gap-8 max-w-xl">
       <section>
-        <h2 className="text-sm font-semibold text-foreground mb-1">Theme</h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          Choose how runwa looks. System follows your OS preference.
-        </p>
+        <SectionTitle
+          title="Theme"
+          description="Choose how runwa looks. System follows your OS preference."
+        />
         <Segmented
           label="Theme"
           value={theme}
@@ -54,10 +54,10 @@ export function GeneralPanel() {
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-foreground mb-1">Palette</h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          Tweaks for the palette window's behaviour and shortcuts.
-        </p>
+        <SectionTitle
+          title="Palette"
+          description="Tweaks for the palette window's behaviour and shortcuts."
+        />
         <Panel>
           <ToggleRow
             title="Use Alt + number to run a result"
@@ -76,34 +76,23 @@ export function GeneralPanel() {
 
       <StartupSection />
 
-      <section className="pt-4 border-t border-destructive/30">
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle size={14} className="text-destructive" />
-          <h2 className="text-sm font-semibold text-destructive">
-            Danger Zone
-          </h2>
-        </div>
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-4">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Wipe all data
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-              Permanently deletes the entire runwa application directory,
-              including all settings, hotkeys, module configuration, keyboard
-              remap rules, and caches. The app will relaunch as if freshly
-              installed. This action cannot be undone.
-            </p>
-          </div>
-          <Button
-            variant="danger"
-            onClick={() => setWipeConfirmOpen(true)}
-            icon={<Trash2 size={12} />}
-            className="shrink-0"
+      <section>
+        <SectionTitle danger title="Danger Zone" />
+        <Panel>
+          <PanelRow
+            title="Wipe all data"
+            description="Permanently deletes the entire runwa application directory, including all settings, hotkeys, module configuration, keyboard remap rules, and caches. The app will relaunch as if freshly installed. This action cannot be undone."
           >
-            Wipe all data
-          </Button>
-        </div>
+            <Button
+              variant="danger"
+              onClick={() => setWipeConfirmOpen(true)}
+              icon={<Trash2 size={12} />}
+              className="shrink-0"
+            >
+              Wipe all data
+            </Button>
+          </PanelRow>
+        </Panel>
       </section>
 
       <ConfirmDialog
@@ -160,10 +149,10 @@ function StartupSection() {
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-foreground mb-1">Startup</h2>
-      <p className="text-xs text-muted-foreground mb-3">
-        Automate how runwa comes up with your system.
-      </p>
+      <SectionTitle
+        title="Startup"
+        description="Automate how runwa comes up with your system."
+      />
       <Panel>
         <ToggleRow
           title="Start at login"

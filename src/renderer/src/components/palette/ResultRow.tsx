@@ -1,9 +1,8 @@
 import type { Ref } from 'react'
 import type { LucideIcon } from '@/lib/lucide-icons'
 import type { PaletteItem } from '@shared/types'
-import { ResultRow as BwResultRow } from '@bedware/ui'
+import { ResultRow as BwResultRow, Tooltip } from '@bedware/ui'
 import { lucideIconFromHint, Square } from '@/lib/lucide-icons'
-import { Tooltip } from '../ui/Tooltip'
 
 interface Props {
   item: PaletteItem

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button, Panel, PanelRow } from '@bedware/ui'
+import { Badge, Button, Label, Panel, PanelRow } from '@bedware/ui'
 import type { PermissionFlags, PermissionName } from '@shared/types'
 
 export interface PermissionRowSpec {
@@ -62,9 +62,8 @@ export function PermissionSection({ heading, description, rows }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-foreground">{heading}</div>
-      <div className="text-xs text-muted-foreground -mt-1">{description}</div>
+    <div>
+      <Label description={description}>{heading}</Label>
       <Panel>
         {rows.map((row) => {
           const granted = permissions[row.name]

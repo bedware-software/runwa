@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent
 } from 'react'
-import { Button, ConfirmDialog, Field, InputField, Kbd, Panel, PanelRow, Select } from '@bedware/ui'
+import { Button, ConfirmDialog, Field, HelpText, IconButton, InputField, Kbd, Label, Notice, Panel, PanelRow, SectionTitle, Select } from '@bedware/ui'
 import type {
   RunningAppSummary,
   UserCommand,
@@ -266,21 +266,23 @@ export function UserCommandsSection() {
 
       {commands !== null && (
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-              {editingId ? 'Edit command' : 'Add command'}
-            </div>
-            {editingId && (
-              <Button
-                variant="ghost"
-                onClick={cancelEditing}
-                icon={<X size={11} />}
-                className="h-6 px-2"
-              >
-                Cancel
-              </Button>
-            )}
-          </div>
+          <SectionTitle
+            level={2}
+            flush
+            title={editingId ? 'Edit command' : 'Add command'}
+            side={
+              editingId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={cancelEditing}
+                  icon={<X size={11} />}
+                >
+                  Cancel
+                </Button>
+              )
+            }
+          />
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
             <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-2">
@@ -324,7 +326,7 @@ export function UserCommandsSection() {
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
             <div>
-              <span className="bw-label">Type</span>
+              <Label>Type</Label>
               <Select<UserCommandKind>
                 label="Type"
                 value={draft.kind}
@@ -358,15 +360,7 @@ export function UserCommandsSection() {
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <div
-              role={error ? 'alert' : undefined}
-              className={cn(
-                'min-h-4 text-xs',
-                error ? 'text-destructive' : 'text-muted-foreground'
-              )}
-            >
-              {error ?? hint}
-            </div>
+            <HelpText error={!!error}>{error ?? hint}</HelpText>
             <Button
               type="submit"
               variant="primary"
@@ -399,13 +393,18 @@ export function UserCommandsSection() {
         </form>
       )}
 
-      <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium text-foreground">Commands file</div>
-        <div className="text-xs text-muted-foreground -mt-1">
-          JSON the commands are stored in. Click Edit to open it in your system
-          editor; changes show up here when you come back to this window.
-          Malformed entries are skipped.
-        </div>
+      <div>
+        <Label
+          description={
+            <>
+              JSON the commands are stored in. Click Edit to open it in your system
+              editor; changes show up here when you come back to this window.
+              Malformed entries are skipped.
+            </>
+          }
+        >
+          Commands file
+        </Label>
         <div className="flex items-center gap-2">
           <InputField
             type="text"
@@ -428,26 +427,30 @@ export function UserCommandsSection() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-            Commands
-          </div>
-          {commands && commands.length > 0 && (
-            <span className="text-[11px] text-muted-foreground">
-              {commands.length} {commands.length === 1 ? 'command' : 'commands'}
-            </span>
-          )}
-        </div>
+        <SectionTitle
+          level={2}
+          flush
+          title="Commands"
+          side={
+            commands &&
+            commands.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                {commands.length} {commands.length === 1 ? 'command' : 'commands'}
+              </span>
+            )
+          }
+        />
 
         <Panel>
           {commands === null ? (
             loadError ? (
-              <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
-                <span>{loadError}</span>
-                <Button onClick={() => void loadCommands()} className="shrink-0">
-                  Retry
-                </Button>
-              </PanelRow>
+              <Notice
+                flush
+                role="alert"
+                side={<Button size="sm" onClick={() => void loadCommands()}>Retry</Button>}
+              >
+                {loadError}
+              </Notice>
             ) : (
               <PanelRow className="py-5 text-xs text-muted-foreground">
                 Loading commands…
@@ -507,33 +510,25 @@ export function UserCommandsSection() {
                       {command.action}
                     </code>
                   </div>
-                  <button
-                    type="button"
+                  <IconButton
+                    pressed={isEditing}
                     onClick={() => (isEditing ? cancelEditing() : startEditing(command))}
-                    aria-label={`Edit ${command.name}`}
+                    label={`Edit ${command.name}`}
                     title="Edit command"
-                    className={cn(
-                      'h-7 w-7 rounded-md flex items-center justify-center shrink-0 transition-colors',
-                      'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                      isEditing && 'bg-accent text-accent-foreground'
-                    )}
+                    className="shrink-0"
                   >
                     <Pencil size={14} />
-                  </button>
-                  <button
-                    type="button"
+                  </IconButton>
+                  <IconButton
+                    danger
                     disabled={removing}
                     onClick={() => setPendingRemoval(command)}
-                    aria-label={`Remove ${command.name}`}
+                    label={`Remove ${command.name}`}
                     title="Remove command"
-                    className={cn(
-                      'h-7 w-7 rounded-md flex items-center justify-center shrink-0 transition-colors',
-                      'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
-                      removing && 'opacity-50 cursor-not-allowed'
-                    )}
+                    className="shrink-0"
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </IconButton>
                 </PanelRow>
               )
                 })}

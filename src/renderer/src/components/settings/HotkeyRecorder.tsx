@@ -1,8 +1,8 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Keyboard, RotateCcw, X } from '@/lib/lucide-icons'
-import { cn } from '@/lib/utils'
+import { HotkeyButton, IconButton } from '@bedware/ui'
+import { RotateCcw, X } from '@/lib/lucide-icons'
 import { keyEventToAccelerator } from '@/lib/hotkey'
-import { Hotkey } from '../ui/Hotkey'
+import { tokenizeHotkey } from '@/lib/hotkey-display'
 
 interface Props {
   value: string
@@ -18,16 +18,16 @@ interface Props {
  */
 export function HotkeyRecorder({ value, onChange, defaultValue }: Props) {
   const [recording, setRecording] = useState(false)
-  const divRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const startRecording = (): void => {
     setRecording(true)
-    setTimeout(() => divRef.current?.focus(), 0)
+    setTimeout(() => buttonRef.current?.focus(), 0)
   }
 
   const stopRecording = (): void => setRecording(false)
 
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLButtonElement>): void => {
     if (!recording) return
     e.preventDefault()
     e.stopPropagation()
@@ -54,50 +54,28 @@ export function HotkeyRecorder({ value, onChange, defaultValue }: Props) {
   return (
     <div className="flex items-center gap-1.5">
       {isCustom && (
-        <button
-          type="button"
+        <IconButton
+          label="Reset to default"
+          size={20}
           onClick={() => onChange(defaultValue)}
-          className="h-5 w-5 flex items-center justify-center rounded hover:bg-muted text-muted-foreground"
-          title="Reset to default"
         >
           <RotateCcw size={10} />
-        </button>
+        </IconButton>
       )}
-      <div
-        ref={divRef}
-        tabIndex={0}
+      <HotkeyButton
+        ref={buttonRef}
+        keys={tokenizeHotkey(value)}
+        recording={recording}
+        emptyLabel="Click to record"
         onBlur={stopRecording}
         onKeyDown={onKeyDown}
         onClick={startRecording}
-        className={cn(
-          'w-48 h-9 px-3 rounded-md bg-card border border-input text-sm text-foreground cursor-pointer select-none outline-none flex items-center justify-between gap-2',
-          recording && 'border-ring bg-background'
-        )}
-      >
-        {recording ? (
-          <span className="flex items-center gap-2 text-muted-foreground">
-            <Keyboard size={14} /> Press keys…
-          </span>
-        ) : value ? (
-          <>
-            <Hotkey value={value} />
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onChange('')
-              }}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X size={14} />
-            </button>
-          </>
-        ) : (
-          <span className="flex items-center gap-2 text-muted-foreground">
-            <Keyboard size={14} /> Click to record
-          </span>
-        )}
-      </div>
+      />
+      {value && !recording && (
+        <IconButton label="Clear hotkey" onClick={() => onChange('')}>
+          <X size={14} />
+        </IconButton>
+      )}
     </div>
   )
 }

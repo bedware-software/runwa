@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, InputField, Panel, PanelRow, Select } from '@bedware/ui'
+import { Button, IconButton, InputField, Notice, Panel, PanelRow, SectionTitle, Select } from '@bedware/ui'
 import type { UlanziProfileSummary } from '@shared/types'
 import {
   ULANZI_ID,
@@ -98,36 +98,42 @@ export function UlanziSection() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-          Profiles
-        </div>
-        <Button
-          variant="ghost"
-          onClick={() => void load()}
-          title="Read the profile list from Ulanzi Studio again"
-          icon={<RefreshCw size={12} />}
-        >
-          Refresh
-        </Button>
-      </div>
-      <p className="m-0 text-xs leading-relaxed text-muted-foreground">
-        <span className="text-foreground">Brief</span> hints disappear after a
-        moment. <span className="text-foreground">Sticky</span> ones stay on
-        screen until another profile becomes active — meant for modes you
-        toggle from the device. <span className="text-foreground">Auto</span>{' '}
-        makes profiles that follow no app sticky and the rest brief. The label
-        replaces the profile name in the hint.
-      </p>
+      <SectionTitle
+        level={2}
+        flush
+        title="Profiles"
+        description={
+          <>
+            <span className="text-foreground">Brief</span> hints disappear after
+            a moment. <span className="text-foreground">Sticky</span> ones stay
+            on screen until another profile becomes active — meant for modes you
+            toggle from the device.{' '}
+            <span className="text-foreground">Auto</span> makes profiles that
+            follow no app sticky and the rest brief. The label replaces the
+            profile name in the hint.
+          </>
+        }
+        side={
+          <Button
+            variant="ghost"
+            onClick={() => void load()}
+            title="Read the profile list from Ulanzi Studio again"
+            icon={<RefreshCw size={12} />}
+          >
+            Refresh
+          </Button>
+        }
+      />
 
       <Panel>
         {loadError ? (
-          <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
-            <span>{loadError}</span>
-            <Button onClick={() => void load()} className="shrink-0">
-              Retry
-            </Button>
-          </PanelRow>
+          <Notice
+            flush
+            role="alert"
+            side={<Button size="sm" onClick={() => void load()}>Retry</Button>}
+          >
+            {loadError}
+          </Notice>
         ) : profiles === null ? (
           <PanelRow className="py-5 text-xs text-muted-foreground">
             Loading profiles…
@@ -224,15 +230,15 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
         className="w-36 shrink-0"
       />
       {!row.profile && (
-        <button
-          type="button"
+        <IconButton
+          danger
           onClick={onRemove}
-          aria-label={`Forget settings for ${row.name}`}
+          label={`Forget settings for ${row.name}`}
           title="Forget these settings"
-          className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="shrink-0"
         >
           <Trash2 size={14} />
-        </button>
+        </IconButton>
       )}
     </PanelRow>
   )

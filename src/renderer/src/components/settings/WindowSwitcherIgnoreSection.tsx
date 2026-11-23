@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Button, ConfirmDialog, Field, Panel, PanelRow } from '@bedware/ui'
+import { Button, ConfirmDialog, Field, HelpText, IconButton, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import type { WindowIgnoreRule } from '@shared/types'
 import { EyeOff, Plus, Trash2 } from '@/lib/lucide-icons'
-import { cn } from '@/lib/utils'
 
 const MAX_FIELD_LENGTH = 512
 
@@ -106,26 +105,26 @@ export function WindowSwitcherIgnoreSection() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-          Ignored windows
-        </div>
-        <p className="m-0 text-xs leading-relaxed text-muted-foreground">
-          Windows matching any rule below are hidden from the switcher. Add them
-          straight from the palette with <span className="font-mono">Ctrl+K</span>{' '}
-          → “Ignore this window”, or write a rule here. Matching is
-          case-insensitive; leave a field empty to match anything, and use{' '}
-          <span className="font-mono">*</span> as a wildcard (e.g.{' '}
-          <span className="font-mono">Telegram*</span> for a title with a
-          changing unread count).
-        </p>
-      </div>
+      <SectionTitle
+        level={2}
+        flush
+        title="Ignored windows"
+        description={
+          <>
+            Windows matching any rule below are hidden from the switcher. Add
+            them straight from the palette with{' '}
+            <span className="font-mono">Ctrl+K</span> → “Ignore this window”, or
+            write a rule here. Matching is case-insensitive; leave a field empty
+            to match anything, and use <span className="font-mono">*</span> as a
+            wildcard (e.g. <span className="font-mono">Telegram*</span> for a
+            title with a changing unread count).
+          </>
+        }
+      />
 
       {rules !== null && (
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-            Add rule
-          </div>
+          <SectionTitle level={2} flush title="Add rule" />
           <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
             <Field
               label="Window title"
@@ -151,15 +150,9 @@ export function WindowSwitcherIgnoreSection() {
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <div
-              role={error ? 'alert' : undefined}
-              className={cn(
-                'min-h-4 text-xs',
-                error ? 'text-destructive' : 'text-muted-foreground'
-              )}
-            >
+            <HelpText error={!!error}>
               {error ?? 'A rule needs at least one of the two fields.'}
-            </div>
+            </HelpText>
             <Button
               type="submit"
               variant="primary"
@@ -174,26 +167,30 @@ export function WindowSwitcherIgnoreSection() {
       )}
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
-            Rules
-          </div>
-          {rules && rules.length > 0 && (
-            <span className="text-[11px] text-muted-foreground">
-              {rules.length} {rules.length === 1 ? 'rule' : 'rules'}
-            </span>
-          )}
-        </div>
+        <SectionTitle
+          level={2}
+          flush
+          title="Rules"
+          side={
+            rules &&
+            rules.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                {rules.length} {rules.length === 1 ? 'rule' : 'rules'}
+              </span>
+            )
+          }
+        />
 
         <Panel>
           {rules === null ? (
             loadError ? (
-              <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
-                <span>{loadError}</span>
-                <Button onClick={() => void loadRules()} className="shrink-0">
-                  Retry
-                </Button>
-              </PanelRow>
+              <Notice
+                flush
+                role="alert"
+                side={<Button size="sm" onClick={() => void loadRules()}>Retry</Button>}
+              >
+                {loadError}
+              </Notice>
             ) : (
               <PanelRow className="py-5 text-xs text-muted-foreground">
                 Loading ignore rules…
@@ -215,20 +212,16 @@ export function WindowSwitcherIgnoreSection() {
                     title: {rule.title || '*'} · exe: {rule.processName || '*'}
                   </code>
                 </div>
-                <button
-                  type="button"
+                <IconButton
+                  danger
                   disabled={removing}
                   onClick={() => setPendingRemoval(rule)}
-                  aria-label={`Stop ignoring ${describeRule(rule)}`}
+                  label={`Stop ignoring ${describeRule(rule)}`}
                   title="Remove rule"
-                  className={cn(
-                    'h-7 w-7 rounded-md flex items-center justify-center shrink-0 transition-colors',
-                    'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
-                    removing && 'opacity-50 cursor-not-allowed'
-                  )}
+                  className="shrink-0"
                 >
                   <Trash2 size={14} />
-                </button>
+                </IconButton>
               </PanelRow>
             ))
           )}

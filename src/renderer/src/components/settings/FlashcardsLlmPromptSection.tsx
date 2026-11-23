@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, ConfirmDialog, InputField } from '@bedware/ui'
+import { Button, ConfirmDialog, InputField, Label, LinkButton } from '@bedware/ui'
 import {
   Check,
   Clipboard,
@@ -89,16 +89,19 @@ export function FlashcardsLlmPromptSection() {
     <div className="flex flex-col gap-4">
       <DecksFolderSection />
 
-      <div className="pt-3 border-t border-border flex flex-col gap-2">
-        <div className="text-xs font-medium text-foreground">
+      <div className="pt-3 border-t border-border">
+        <Label
+          description={
+            <>
+              Markdown file you paste into your LLM along with your source
+              notes. Click Edit to open it in your default editor for{' '}
+              <code>.md</code>; Copy puts the current file content on the
+              clipboard (always fresh from disk).
+            </>
+          }
+        >
           LLM prompt for generating decks
-        </div>
-        <div className="text-xs text-muted-foreground -mt-1">
-          Markdown file you paste into your LLM along with your source
-          notes. Click Edit to open it in your default editor for{' '}
-          <code>.md</code>; Copy puts the current file content on the
-          clipboard (always fresh from disk).
-        </div>
+        </Label>
         <div className="flex items-center gap-2">
           <InputField
             type="text"
@@ -182,13 +185,18 @@ function DecksFolderSection() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-foreground">Decks folder</div>
-      <div className="text-xs text-muted-foreground -mt-1">
-        One <code>.md</code> file per deck — format under <em>Deck files</em>{' '}
-        below. Pick a Dropbox or OneDrive folder to sync decks between
-        machines.
-      </div>
+    <div>
+      <Label
+        description={
+          <>
+            One <code>.md</code> file per deck — format under <em>Deck files</em>{' '}
+            below. Pick a Dropbox or OneDrive folder to sync decks between
+            machines.
+          </>
+        }
+      >
+        Decks folder
+      </Label>
       <div className="flex items-center gap-2">
         <InputField
           type="text"
@@ -226,17 +234,13 @@ function DecksFolderSection() {
         </Button>
       </div>
       {view && !view.isDefault && (
-        <div className="text-xs text-muted-foreground flex items-center gap-2 min-w-0">
+        <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2 min-w-0">
           <span className="truncate">
             Default: <span className="font-mono">{view.defaultFolder}</span>
           </span>
-          <button
-            type="button"
-            onClick={() => void onUseDefault()}
-            className="shrink-0 text-xs font-medium text-foreground underline underline-offset-2 hover:text-foreground/80"
-          >
+          <LinkButton onClick={() => void onUseDefault()} className="shrink-0">
             Use default
-          </button>
+          </LinkButton>
         </div>
       )}
     </div>
@@ -252,7 +256,7 @@ function DecksFolderSection() {
 function HowReviewWorksSection() {
   return (
     <div className="pt-4 mt-2 border-t border-border flex flex-col gap-3">
-      <div className="text-xs font-medium text-foreground">How review works</div>
+      <Label>How review works</Label>
 
       <Subsection title="Spaced repetition (SM-2)">
         Each card carries an interval (days until next review) and an

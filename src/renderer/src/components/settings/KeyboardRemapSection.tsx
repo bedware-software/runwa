@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, InputField, Panel, PanelRow } from '@bedware/ui'
+import { Badge, Button, InputField, Label, Notice, Panel, PanelRow } from '@bedware/ui'
 import { Pencil, RefreshCw } from '@/lib/lucide-icons'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -48,12 +48,17 @@ export function KeyboardRemapSection() {
 
   return (
     <div className="pt-3 border-t border-border flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium text-foreground">Rules file</div>
-        <div className="text-xs text-muted-foreground -mt-1">
-          YAML config for tap/hold bindings. Click Edit to open in your system
-          editor; Reload re-installs the hook from disk — no app restart.
-        </div>
+      <div>
+        <Label
+          description={
+            <>
+              YAML config for tap/hold bindings. Click Edit to open in your system
+              editor; Reload re-installs the hook from disk — no app restart.
+            </>
+          }
+        >
+          Rules file
+        </Label>
         <div className="flex items-center gap-2">
           <InputField
             type="text"
@@ -108,26 +113,28 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
 
   if (view.error) {
     return (
-      <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium text-foreground">Hotkeys</div>
-        <div className="flex flex-col gap-1.5 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/40 text-xs text-destructive">
-          <div className="font-semibold">
-            {view.usingPrevious
+      <div>
+        <Label>Hotkeys</Label>
+        <Notice
+          role="alert"
+          title={
+            view.usingPrevious
               ? 'Invalid rules. Previous working remap is still active.'
-              : 'Invalid rules. Keyboard remap is not active.'}
-          </div>
+              : 'Invalid rules. Keyboard remap is not active.'
+          }
+        >
           <div className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
             {view.error}
           </div>
-        </div>
+        </Notice>
       </div>
     )
   }
 
   if (view.triggers.length === 0) {
     return (
-      <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium text-foreground">Hotkeys</div>
+      <div>
+        <Label>Hotkeys</Label>
         <div className="text-xs text-muted-foreground">
           No triggers defined. Edit the file to add bindings.
         </div>
@@ -136,8 +143,8 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-foreground">Hotkeys</div>
+    <div>
+      <Label>Hotkeys</Label>
       <Panel>
         {view.triggers.map((t) => (
           <PanelRow key={t.name} className="flex-col items-stretch gap-2">

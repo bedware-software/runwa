@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Panel, PanelRow } from '@bedware/ui'
+import { Button, LinkButton, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import { Download, RefreshCw } from '@/lib/lucide-icons'
 import type { AppInfo, UpdateStatus } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -25,10 +25,10 @@ export function AboutPanel() {
   return (
     <div className="flex flex-col gap-8 max-w-xl">
       <section>
-        <h2 className="text-sm font-semibold text-foreground mb-1">{info?.name ?? '…'}</h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          A cross-platform command palette launcher.
-        </p>
+        <SectionTitle
+          title={info?.name ?? '…'}
+          description="A cross-platform command palette launcher."
+        />
         <Panel>
           <PanelRow title="Version">
             <div className="text-sm text-muted-foreground tabular-nums">
@@ -45,16 +45,16 @@ export function AboutPanel() {
               Settings folder
             </div>
             {info?.userDataPath ? (
-              <button
-                type="button"
+              <LinkButton
+                mono
                 onClick={() =>
                   void window.electronAPI.revealInFolder(info.userDataPath)
                 }
                 title="Reveal in file manager"
-                className="text-xs text-muted-foreground font-mono truncate hover:text-foreground transition-colors text-right"
+                className="min-w-0 truncate"
               >
                 {info.userDataPath}
-              </button>
+              </LinkButton>
             ) : (
               <div className="text-xs text-muted-foreground">…</div>
             )}
@@ -105,11 +105,10 @@ function UpdateSection() {
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-foreground mb-1">Updates</h2>
-      <p className="text-xs text-muted-foreground mb-3">
-        runwa checks the GitHub releases on launch and every few hours.
-        The button below triggers a manual check.
-      </p>
+      <SectionTitle
+        title="Updates"
+        description="runwa checks the GitHub releases on launch and every few hours. The button below triggers a manual check."
+      />
       <Panel>
         <PanelRow title={label} description={description} className="items-start">
           <Button

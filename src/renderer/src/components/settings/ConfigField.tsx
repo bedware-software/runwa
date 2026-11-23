@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Button, InputField, Segmented } from '@bedware/ui'
+import { useEffect, useState } from 'react'
+import { Button, Checkbox, InputField, Label, Segmented, Textarea } from '@bedware/ui'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { optionalLucideIconFromHint } from '@/lib/lucide-icons'
@@ -22,12 +22,7 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
     return (
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-foreground">{field.label}</div>
-          {field.description && (
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {field.description}
-            </div>
-          )}
+          <Label description={field.description}>{field.label}</Label>
         </div>
         <Button
           onClick={() => onAction?.(field.key)}
@@ -50,54 +45,14 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
     const isReadOnly = field.readOnly === true
     const checked = isReadOnly ? Boolean(field.defaultValue) : Boolean(effective)
     return (
-      <label
-        className={cn(
-          'flex items-start gap-3 select-none',
-          isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'
-        )}
+      <Checkbox
+        checked={checked}
+        disabled={isReadOnly}
+        onChange={(next) => onChange(next)}
+        label={field.label}
+        description={field.description}
         title={isReadOnly ? 'Built-in — always on.' : undefined}
-      >
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={checked}
-          aria-disabled={isReadOnly || undefined}
-          disabled={isReadOnly}
-          onClick={() => {
-            if (isReadOnly) return
-            onChange(!checked)
-          }}
-          className={cn(
-            'mt-0.5 h-4 w-4 rounded-[3px] border flex items-center justify-center shrink-0 transition-colors',
-            checked
-              ? 'bg-primary border-primary'
-              : 'bg-secondary border-input hover:border-muted-foreground',
-            isReadOnly && 'opacity-60 cursor-not-allowed'
-          )}
-        >
-          {checked && (
-            <svg
-              viewBox="0 0 16 16"
-              className="h-3 w-3 text-primary-foreground"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={3}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="3 8.5 6.5 12 13 4.5" />
-            </svg>
-          )}
-        </button>
-        <div className={cn('flex-1 min-w-0', isReadOnly && 'opacity-80')}>
-          <div className="text-xs font-medium text-foreground">{field.label}</div>
-          {field.description && (
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {field.description}
-            </div>
-          )}
-        </div>
-      </label>
+      />
     )
   }
 
@@ -111,13 +66,8 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
   // field.type === 'radio'
   const current = typeof effective === 'string' ? effective : field.defaultValue
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-foreground">{field.label}</div>
-      {field.description && (
-        <div className="text-xs text-muted-foreground -mt-1">
-          {field.description}
-        </div>
-      )}
+    <div>
+      <Label description={field.description}>{field.label}</Label>
       <Segmented
         label={field.label}
         value={current}
@@ -141,24 +91,12 @@ interface TextFieldProps {
 function TextConfigField({ field, value, onChange }: TextFieldProps) {
   const [draft, setDraft] = useState(value)
   const [revealed, setRevealed] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Adopt server updates when they don't match the in-flight draft — covers
   // external changes (another window, file edit) without clobbering typing.
   useEffect(() => {
     setDraft(value)
   }, [value])
-
-  // Auto-grow the textarea to its content so the whole prompt stays visible
-  // without an internal scrollbar. Runs synchronously before paint to avoid
-  // a one-frame flash of the wrong height on first mount / draft changes.
-  useLayoutEffect(() => {
-    if (!field.multiline) return
-    const ta = textareaRef.current
-    if (!ta) return
-    ta.style.height = 'auto'
-    ta.style.height = `${ta.scrollHeight}px`
-  }, [draft, field.multiline])
 
   const commit = (next: string): void => {
     if (next !== value) onChange(next)
@@ -167,25 +105,19 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
   const inputType = field.secret && !revealed ? 'password' : 'text'
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-foreground">{field.label}</div>
-      {field.description && (
-        <div className="text-xs text-muted-foreground -mt-1">
-          {field.description}
-        </div>
-      )}
+    <div>
+      <Label description={field.description}>{field.label}</Label>
       <div className={cn('flex gap-2', field.multiline ? 'items-start' : 'items-center')}>
         {field.multiline ? (
-          <textarea
-            ref={textareaRef}
+          <Textarea
+            mono
             value={draft}
             placeholder={field.placeholder}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => commit(draft)}
             spellCheck={false}
             autoComplete="off"
-            rows={3}
-            className="flex-1 min-h-[4.5rem] px-3 py-2 rounded-md bg-card border border-input text-sm text-foreground outline-none focus:border-ring font-mono resize-none overflow-hidden whitespace-pre-wrap break-words leading-5"
+            className="flex-1"
           />
         ) : (
           <InputField

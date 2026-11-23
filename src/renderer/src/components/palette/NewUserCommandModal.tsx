@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Badge, Button, Field, Segmented } from '@bedware/ui'
+import { Button, Field, FormDialog, Label, Segmented } from '@bedware/ui'
 import type { UserCommandKind } from '@shared/types'
 import { IS_MAC } from '@/lib/platform'
-import { cn } from '@/lib/utils'
 
 /**
  * Inline "new user command" form, opened by the palette's
@@ -16,9 +15,8 @@ import { cn } from '@/lib/utils'
  * is), the action itself, and an optional alias. Main rejects an alias
  * another of this app's commands already uses.
  *
- * Keyboard handling mirrors AliasInputModal: Esc closes, Enter submits, and
- * both are captured at the document level so the palette behind doesn't also
- * act on them.
+ * Keyboard handling mirrors AliasInputModal: Esc closes and Enter submits,
+ * both owned by the design system's FormDialog.
  */
 
 interface Props {
@@ -57,7 +55,6 @@ export function NewUserCommandModal({
   const [action, setAction] = useState('')
   const [alias, setAlias] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
 
   // Fresh form on every open — the palette session that follows is usually
   // about a different command entirely.
@@ -73,30 +70,6 @@ export function NewUserCommandModal({
     }, 0)
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
-  }, [open, onClose])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open, onClose])
-
   if (!open) return null
 
   const canSubmit = name.trim().length > 0 && action.trim().length > 0 && !saving
@@ -107,114 +80,85 @@ export function NewUserCommandModal({
   }
 
   return (
-    <>
-      <div className="absolute inset-0 bg-background/60 backdrop-blur-[1px]" />
-      <div
-        ref={rootRef}
-        role="dialog"
-        className="bw-dialog absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[420px]"
-      >
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              New user command
-            </div>
-            <div className="text-sm font-medium truncate">
-              Only shown in this app
-            </div>
-          </div>
-          <Badge className="shrink-0 max-w-[45%]" title={appLabel}>
-            <span className="truncate">{appLabel}</span>
-          </Badge>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-          className="p-3 flex flex-col gap-3"
-        >
-          <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
-            <Field
-              ref={nameRef}
-              label="Name"
-              size="sm"
-              type="text"
-              value={name}
-              maxLength={100}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Reformat code"
-            />
-            <Field
-              label="Alias"
-              size="sm"
-              mono
-              type="text"
-              value={alias}
-              maxLength={64}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => setAlias(e.target.value)}
-              placeholder="optional"
-            />
-          </div>
-
-          <div>
-            <span className="bw-label">Type</span>
-            <Segmented
-              label="Type"
-              value={kind}
-              onChange={setKind}
-              options={[
-                { value: 'keystroke', label: 'Keystroke' },
-                { value: 'shell', label: 'Shell command' }
-              ]}
-            />
-          </div>
-
-          <Field
-            label={kind === 'keystroke' ? 'Keystroke' : 'Action'}
-            size="sm"
-            mono
-            type="text"
-            value={action}
-            maxLength={4096}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => setAction(e.target.value)}
-            placeholder={
-              kind === 'keystroke' ? KEYSTROKE_PLACEHOLDER : SHELL_PLACEHOLDER
-            }
-          />
-
-          <div className="flex items-center justify-between gap-2">
-            <span
-              role={error ? 'alert' : undefined}
-              className={cn(
-                'text-[11px] min-w-0 truncate',
-                error ? 'text-destructive' : 'text-muted-foreground'
-              )}
-              title={error ?? undefined}
-            >
-              {error ??
-                (kind === 'keystroke'
-                  ? 'Commas separate steps: “Alt+Space, R”.'
-                  : 'Runs in the background, output is not shown.')}
-            </span>
-            <div className="flex items-center gap-1 shrink-0">
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit" disabled={!canSubmit}>
-                {saving ? 'Saving…' : 'Create'}
-              </Button>
-            </div>
-          </div>
-        </form>
+    <FormDialog
+      open
+      width={420}
+      title="New user command"
+      description={`Only shown in ${appLabel}`}
+      onSubmit={submit}
+      onCancel={onClose}
+      note={
+        error ??
+        (kind === 'keystroke'
+          ? 'Commas separate steps: “Alt+Space, R”.'
+          : 'Runs in the background, output is not shown.')
+      }
+      noteError={!!error}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" disabled={!canSubmit}>
+            {saving ? 'Saving…' : 'Create'}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+        <Field
+          ref={nameRef}
+          label="Name"
+          size="sm"
+          type="text"
+          value={name}
+          maxLength={100}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Reformat code"
+        />
+        <Field
+          label="Alias"
+          size="sm"
+          mono
+          type="text"
+          value={alias}
+          maxLength={64}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setAlias(e.target.value)}
+          placeholder="optional"
+        />
       </div>
-    </>
+
+      <div>
+        <Label>Type</Label>
+        <Segmented
+          label="Type"
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'keystroke', label: 'Keystroke' },
+            { value: 'shell', label: 'Shell command' }
+          ]}
+        />
+      </div>
+
+      <Field
+        label={kind === 'keystroke' ? 'Keystroke' : 'Action'}
+        size="sm"
+        mono
+        type="text"
+        value={action}
+        maxLength={4096}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => setAction(e.target.value)}
+        placeholder={
+          kind === 'keystroke' ? KEYSTROKE_PLACEHOLDER : SHELL_PLACEHOLDER
+        }
+      />
+    </FormDialog>
   )
 }

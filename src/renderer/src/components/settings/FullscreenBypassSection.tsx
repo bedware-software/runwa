@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Panel, PanelRow } from '@bedware/ui'
+import { Button, IconButton, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import { Keyboard, Trash2 } from '@/lib/lucide-icons'
-import { cn } from '@/lib/utils'
 
 function readableError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
@@ -69,38 +68,35 @@ export function FullscreenBypassSection() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-xs font-medium text-foreground">
-          Disabled in fullscreen
-        </div>
-        {processes && processes.length > 0 && (
-          <span className="text-[11px] text-muted-foreground">
-            {processes.length} {processes.length === 1 ? 'app' : 'apps'}
-          </span>
-        )}
-      </div>
-      <div className="text-xs text-muted-foreground -mt-1">
-        These apps get the raw keyboard while a window of theirs covers the
-        screen — no layers, no tap-vs-hold. Windowed, they behave normally.
-        Add one from the palette: Ctrl+K on a window, then “Disable remapping
-        in fullscreen”.
-      </div>
+      <SectionTitle
+        level={2}
+        flush
+        title="Disabled in fullscreen"
+        description="These apps get the raw keyboard while a window of theirs covers the screen — no layers, no tap-vs-hold. Windowed, they behave normally. Add one from the palette: Ctrl+K on a window, then “Disable remapping in fullscreen”."
+        side={
+          processes &&
+          processes.length > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              {processes.length} {processes.length === 1 ? 'app' : 'apps'}
+            </span>
+          )
+        }
+      />
 
       {error && (
-        <div role="alert" className="text-xs text-destructive">
-          {error}
-        </div>
+        <Notice role="alert">{error}</Notice>
       )}
 
       <Panel>
         {processes === null ? (
           loadError ? (
-            <PanelRow role="alert" className="py-4 gap-3 text-xs text-destructive">
-              <span>{loadError}</span>
-              <Button onClick={() => void load()} className="shrink-0">
-                Retry
-              </Button>
-            </PanelRow>
+            <Notice
+              flush
+              role="alert"
+              side={<Button size="sm" onClick={() => void load()}>Retry</Button>}
+            >
+              {loadError}
+            </Notice>
           ) : (
             <PanelRow className="py-5 text-xs text-muted-foreground">
               Loading…
@@ -117,20 +113,16 @@ export function FullscreenBypassSection() {
               <code className="flex-1 min-w-0 text-xs text-foreground font-mono truncate">
                 {processName}
               </code>
-              <button
-                type="button"
+              <IconButton
+                danger
                 disabled={removing !== null}
                 onClick={() => void remove(processName)}
-                aria-label={`Re-enable remapping for ${processName}`}
+                label={`Re-enable remapping for ${processName}`}
                 title="Re-enable remapping"
-                className={cn(
-                  'h-7 w-7 rounded-md flex items-center justify-center shrink-0 transition-colors',
-                  'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
-                  removing !== null && 'opacity-50 cursor-not-allowed'
-                )}
+                className="shrink-0"
               >
                 <Trash2 size={14} />
-              </button>
+              </IconButton>
             </PanelRow>
           ))
         )}

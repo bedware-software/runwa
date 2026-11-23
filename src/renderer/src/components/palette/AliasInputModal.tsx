@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, InputField } from '@bedware/ui'
+import { Button, FormDialog, InputField } from '@bedware/ui'
 
 /**
  * Modal overlay for assigning an alias to the currently-selected palette
  * row. Opens from the Ctrl+K context menu's "Set alias…" action; closes
- * on Escape, click-outside, or after Save.
+ * on Escape, click-outside, or after Save (the design system's FormDialog
+ * owns Escape, click-outside and the focus trap).
  *
  * Semantics:
  *  - Empty submission REMOVES the alias (standard "clear to none" UX).
@@ -44,7 +45,6 @@ export function AliasInputModal({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -57,33 +57,6 @@ export function AliasInputModal({
       inputRef.current?.select()
     }, 0)
   }, [open, initialValue])
-
-  // Document-level capture keeps us ahead of the palette's onKeyDown so
-  // Esc closes the modal without also triggering back / dismiss, and
-  // Enter commits without double-firing the row's execute path.
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
-  }, [open, onClose])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open, onClose])
 
   if (!open) return null
 
@@ -103,64 +76,43 @@ export function AliasInputModal({
   }
 
   return (
-    <>
-      <div className="absolute inset-0 bg-background/60 backdrop-blur-[1px]" />
-      <div
-        ref={rootRef}
-        role="dialog"
-        className="bw-dialog absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 w-[360px]"
-      >
-        <div className="px-4 py-3 border-b border-border">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Alias for
-          </div>
-          <div className="text-sm font-medium truncate">{itemTitle}</div>
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-          className="p-3 flex flex-col gap-3"
-        >
-          <InputField
-            ref={inputRef}
-            size="sm"
-            mono
-            invalid={!!error}
-            type="text"
-            spellCheck={false}
-            autoComplete="off"
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value)
-              setError(null)
-            }}
-            placeholder="e.g. chr"
-          />
-          <div className="flex items-center justify-between gap-2">
-            <span
-              role={error ? 'alert' : undefined}
-              title={error ?? undefined}
-              className={
-                error
-                  ? 'text-[11px] text-destructive min-w-0 truncate'
-                  : 'text-[11px] text-muted-foreground'
-              }
-            >
-              {error ?? 'Leave empty to clear.'}
-            </span>
-            <div className="flex items-center gap-1 shrink-0">
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit">
-                Save
-              </Button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </>
+    <FormDialog
+      open
+      width={360}
+      title="Alias"
+      description={itemTitle}
+      mark="@"
+      onSubmit={submit}
+      onCancel={onClose}
+      note={error ?? 'Leave empty to clear.'}
+      noteError={!!error}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit">
+            Save
+          </Button>
+        </>
+      }
+    >
+      <InputField
+        ref={inputRef}
+        size="sm"
+        mono
+        invalid={!!error}
+        type="text"
+        aria-label="Alias"
+        spellCheck={false}
+        autoComplete="off"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value)
+          setError(null)
+        }}
+        placeholder="e.g. chr"
+      />
+    </FormDialog>
   )
 }

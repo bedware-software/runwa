@@ -6,11 +6,10 @@ import {
   AUTO_DARK_MODE_LIGHT_TIME_KEY,
   AUTO_DARK_MODE_MANAGE_WINDOWS_BACKGROUND_KEY,
   AUTO_DARK_MODE_MODE_KEY,
-  isHexColor,
   readAutoDarkModeConfig,
   type AutoDarkModeMode
 } from '@shared/auto-dark-mode'
-import { InputField, Panel, PanelRow } from '@bedware/ui'
+import { ChoiceCards, ColorField, InputField, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import type { ModuleConfigValue } from '@shared/types'
 import { AlertTriangle } from '@/lib/lucide-icons'
 import { CURRENT_OS } from '@/lib/platform'
@@ -65,87 +64,29 @@ export function AutoDarkModeSection() {
   return (
     <div className="flex flex-col gap-4">
       {!supported && (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs text-muted-foreground">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
+        <Notice icon={<AlertTriangle size={14} />}>
           Auto Dark Mode currently supports Windows and macOS.
-        </div>
+        </Notice>
       )}
 
-      <section className={cn('flex flex-col gap-3', !supported && 'opacity-55')}>
-        <div>
-          <h2
-            id="auto-dark-mode-mode-label"
-            className="text-sm font-semibold text-foreground"
-          >
-            Mode
-          </h2>
-          <p
-            id="auto-dark-mode-mode-description"
-            className="mt-0.5 text-xs text-muted-foreground"
-          >
-            Toggle Theme always enters Manual mode so a schedule cannot
-            immediately undo your choice.
-          </p>
-        </div>
-
-        <div
-          className="grid grid-cols-2 gap-2"
-          role="radiogroup"
-          aria-labelledby="auto-dark-mode-mode-label"
-          aria-describedby={[
-            'auto-dark-mode-mode-description',
-            modeError ? scheduleErrorId : undefined
-          ]
-            .filter(Boolean)
-            .join(' ')}
+      <section>
+        <SectionTitle
+          title="Mode"
+          description="Toggle Theme always enters Manual mode so a schedule cannot immediately undo your choice."
+        />
+        <ChoiceCards
+          label="Mode"
+          value={config.mode}
+          options={MODES.map((item) => ({
+            value: item.value,
+            title: item.label,
+            description: item.description,
+            disabled: !supported
+          }))}
+          onChange={(mode) => patch({ [AUTO_DARK_MODE_MODE_KEY]: mode })}
+          aria-describedby={modeError ? scheduleErrorId : undefined}
           aria-invalid={modeError || undefined}
-        >
-          {MODES.map((item) => {
-            const selected = config.mode === item.value
-            return (
-              <label
-                key={item.value}
-                className={cn(
-                  'block',
-                  supported ? 'cursor-pointer' : 'cursor-not-allowed'
-                )}
-              >
-                <input
-                  type="radio"
-                  name="auto-dark-mode-mode"
-                  value={item.value}
-                  checked={selected}
-                  disabled={!supported}
-                  onChange={() =>
-                    patch({ [AUTO_DARK_MODE_MODE_KEY]: item.value })
-                  }
-                  className="peer sr-only"
-                />
-                <span
-                  className={cn(
-                    'block min-h-16 rounded-lg border px-3 py-2 text-left transition-colors',
-                    'peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring/40',
-                    selected
-                      ? 'border-primary bg-primary/10'
-                      : 'border-input bg-card hover:bg-accent'
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'block text-xs font-semibold',
-                      selected ? 'text-primary' : 'text-foreground'
-                    )}
-                  >
-                    {item.label}
-                  </span>
-                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
-                    {item.description}
-                  </span>
-                </span>
-              </label>
-            )
-          })}
-        </div>
+        />
       </section>
 
       <Panel className={cn(!supported && 'opacity-55')}>
@@ -174,14 +115,14 @@ export function AutoDarkModeSection() {
           }
         />
         {error && (
-          <div
+          <Notice
+            flush
             id={scheduleErrorId}
             role="alert"
-            className="flex items-center gap-2 border-t border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+            icon={<AlertTriangle size={14} />}
           >
-            <AlertTriangle size={13} className="shrink-0" />
             {error}
-          </div>
+          </Notice>
         )}
       </Panel>
 
@@ -226,14 +167,14 @@ export function AutoDarkModeSection() {
             wallpaper.
           </p>
           {backgroundColorError && (
-            <div
+            <Notice
+              flush
               id={backgroundErrorId}
               role="alert"
-              className="flex items-center gap-2 border-t border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+              icon={<AlertTriangle size={14} />}
             >
-              <AlertTriangle size={13} className="shrink-0" />
               {backgroundColorError}
-            </div>
+            </Notice>
           )}
         </Panel>
       )}
@@ -288,29 +229,17 @@ function ColorRow({
   describedBy?: string
   onChange: (value: string) => void
 }) {
-  const pickerValue = isHexColor(value) ? value : '#000000'
-
   return (
     <PanelRow title={label}>
-      <span className="flex items-center gap-2">
-        <span className="w-[4.5rem] font-mono text-xs uppercase text-muted-foreground">
-          {value}
-        </span>
-        <input
-          type="color"
-          aria-label={label}
-          value={pickerValue}
-          onChange={(event) => onChange(event.target.value.toUpperCase())}
-          aria-invalid={invalid || undefined}
-          aria-describedby={describedBy}
-          className={cn(
-            'h-8 w-10 cursor-pointer rounded-md border border-input bg-background p-1 outline-none transition-colors',
-            invalid
-              ? 'border-destructive focus:border-destructive focus:ring-1 focus:ring-destructive/30'
-              : 'focus:border-ring focus:ring-1 focus:ring-ring/30'
-          )}
-        />
-      </span>
+      <ColorField
+        size="sm"
+        aria-label={label}
+        value={value}
+        onChange={(next) => onChange(next.toUpperCase())}
+        invalid={invalid}
+        aria-describedby={describedBy}
+        boxClassName="w-32"
+      />
     </PanelRow>
   )
 }

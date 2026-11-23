@@ -16,17 +16,15 @@ interface Props {
  */
 export function Toggle({ checked, onChange, ariaLabel, size = 'sm', disabled }: Props) {
   return (
-    // The span, not the Switch, stops the click: stopping it in the capture
-    // phase on the Switch itself would also swallow the Switch's own onClick.
-    <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-      <Switch
-        checked={checked}
-        onChange={onChange}
-        label={ariaLabel ?? ''}
-        size={size}
-        disabled={disabled}
-        onMouseDown={(e) => e.preventDefault()}
-      />
-    </span>
+    <Switch
+      checked={checked}
+      onChange={onChange}
+      label={ariaLabel ?? ''}
+      size={size}
+      disabled={disabled}
+      onMouseDown={(e) => e.preventDefault()}
+      // The Switch runs this before toggling and toggles regardless.
+      onClick={(e) => e.stopPropagation()}
+    />
   )
 }
