@@ -10,15 +10,16 @@ const iconPath = app.isPackaged
 const isMac = process.platform === 'darwin'
 
 /**
- * Hex approximations of the `--color-card` / `--color-foreground` tokens from
- * globals.css. These are what `titleBarOverlay` uses to draw the native
+ * The `--color-card` / `--color-foreground` values of the bedware design
+ * system (`surface-1` / `text` in @bedware/ui's tailwind-theme.css) — update
+ * by hand when those tokens change. These are what `titleBarOverlay` uses to draw the native
  * min/max/close strip on Windows and Linux — they need to match the toolbar
  * background closely enough that the seam at the overlay edge isn't visible.
  * A 1–2 pixel delta gets absorbed by the `border-b` under the toolbar.
  */
 const CHROME_COLORS: Record<'light' | 'dark', { bg: string; fg: string }> = {
-  dark: { bg: '#0f0f0f', fg: '#d7d7d7' },
-  light: { bg: '#fcfcfc', fg: '#1b1b1b' }
+  dark: { bg: '#0e0d0c', fg: '#f4f1e8' },
+  light: { bg: '#faf8f2', fg: '#1d1b18' }
 }
 
 function resolveTheme(theme: Theme): 'light' | 'dark' {
