@@ -1,6 +1,6 @@
 {
   "name": "Runwa",
-  "version": "0.1.151",
+  "version": "0.1.152",
   "description": "A cross-platform command palette launcher",
   "main": "./out/main/index.js",
   "author": "dmitr",

@@ -35,6 +35,11 @@ export function AboutPanel() {
               {info ? `v${info.version}` : '…'}
             </div>
           </PanelRow>
+          <PanelRow title="bedware UI">
+            <div className="text-sm text-muted-foreground tabular-nums">
+              v{__BEDWARE_UI_VERSION__}
+            </div>
+          </PanelRow>
           <PanelRow>
             <div className="text-sm font-medium text-foreground shrink-0">
               Settings folder
