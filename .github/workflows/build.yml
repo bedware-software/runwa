@@ -101,9 +101,12 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create draft release
+      # Published straight away: pushing a v* tag is the release decision.
+      # This job runs only after every platform build succeeded, so a
+      # release never appears with a platform missing.
+      - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*
           generate_release_notes: true
-          draft: true
+          draft: false

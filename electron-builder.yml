@@ -13,9 +13,10 @@ afterSign: scripts/mac-after-sign.mjs
 # electron-updater reads release metadata from the GitHub repo's public
 # releases API. `publish: never` in CI keeps us out of electron-builder's
 # own upload path — the workflow uploads artifacts (including the .yml
-# update manifests) via softprops/action-gh-release instead, so we keep
-# the "draft, review, hit publish" review step. electron-updater doesn't
-# care who uploaded the files, only that they're present on the release.
+# update manifests) via softprops/action-gh-release instead, in one go
+# after all platforms built, and publishes the release straight away.
+# electron-updater doesn't care who uploaded the files, only that
+# they're present on the release.
 publish:
   provider: github
   owner: bedware-software
