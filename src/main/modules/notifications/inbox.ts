@@ -2,6 +2,8 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import {
+  CONSOLE_TARGET_ARGUMENTS,
+  type ConsoleNotificationsTarget,
   NOTIFICATION_MAX_DURATION_MS,
   NOTIFICATION_MIN_DURATION_MS,
   NOTIFICATION_TEXT_MAX,
@@ -44,7 +46,10 @@ const SOURCE_PATTERN = /^[A-Za-z0-9_.-]{1,40}$/
 export type InboxRequest = Pick<
   DesktopHintPayload,
   'source' | 'message' | 'title' | 'tone' | 'durationMs'
->
+> & {
+  /** The command's `--to`; absent means "as the module is set". */
+  target?: ConsoleNotificationsTarget
+}
 
 export class NotificationInbox {
   private watcher: fs.FSWatcher | null = null
@@ -182,9 +187,15 @@ function readRequest(file: string): InboxRequest | null {
           )
         : undefined
 
+    const target =
+      typeof record.to === 'string' && Object.hasOwn(CONSOLE_TARGET_ARGUMENTS, record.to)
+        ? CONSOLE_TARGET_ARGUMENTS[record.to]
+        : undefined
+
     return {
       source,
       message,
+      ...(target ? { target } : {}),
       ...(title ? { title } : {}),
       ...(tone ? { tone } : {}),
       ...(durationMs !== undefined ? { durationMs } : {})

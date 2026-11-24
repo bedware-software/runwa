@@ -39,9 +39,10 @@ export function NotificationsSection() {
             <span className="font-mono text-foreground">--title</span>,{' '}
             <span className="font-mono text-foreground">--duration</span> (milliseconds),{' '}
             <span className="font-mono text-foreground">--tone</span> (neutral, error,
-            success) and <span className="font-mono text-foreground">--source</span> are
-            optional. A later notification with the same source replaces the earlier
-            one.
+            success), <span className="font-mono text-foreground">--source</span> and{' '}
+            <span className="font-mono text-foreground">--to</span> (runwa, system, both)
+            are optional. A later notification with the same source replaces the
+            earlier one.
           </>
         }
       />
@@ -69,8 +70,8 @@ function CopyLine({
 }) {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
-    void navigator.clipboard
-      .writeText(value)
+    void window.electronAPI
+      .copyText(value)
       .then(() => {
         setCopied(true)
         setTimeout(() => setCopied(false), 1200)

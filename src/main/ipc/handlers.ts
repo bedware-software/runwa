@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   session,
@@ -466,6 +467,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('notifications:cli-info', async (event) => {
     assertSenderWindow(event, settingsWindow.getBrowserWindow(), 'Notifications command')
     return notificationsCliInfo()
+  })
+
+  // Copy buttons in Settings. Through main because `navigator.clipboard` in a
+  // renderer asks for a permission, and the session's permission handler
+  // (recorder-window.ts) grants nothing but the recorder's microphone.
+  ipcMain.handle('clipboard:write-text', async (event, text: unknown) => {
+    assertSenderWindow(event, settingsWindow.getBrowserWindow(), 'Copy')
+    if (typeof text !== 'string' || text.length > 4096) throw new Error('Copy: bad text')
+    clipboard.writeText(text)
   })
 
   // Palette / settings window control

@@ -84,8 +84,8 @@ function ModuleIdBadge({ moduleId }: { moduleId: string }) {
   const [copied, setCopied] = useState(false)
   const snippet = `open_module: ${moduleId}`
   const copy = (): void => {
-    void navigator.clipboard
-      .writeText(snippet)
+    void window.electronAPI
+      .copyText(snippet)
       .then(() => {
         setCopied(true)
         setTimeout(() => setCopied(false), 1200)

@@ -887,6 +887,8 @@ export interface ElectronAPI {
    */
   ulanziListProfiles: () => Promise<UlanziProfilesView>
   notificationsCliInfo: () => Promise<import('./notifications').NotificationsCliInfo>
+  /** Put text on the clipboard (Settings' Copy buttons). Settings-window only. */
+  copyText: (text: string) => Promise<void>
 
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>

@@ -2,6 +2,8 @@ import { app } from 'electron'
 import path from 'path'
 import type { ModuleManifest } from '@shared/types'
 import {
+  DEFAULT_CONSOLE_NOTIFICATIONS_TARGET,
+  NOTIFICATIONS_CONSOLE_KEY,
   DEFAULT_NOTIFICATION_DURATION_MS,
   DEFAULT_NOTIFICATION_LOOK,
   DEFAULT_NOTIFICATION_POSITION,
@@ -88,6 +90,19 @@ const MANIFEST: ModuleManifest = {
       options: [
         { value: 'os', label: 'System notification centre' },
         { value: 'runwa', label: 'Runwa strip' }
+      ]
+    },
+    {
+      type: 'radio',
+      key: NOTIFICATIONS_CONSOLE_KEY,
+      label: 'Notifications from the console',
+      description:
+        'Where a notification sent with runwa-notify goes. The strip shows it for a few seconds and keeps nothing; the system notification centre keeps it until you clear it. --to runwa, system or both on the command overrides this for one call.',
+      defaultValue: DEFAULT_CONSOLE_NOTIFICATIONS_TARGET,
+      options: [
+        { value: 'runwa', label: 'Runwa strip' },
+        { value: 'os', label: 'System notification centre' },
+        { value: 'both', label: 'Both' }
       ]
     },
     {

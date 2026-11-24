@@ -142,6 +142,7 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('ulanzi:list-profiles'),
   notificationsCliInfo: (): Promise<NotificationsCliInfo> =>
     ipcRenderer.invoke('notifications:cli-info'),
+  copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write-text', text),
 
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>

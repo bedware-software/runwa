@@ -37,11 +37,18 @@ class NotificationsService {
   private started = false
   private enabled = true
   private config: NotificationsConfig = readNotificationsConfig(undefined)
-  private readonly inbox = new NotificationInbox((request) => {
-    this.show({
-      ...request,
-      durationMs: request.durationMs ?? this.config.defaultDurationMs
-    })
+  private readonly inbox = new NotificationInbox(({ target, ...request }) => {
+    // The command's --to wins over the module setting for that one call.
+    const to = target ?? this.config.consoleNotifications
+    if (to !== 'os') {
+      this.show({
+        ...request,
+        durationMs: request.durationMs ?? this.config.defaultDurationMs
+      })
+    }
+    if (to !== 'runwa') {
+      this.showInOsCentre(request.title ?? 'Runwa', request.message, request.tone === 'error')
+    }
   })
 
   private readonly onSettingsChange = (settings: Settings): void => {
@@ -98,15 +105,20 @@ class NotificationsService {
       })
       return
     }
+    this.showInOsCentre(note.title, note.body, note.urgency === 'critical')
+  }
+
+  /** Critical ones make a sound; the rest arrive silently. */
+  private showInOsCentre(title: string, body: string, critical: boolean): void {
     if (!Notification.isSupported()) {
-      console.log(`[notifications] ${note.title}: ${note.body}`)
+      console.log(`[notifications] ${title}: ${body}`)
       return
     }
     try {
       new Notification({
-        title: note.title,
-        body: note.body,
-        silent: note.urgency !== 'critical',
+        title,
+        body,
+        silent: !critical,
         icon: getNotificationIcon()
       }).show()
     } catch (err) {

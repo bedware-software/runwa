@@ -11,6 +11,7 @@ export const NOTIFICATIONS_LOOK_KEY = 'look'
 export const NOTIFICATIONS_POSITION_KEY = 'position'
 export const NOTIFICATIONS_DURATION_KEY = 'defaultDuration'
 export const NOTIFICATIONS_SYSTEM_KEY = 'systemNotifications'
+export const NOTIFICATIONS_CONSOLE_KEY = 'consoleNotifications'
 export const NOTIFICATIONS_TEST_ACTION = 'test'
 
 export const NOTIFICATION_POSITIONS = [
@@ -36,7 +37,24 @@ export const DEFAULT_NOTIFICATION_DURATION_MS = 4000
 /** Where errors and "update ready" go: the OS notification centre or the strip. */
 export type SystemNotificationsTarget = 'os' | 'runwa'
 
-export const NOTIFICATION_TONES = ['neutral', 'error', 'success'] as const
+/**
+ * Where a notification sent with `runwa-notify` goes: the Runwa strip, the OS
+ * notification centre, or both. The module setting is the default; the
+ * command's `--to` overrides it for one call (there the OS centre is spelled
+ * `system`, see CONSOLE_TARGET_ARGUMENTS).
+ */
+export const CONSOLE_NOTIFICATION_TARGETS = ['runwa', 'os', 'both'] as const
+export type ConsoleNotificationsTarget = (typeof CONSOLE_NOTIFICATION_TARGETS)[number]
+export const DEFAULT_CONSOLE_NOTIFICATIONS_TARGET: ConsoleNotificationsTarget = 'runwa'
+
+/** Values of the command's `--to` option. */
+export const CONSOLE_TARGET_ARGUMENTS: Record<string, ConsoleNotificationsTarget> = {
+  runwa: 'runwa',
+  system: 'os',
+  both: 'both'
+}
+
+export const NOTIFICATION_TONES =['neutral', 'error', 'success'] as const
 export type NotificationTone = (typeof NOTIFICATION_TONES)[number]
 
 /** Limits for anything that arrives from outside the app (`runwa-notify`). */
@@ -50,6 +68,7 @@ export interface NotificationsConfig {
   position: NotificationPosition
   defaultDurationMs: number
   systemNotifications: SystemNotificationsTarget
+  consoleNotifications: ConsoleNotificationsTarget
 }
 
 export function readNotificationsConfig(
@@ -58,7 +77,13 @@ export function readNotificationsConfig(
   const look = stored?.[NOTIFICATIONS_LOOK_KEY]
   const position = stored?.[NOTIFICATIONS_POSITION_KEY]
   const duration = Number(stored?.[NOTIFICATIONS_DURATION_KEY])
+  const consoleTarget = stored?.[NOTIFICATIONS_CONSOLE_KEY]
   return {
+    consoleNotifications: (CONSOLE_NOTIFICATION_TARGETS as readonly unknown[]).includes(
+      consoleTarget
+    )
+      ? (consoleTarget as ConsoleNotificationsTarget)
+      : DEFAULT_CONSOLE_NOTIFICATIONS_TARGET,
     look: (NOTIFICATION_LOOKS as readonly unknown[]).includes(look)
       ? (look as NotificationLook)
       : DEFAULT_NOTIFICATION_LOOK,

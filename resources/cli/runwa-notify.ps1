@@ -2,9 +2,12 @@
 #
 #   runwa-notify --text "Finished" [--title "Build"] [--duration 4000]
 #                [--tone neutral|error|success] [--source build]
+#                [--to runwa|system|both]
 #
 # --text is required. --duration is in milliseconds. A later notification with
-# the same --source replaces the earlier one.
+# the same --source replaces the earlier one. --to picks the Runwa strip, the
+# system notification centre or both for this call; without it the setting in
+# the Notifications module decides.
 #
 # It only writes a small JSON file into %APPDATA%\Runwa\notify-inbox, which
 # Runwa watches (the Notifications module must be on). Nothing is launched, so
@@ -14,12 +17,12 @@
 
 $ErrorActionPreference = 'Stop'
 
-$known = @('title', 'text', 'duration', 'tone', 'source')
+$known = @('title', 'text', 'duration', 'tone', 'source', 'to')
 $values = @{}
 for ($i = 0; $i -lt $args.Count; $i++) {
   $arg = [string]$args[$i]
   if ($arg -eq '--help' -or $arg -eq '-h') {
-    Write-Host 'usage: runwa-notify --text "..." [--title "..."] [--duration ms] [--tone neutral|error|success] [--source name]'
+    Write-Host 'usage: runwa-notify --text "..." [--title "..."] [--duration ms] [--tone neutral|error|success] [--source name] [--to runwa|system|both]'
     exit 0
   }
   $name = $arg -replace '^--?', ''
@@ -44,6 +47,13 @@ $request = [ordered]@{ text = $values['text'] }
 if ($values.ContainsKey('title')) { $request['title'] = $values['title'] }
 if ($values.ContainsKey('tone')) { $request['tone'] = $values['tone'] }
 if ($values.ContainsKey('source')) { $request['source'] = $values['source'] }
+if ($values.ContainsKey('to')) {
+  if (@('runwa', 'system', 'both') -cnotcontains $values['to']) {
+    Write-Host 'runwa-notify: --to is runwa, system or both'
+    exit 2
+  }
+  $request['to'] = $values['to']
+}
 if ($values.ContainsKey('duration')) {
   $duration = 0
   if (-not [int]::TryParse($values['duration'], [ref]$duration) -or $duration -le 0) {
