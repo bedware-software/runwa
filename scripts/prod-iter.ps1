@@ -14,15 +14,72 @@
 #
 # Get-Process Runwa matches only the installed app: an `npm run dev` instance runs as
 # electron.exe and is never touched.
+#
+# -Unattended is how the "Runwa prod-iter" scheduled task runs this script (the task is
+# created by scripts\install-prod-iter-task.ps1 and started by scripts\prod-iter-run.ps1, so a
+# non-elevated session can ship an elevated Runwa). It asks nothing, writes everything to
+# release\prod-iter.log, ends that log with one "RESULT: OK <version>" or
+# "RESULT: FAIL <step>: <reason>" line and exits 0 or 1 to match. The commit message, if any,
+# comes from release\prod-iter-message.txt, since a task takes no arguments.
 
 param(
+  [switch]$Unattended,
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$Message
 )
 
 $ErrorActionPreference = 'Stop'
 
-function Step($Text) { Write-Host "`n==> $Text" -ForegroundColor Cyan }
+$repo = Split-Path $PSScriptRoot -Parent
+$unattendedLog = Join-Path $repo 'release\prod-iter.log'
+$messageFile = Join-Path $repo 'release\prod-iter-message.txt'
+
+# Unattended, outer half: run this same script again with every stream of it and of its
+# children (npm, cargo, git, the installer) sent to the log. The redirect is cmd's, not
+# PowerShell's: 5.1 turns redirected native stderr into errors, see step 2/7.
+if ($Unattended -and -not $env:RUNWA_PROD_ITER_LOGGED) {
+  $code = 1
+  try {
+    New-Item -ItemType Directory -Force -Path (Split-Path $unattendedLog -Parent) | Out-Null
+    $env:RUNWA_PROD_ITER_LOGGED = '1'
+    $shell = (Get-Process -Id $PID).Path
+    $cmdArgs = '/d /s /c ""{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}" -Unattended > "{2}" 2>&1"' -f
+      $shell, $PSCommandPath, $unattendedLog
+    $child = Start-Process -FilePath $env:ComSpec -ArgumentList $cmdArgs -WindowStyle Hidden -PassThru
+    # Not Start-Process -Wait: that also waits for descendants, and the relaunched Runwa is one.
+    $child.WaitForExit()
+    $code = $child.ExitCode
+    $hasResult = (Test-Path -LiteralPath $unattendedLog) -and
+      (Select-String -LiteralPath $unattendedLog -Pattern '^RESULT: ' -Quiet)
+    if (-not $hasResult) {
+      if ($code -eq 0) { $code = 1 }
+      Add-Content -LiteralPath $unattendedLog -Encoding UTF8 -Value "RESULT: FAIL launch: the script exited with code $code and no result"
+    }
+  } catch {
+    $reason = ("$($_.Exception.Message)" -replace '\s+', ' ').Trim()
+    try {
+      Add-Content -LiteralPath $unattendedLog -Encoding UTF8 -Value "RESULT: FAIL launch: $reason"
+    } catch {}
+    $code = 1
+  }
+  exit $code
+}
+
+if ($Unattended) {
+  # npm and cargo write UTF-8; make this process's own redirected output match.
+  try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+  # Nobody can answer a prompt in a hidden console: have git fail instead of waiting.
+  $env:GIT_TERMINAL_PROMPT = '0'
+  Write-Host "prod-iter unattended, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $PSCommandPath"
+}
+
+$script:CurrentStep = 'preflight'
+$exitCode = 0
+
+function Step($Text) {
+  $script:CurrentStep = $Text
+  Write-Host "`n==> $Text" -ForegroundColor Cyan
+}
 
 # Native commands don't throw on a non-zero exit code, so check it explicitly.
 function Invoke-Checked([scriptblock]$Command) {
@@ -52,9 +109,14 @@ function Test-Elevated {
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-$repo = Split-Path $PSScriptRoot -Parent
 Push-Location $repo
 try {
+  if ($Unattended -and -not $Message -and (Test-Path -LiteralPath $messageFile)) {
+    $text = "$(Get-Content -LiteralPath $messageFile -Raw -Encoding UTF8)".Trim()
+    Remove-Item -LiteralPath $messageFile -Force
+    if ($text) { $Message = @($text) }
+  }
+
   # Relaunch from wherever the app runs from, unless that is a build inside the repo. NSIS /S
   # reinstalls into the previous install location, so that is also where the new exe lands.
   $exe = Join-Path $env:LOCALAPPDATA 'Programs\Runwa\Runwa.exe'
@@ -86,6 +148,10 @@ try {
     # commit that made the same bump elsewhere leaves the version as it was).
     if ($installed -eq $oldVersion -and $installedCommit -eq $head) {
       Write-Host "Working tree is clean and $exe is already $oldVersion ($($head.Substring(0, 7)))."
+      if ($Unattended) {
+        Write-Host "RESULT: OK $oldVersion (already installed, nothing to ship)"
+        return
+      }
       if ([Console]::IsInputRedirected) { return }
       $answer = Read-Host "Rebuild and reinstall $oldVersion anyway? [y/N]"
       if ($answer -notmatch '^[yY]') { return }
@@ -188,7 +254,19 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "$version is installed, but the push failed" }
 
   Write-Host "`nShipped $version to $exe (log: $log)" -ForegroundColor Green
+  if ($Unattended) { Write-Host "RESULT: OK $version" }
+}
+catch {
+  # Interactive runs fail exactly as before; unattended ones end the log with the verdict.
+  if (-not $Unattended) { throw }
+  $reason = ("$($_.Exception.Message)" -replace '\s+', ' ').Trim()
+  Write-Host "`nFAILED at $($script:CurrentStep)"
+  Write-Host ($_ | Out-String)
+  Write-Host "RESULT: FAIL $($script:CurrentStep): $reason"
+  $exitCode = 1
 }
 finally {
   Pop-Location
 }
+
+if ($Unattended) { exit $exitCode }
