@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Checkbox, Panel, SectionTitle } from '@bedware/ui'
+import { Button, Checkbox, Notice, Panel, SectionTitle } from '@bedware/ui'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { useSettingsStore } from '@/store/settings-store'
@@ -14,6 +14,7 @@ import { UserCommandsSection } from './UserCommandsSection'
 import { AutoDarkModeSection } from './AutoDarkModeSection'
 import { UlanziSection } from './UlanziSection'
 import { WindowSwitcherIgnoreSection } from './WindowSwitcherIgnoreSection'
+import { ModuleLockContext } from './module-lock'
 
 interface Props {
   moduleId: string
@@ -80,18 +81,48 @@ function osMatches(os: string): boolean {
  * opens directly into hotkeys / config / per-module sections. Dropping
  * the header avoids the visual duplication and lets the actionable
  * controls start at the top.
+ *
+ * A module that is switched off shows the same page, locked: a notice with
+ * a "Turn on" button on top, and everything below it readable but not
+ * editable (see module-lock.ts). The sections only read on mount — lists,
+ * file paths, parsed rules — so showing them starts nothing in the module.
  */
 export function ModulePanel({ moduleId }: Props) {
   const module = useSettingsStore((s) => s.modules.find((m) => m.id === moduleId))
   const setHotkey = useSettingsStore((s) => s.setModuleHotkey)
   const setConfig = useSettingsStore((s) => s.setModuleConfig)
+  const setEnabled = useSettingsStore((s) => s.setModuleEnabled)
   const remapTriggers = useRemapTriggers(moduleId)
 
   if (!module) return null
 
+  const locked = !module.enabled
+
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
-      {module.supportsDirectLaunch && module.enabled && (
+      {locked && (
+        <Notice
+          tone="warning"
+          title={`${module.name} is turned off`}
+          side={
+            <Button size="sm" onClick={() => void setEnabled(module.id, true)}>
+              Turn on
+            </Button>
+          }
+        >
+          Its settings are shown below, but they can’t be changed until the
+          module is on.
+        </Notice>
+      )}
+
+      <ModuleLockContext.Provider value={locked}>
+        <fieldset
+          disabled={locked}
+          inert={locked}
+          aria-label={`${module.name} settings`}
+          className="flex flex-col gap-4 min-w-0"
+        >
+      {module.supportsDirectLaunch && (
         <Panel>
           <HotkeyRow
             title="Direct-launch hotkey"
@@ -106,7 +137,7 @@ export function ModulePanel({ moduleId }: Props) {
         </Panel>
       )}
 
-      {module.enabled && !CUSTOM_CONFIG_MODULE_IDS.has(module.id) && module.configFields && (() => {
+      {!CUSTOM_CONFIG_MODULE_IDS.has(module.id) && module.configFields && (() => {
         // Drop fields gated to other operating systems — e.g. App
         // Search's "Store / UWP apps" and "Desktop shortcuts" are
         // Windows-only enumeration sources and would just confuse a mac
@@ -168,21 +199,21 @@ export function ModulePanel({ moduleId }: Props) {
         )
       })()}
 
-      {module.enabled && module.id === 'keyboard-remap' && <KeyboardRemapSection />}
+      {module.id === 'keyboard-remap' && <KeyboardRemapSection />}
 
-      {module.enabled && module.id === 'auto-dark-mode' && <AutoDarkModeSection />}
+      {module.id === 'auto-dark-mode' && <AutoDarkModeSection />}
 
-      {module.enabled && module.id === 'ulanzi' && <UlanziSection />}
+      {module.id === 'ulanzi' && <UlanziSection />}
 
-      {module.enabled && module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
+      {module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
 
-      {module.enabled && module.id === 'user-commands' && <UserCommandsSection />}
+      {module.id === 'user-commands' && <UserCommandsSection />}
 
-      {module.enabled && module.id === 'window-switcher' && (
+      {module.id === 'window-switcher' && (
         <WindowSwitcherIgnoreSection />
       )}
 
-      {module.enabled && module.id === 'window-switcher' && (
+      {module.id === 'window-switcher' && (
         <PermissionSection
           heading="Permissions"
           description="macOS Screen Recording access is needed to read window titles. Relaunch runwa after granting."
@@ -196,6 +227,8 @@ export function ModulePanel({ moduleId }: Props) {
           ]}
         />
       )}
+        </fieldset>
+      </ModuleLockContext.Provider>
     </div>
   )
 }
