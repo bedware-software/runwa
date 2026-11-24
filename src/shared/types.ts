@@ -299,8 +299,23 @@ export type DesktopHintIcon = 'clipboard' | 'microphone' | 'spinner'
 export interface DesktopHintPayload {
   source: string
   message: string
+  /** Optional heading drawn above the message. */
+  title?: string
   icon?: DesktopHintIcon
+  /** Absent = neutral. */
+  tone?: 'neutral' | 'error' | 'success'
   durationMs?: number
+  /**
+   * Where on the screen the surface sits. Filled in by the window from the
+   * Notifications module's setting; callers don't set it.
+   */
+  position?:
+    | 'bottom-center'
+    | 'top-center'
+    | 'bottom-left'
+    | 'bottom-right'
+    | 'top-left'
+    | 'top-right'
 }
 
 export interface ModuleSettings {
@@ -866,6 +881,7 @@ export interface ElectronAPI {
    * module's per-profile table. Settings-window only.
    */
   ulanziListProfiles: () => Promise<UlanziProfilesView>
+  notificationsCliInfo: () => Promise<import('./notifications').NotificationsCliInfo>
 
   // Context-menu action: reveal an absolute path in Explorer / Finder.
   revealInFolder: (absolutePath: string) => Promise<void>

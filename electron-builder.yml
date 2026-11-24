@@ -41,6 +41,10 @@ extraResources:
   # virtual desktop.
   - from: resources/tray-icons
     to: tray-icons
+  # The runwa-notify command (Notifications module): a .cmd + .ps1 pair for
+  # Windows and a shell script for macOS. Settings shows the installed path.
+  - from: resources/cli
+    to: cli
 asarUnpack:
   - "**/*.node"
   - native/**

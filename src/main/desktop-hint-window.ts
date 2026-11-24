@@ -12,11 +12,16 @@ import type { DesktopHintPayload } from '@shared/types'
  * language without depending on each other.
  */
 
-// Transparent breathing room keeps the CSS shadow from being clipped by the
-// frameless BrowserWindow while the visible surface retains its compact size.
+// The window is a fixed, click-through, transparent box; the surface sits at
+// the edge of it that faces the screen edge and grows inward (a title and a
+// long message need the height). The renderer keeps SURFACE_INSET of
+// transparent room around the surface so its shadow is not clipped.
 const WIDTH = 360
-const HEIGHT = 104
-const BOTTOM_MARGIN = 32
+const HEIGHT = 280
+/** Gap between the window and the work-area edge it is placed against. */
+const EDGE_MARGIN = 32
+/** Must match the padding in DesktopHintApp. */
+const SURFACE_INSET = 24
 
 interface DesktopHintEntry {
   payload: DesktopHintPayload
@@ -34,6 +39,13 @@ class DesktopHintWindow {
   private entries = new Map<string, DesktopHintEntry>()
   private currentSource: string | null = null
   private ipcWired = false
+  /**
+   * While muted (the Notifications module is off) nothing is drawn, but
+   * entries and their lifetimes are kept: an ongoing status published while
+   * muted shows up when the module is turned back on.
+   */
+  private muted = false
+  private position: NonNullable<DesktopHintPayload['position']> = 'bottom-center'
 
   init(): void {
     if (this.window && !this.window.isDestroyed()) return
@@ -146,6 +158,24 @@ class DesktopHintWindow {
     }
   }
 
+  setMuted(muted: boolean): void {
+    if (muted === this.muted) return
+    this.muted = muted
+    if (muted) {
+      this.currentSource = null
+      this.hideWindow()
+    } else {
+      this.showNewestOrHide()
+    }
+  }
+
+  setPosition(position: NonNullable<DesktopHintPayload['position']>): void {
+    if (position === this.position) return
+    this.position = position
+    // Move whatever is on screen right away.
+    if (this.currentSource) this.showNewestOrHide()
+  }
+
   dispose(): void {
     for (const entry of this.entries.values()) {
       if (entry.hideTimer) clearTimeout(entry.hideTimer)
@@ -179,17 +209,34 @@ class DesktopHintWindow {
 
   private applyPayload(payload: DesktopHintPayload): void {
     const win = this.getBrowserWindow()
-    if (!win) return
+    if (!win || this.muted) return
 
     this.currentSource = payload.source
-    win.webContents.send('desktop-hint:payload', payload)
+    win.webContents.send('desktop-hint:payload', {
+      ...payload,
+      position: this.position
+    })
 
     // Follow the pointer to the display the user is actively looking at.
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
     const { x: displayX, y: displayY, width, height } = display.workArea
-    const x = Math.round(displayX + (width - WIDTH) / 2)
-    const y = Math.round(displayY + height - HEIGHT - BOTTOM_MARGIN)
+    // The surface ends up EDGE_MARGIN + SURFACE_INSET from the bottom or top
+    // (56px, where the single-line hint has always sat) and EDGE_MARGIN from
+    // the side in a corner.
+    const [vertical, horizontal] = this.position.split('-')
+    const x = Math.round(
+      horizontal === 'left'
+        ? displayX + EDGE_MARGIN - SURFACE_INSET
+        : horizontal === 'right'
+          ? displayX + width - WIDTH - EDGE_MARGIN + SURFACE_INSET
+          : displayX + (width - WIDTH) / 2
+    )
+    const y = Math.round(
+      vertical === 'top'
+        ? displayY + EDGE_MARGIN
+        : displayY + height - HEIGHT - EDGE_MARGIN
+    )
     win.setBounds({ x, y, width: WIDTH, height: HEIGHT })
 
     if (!win.isVisible()) {
@@ -234,6 +281,10 @@ class DesktopHintWindow {
 
   private showNewestOrHide(): void {
     if (!this.ready) return
+    if (this.muted) {
+      this.hideWindow()
+      return
+    }
 
     let newest: DesktopHintEntry | null = null
     for (const entry of this.entries.values()) newest = entry
@@ -267,10 +318,14 @@ function normalizePayload(payload: DesktopHintPayload): DesktopHintPayload {
       ? Math.max(250, Math.round(payload.durationMs))
       : undefined
 
+  const title = payload.title?.trim()
+
   return {
     source,
     message,
+    ...(title ? { title } : {}),
     ...(payload.icon ? { icon: payload.icon } : {}),
+    ...(payload.tone && payload.tone !== 'neutral' ? { tone: payload.tone } : {}),
     ...(durationMs !== undefined ? { durationMs } : {})
   }
 }

@@ -48,6 +48,7 @@ import { fullscreenBypassStore } from '../modules/keyboard-remap/fullscreen-bypa
 import { windowIgnoreStore } from '../modules/window-switcher/ignore-store'
 import { qualityFromAnswer } from '../modules/flashcards/srs'
 import { listUlanziProfiles } from '../modules/ulanzi/profiles'
+import { notificationsCliInfo } from '../modules/notifications'
 import { checkForUpdatesNow, getUpdateStatus, installUpdateNow } from '../auto-update'
 import { forceKillSelf, logProcessSnapshot } from '../process-utils'
 import {
@@ -460,6 +461,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('ulanzi:list-profiles', async (event) => {
     assertSenderWindow(event, settingsWindow.getBrowserWindow(), 'Ulanzi profiles')
     return listUlanziProfiles()
+  })
+
+  ipcMain.handle('notifications:cli-info', async (event) => {
+    assertSenderWindow(event, settingsWindow.getBrowserWindow(), 'Notifications command')
+    return notificationsCliInfo()
   })
 
   // Palette / settings window control

@@ -1,9 +1,8 @@
-import { clipboard, Notification, nativeImage, app } from 'electron'
-import path from 'path'
+import { clipboard } from 'electron'
 import type { ModuleConfigValue, ModuleManifest } from '@shared/types'
 import type { DirectLaunchEvent, PaletteModule } from '../types'
 import { settingsStore } from '../../settings-store'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { recorderWindow } from './recorder-window'
 import { GroqError, transcribe } from './groq-client'
 import { simulatePaste } from './uiohook-bridge'
@@ -122,36 +121,8 @@ function configString(cfg: Record<string, ModuleConfigValue>, key: string): stri
   return typeof v === 'string' ? v : ''
 }
 
-let notificationIcon: Electron.NativeImage | null = null
-function getNotificationIcon(): Electron.NativeImage | undefined {
-  if (notificationIcon) return notificationIcon
-  try {
-    const iconPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'icon.png')
-      : path.join(app.getAppPath(), 'resources', 'icon.png')
-    notificationIcon = nativeImage.createFromPath(iconPath)
-    return notificationIcon
-  } catch {
-    return undefined
-  }
-}
-
 function notify(title: string, body: string, urgency: 'low' | 'normal' | 'critical' = 'low'): void {
-  if (!Notification.isSupported()) {
-    console.log(`[groq-stt] ${title}: ${body}`)
-    return
-  }
-  try {
-    const n = new Notification({
-      title,
-      body,
-      silent: urgency !== 'critical',
-      icon: getNotificationIcon()
-    })
-    n.show()
-  } catch (err) {
-    console.warn('[groq-stt] notification failed:', err)
-  }
+  notifications.system({ source: `:notice`, title, body, urgency })
 }
 
 export function createGroqSttModule(): PaletteModule {
@@ -176,7 +147,7 @@ export function createGroqSttModule(): PaletteModule {
     // Synchronously mark recording + capture the promise so a near-instant
     // release/toggle event sees a real in-flight result instead of null.
     state.state = 'recording'
-    desktopHintWindow.show({
+    notifications.show({
       source: DESKTOP_HINT_SOURCE,
       message: 'Listening…',
       icon: 'microphone'
@@ -193,7 +164,7 @@ export function createGroqSttModule(): PaletteModule {
   const endRecording = async (): Promise<void> => {
     if (state.state !== 'recording' || !state.recordingResult) return
     state.state = 'transcribing'
-    desktopHintWindow.show({
+    notifications.show({
       source: DESKTOP_HINT_SOURCE,
       message: 'Transcribing…',
       icon: 'spinner'
@@ -205,7 +176,7 @@ export function createGroqSttModule(): PaletteModule {
     } catch (err) {
       state.state = 'idle'
       state.recordingResult = null
-      desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+      notifications.hide(DESKTOP_HINT_SOURCE)
       const msg = (err as Error).message
       // "Released too fast" / "no audio captured" / "mic not ready"
       // all map to the same user-facing reality: the push-to-talk
@@ -258,7 +229,7 @@ export function createGroqSttModule(): PaletteModule {
         // isn't loaded, simulatePaste() returns false and the user
         // still has the text on their clipboard for a manual paste.
         state.state = 'idle'
-        desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+        notifications.hide(DESKTOP_HINT_SOURCE)
         setTimeout(() => {
           simulatePaste()
         }, 40)
@@ -276,7 +247,7 @@ export function createGroqSttModule(): PaletteModule {
       }
     } finally {
       state.state = 'idle'
-      desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+      notifications.hide(DESKTOP_HINT_SOURCE)
     }
   }
 

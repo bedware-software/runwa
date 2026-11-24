@@ -7,7 +7,7 @@ import {
   readAutoDarkModeConfig,
   type AutoDarkModeConfig
 } from '@shared/auto-dark-mode'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { settingsStore } from '../../settings-store'
 import {
   getSystemTheme,
@@ -96,7 +96,7 @@ class AutoDarkModeService {
     this.configError = null
     this.backgroundColorError = null
     this.lastScheduleSegment = null
-    desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+    notifications.hide(DESKTOP_HINT_SOURCE)
   }
 
   /**
@@ -281,7 +281,7 @@ class AutoDarkModeService {
 
     if (!this.started || !nextEnabled) {
       this.pendingReconcile = Promise.resolve(null)
-      desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+      notifications.hide(DESKTOP_HINT_SOURCE)
       return
     }
 
@@ -594,7 +594,7 @@ class AutoDarkModeService {
 
   private showHint(message: string, durationMs = HINT_DURATION_MS): void {
     if (!this.started) return
-    desktopHintWindow.show({
+    notifications.show({
       source: DESKTOP_HINT_SOURCE,
       message,
       durationMs

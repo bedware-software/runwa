@@ -9,7 +9,7 @@ import {
   type FocusedApp
 } from '../../focus-context'
 import { fuzzyScore } from '../../fuzzy-match'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { paletteWindow } from '../../palette-window'
 import { getForegroundWindow } from '../window-switcher/native'
 import { formatKeystrokeAction } from './keystroke'
@@ -110,7 +110,7 @@ export function createUserCommandsModule(): PaletteModule {
         paletteWindow.toggle(USER_COMMANDS_ID)
         return
       }
-      desktopHintWindow.show({
+      notifications.show({
         source: USER_COMMANDS_ID,
         message: app
           ? `No user commands for ${appDisplayName(app)}`

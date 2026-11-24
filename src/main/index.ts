@@ -16,6 +16,7 @@ import { hotstringService } from './modules/hotstrings/service'
 import { HOTSTRINGS_RULES_KEY } from './modules/hotstrings'
 import { autoDarkModeService } from './modules/auto-dark-mode/service'
 import { ulanziService } from './modules/ulanzi/service'
+import { notifications } from './modules/notifications/service'
 import { flashcardsStore } from './modules/flashcards/store'
 import { userCommandsStore } from './modules/user-commands/store'
 import { fullscreenBypassStore } from './modules/keyboard-remap/fullscreen-bypass-store'
@@ -189,6 +190,10 @@ app.whenReady().then(async () => {
   // Pre-create the shared Desktop Hint window (hidden until needed) so the
   // first status or mode-change hint doesn't wait on a renderer cold boot.
   desktopHintWindow.init()
+  // Notifications owns that window: it applies the module's position and
+  // on/off state, and starts reading the runwa-notify inbox. Before the
+  // services below, which publish through it.
+  notifications.start()
 
   // Auto Dark Mode must be ready before IPC and global hotkeys can execute
   // its Command Palette actions. Manual mode remains idle; Scheduled mode
@@ -327,6 +332,7 @@ app.on('will-quit', () => {
     console.warn('[shutdown] autoDarkModeService.stop threw:', err)
   }
   try {
+    notifications.stop()
     console.log('[shutdown] ulanziService.stop…')
     ulanziService.stop()
     console.log('[shutdown] ulanziService.stop OK')

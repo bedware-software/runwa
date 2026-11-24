@@ -8,7 +8,7 @@ import {
   type UlanziProfileRules,
   type UlanziResolvedDisplay
 } from '@shared/ulanzi'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { settingsStore } from '../../settings-store'
 import { UlanziProfileWatcher } from './profile-watcher'
 import { listUlanziProfiles, ulanziConfigDir } from './profiles'
@@ -127,9 +127,9 @@ class UlanziService {
 
     const message = rule.label.trim() || profile
     if (display === 'sticky') {
-      desktopHintWindow.show({ source: DESKTOP_HINT_SOURCE, message })
+      notifications.show({ source: DESKTOP_HINT_SOURCE, message })
     } else if (display === 'brief' && switched) {
-      desktopHintWindow.show({
+      notifications.show({
         source: DESKTOP_HINT_SOURCE,
         message,
         durationMs: ULANZI_BRIEF_HINT_MS
@@ -140,7 +140,7 @@ class UlanziService {
   }
 
   private clearHint(): void {
-    desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+    notifications.hide(DESKTOP_HINT_SOURCE)
   }
 }
 

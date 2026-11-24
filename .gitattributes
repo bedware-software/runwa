@@ -1,2 +1,3 @@
 build/entitlements.mac*.plist text eol=lf
 *.sh text eol=lf
+resources/cli/runwa-notify text eol=lf

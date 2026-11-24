@@ -15,6 +15,8 @@ import { AutoDarkModeSection } from './AutoDarkModeSection'
 import { UlanziSection } from './UlanziSection'
 import { WindowSwitcherIgnoreSection } from './WindowSwitcherIgnoreSection'
 import { ModuleLockContext } from './module-lock'
+import { NotificationsSection } from './NotificationsSection'
+import { NOTIFICATIONS_ID } from '@shared/notifications'
 
 interface Props {
   moduleId: string
@@ -205,6 +207,8 @@ export function ModulePanel({ moduleId }: Props) {
 
       {module.id === 'ulanzi' && <UlanziSection />}
 
+      {module.id === NOTIFICATIONS_ID && <NotificationsSection />}
+
       {module.id === 'flashcards' && <FlashcardsLlmPromptSection />}
 
       {module.id === 'user-commands' && <UserCommandsSection />}
@@ -292,7 +296,7 @@ function ConfigGroup({ label, fields, values, onPatch, onAction }: ConfigGroupPr
   const hasCheckboxes = checkboxFields.length > 0
 
   return (
-    <div className="flex flex-col gap-3 border border-border rounded-md p-3 bg-card/40">
+    <Panel className="flex flex-col gap-3 p-3">
       {hasCheckboxes ? (
         <Checkbox
           checked={mixed ? 'mixed' : allOn}
@@ -315,6 +319,6 @@ function ConfigGroup({ label, fields, values, onPatch, onAction }: ConfigGroupPr
           />
         ))}
       </div>
-    </div>
+    </Panel>
   )
 }

@@ -1,0 +1,81 @@
+#!/bin/sh
+# Show a notification in a running Runwa (macOS).
+#
+#   runwa-notify --text "Finished" [--title "Build"] [--duration 4000]
+#                [--tone neutral|error|success] [--source build]
+#
+# --text is required. --duration is in milliseconds. A later notification with
+# the same --source replaces the earlier one.
+#
+# It only writes a small JSON file into Runwa's notify-inbox folder, which
+# Runwa watches (the Notifications module must be on). Nothing is launched.
+
+set -eu
+
+usage='usage: runwa-notify --text "..." [--title "..."] [--duration ms] [--tone neutral|error|success] [--source name]'
+title=''
+text=''
+duration=''
+tone=''
+source_name=''
+has_title=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) echo "$usage"; exit 0 ;;
+    --title|--text|--duration|--tone|--source)
+      if [ "$#" -lt 2 ]; then
+        echo "runwa-notify: $1 needs a value" >&2
+        exit 2
+      fi
+      case "$1" in
+        --title) title=$2; has_title=1 ;;
+        --text) text=$2 ;;
+        --duration) duration=$2 ;;
+        --tone) tone=$2 ;;
+        --source) source_name=$2 ;;
+      esac
+      shift 2
+      ;;
+    *)
+      echo "runwa-notify: unknown option $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$text" ]; then
+  echo 'runwa-notify: --text is required' >&2
+  exit 2
+fi
+
+case "$duration" in
+  '') ;;
+  *[!0-9]*|0*)
+    echo 'runwa-notify: --duration is a number of milliseconds' >&2
+    exit 2
+    ;;
+esac
+
+inbox="$HOME/Library/Application Support/Runwa/notify-inbox"
+if [ ! -d "$inbox" ]; then
+  echo "runwa-notify: $inbox does not exist. Is Runwa running with the Notifications module on?" >&2
+  exit 1
+fi
+
+# A JSON string: backslash and quote escaped, line breaks and tabs to spaces.
+json_string() {
+  printf '%s' "$1" | tr '\n\r\t' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+json="{\"text\":\"$(json_string "$text")\""
+if [ "$has_title" -eq 1 ]; then json="$json,\"title\":\"$(json_string "$title")\""; fi
+if [ -n "$tone" ]; then json="$json,\"tone\":\"$(json_string "$tone")\""; fi
+if [ -n "$source_name" ]; then json="$json,\"source\":\"$(json_string "$source_name")\""; fi
+if [ -n "$duration" ]; then json="$json,\"duration\":$duration"; fi
+json="$json}"
+
+# Written under a temporary name and renamed, so Runwa never reads half a file.
+name="$(date +%Y%m%d%H%M%S)-$$"
+printf '%s' "$json" > "$inbox/$name.tmp"
+mv "$inbox/$name.tmp" "$inbox/$name.json"

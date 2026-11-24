@@ -10,7 +10,7 @@ import { flashcardsService } from './service'
 import { flashcardsStore } from './store'
 import { isDue } from './srs'
 import { openPathAsUser } from '../../elevation'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 
 /**
  * Flashcards — search dialog over the on-disk deck folder. Selecting a
@@ -242,7 +242,7 @@ export function createFlashcardsModule(): PaletteModule {
       if (key === CONFIG_RELOAD) {
         flashcardsService.reload()
         const count = flashcardsService.listDecks().length
-        desktopHintWindow.show({
+        notifications.show({
           source: 'flashcards',
           message: `Decks reloaded · ${count} ${count === 1 ? 'deck' : 'decks'}`,
           durationMs: 2200

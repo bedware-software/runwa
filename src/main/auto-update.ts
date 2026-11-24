@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateInfo } from 'electron-updater'
 import { execFileSync, spawn } from 'node:child_process'
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { UpdateStatus } from '@shared/types'
 import { forceKillSelf, killSiblingRunwaProcesses } from './process-utils'
+import { notifications } from './modules/notifications/service'
 
 /**
  * GitHub Releases-backed auto-update.
@@ -132,12 +133,11 @@ export function initAutoUpdater(): void {
 
 function notifyDownloaded(version: string): void {
   setStatus({ state: 'downloaded', version })
-  if (Notification.isSupported()) {
-    new Notification({
-      title: 'runwa update ready',
-      body: `Version ${version} will install the next time you quit runwa.`
-    }).show()
-  }
+  notifications.system({
+    source: 'auto-update',
+    title: 'runwa update ready',
+    body: `Version ${version} will install the next time you quit runwa.`
+  })
 }
 
 /**

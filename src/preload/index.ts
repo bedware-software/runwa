@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { NotificationsCliInfo } from '@shared/notifications'
 import type {
   AppInfo,
   DesktopHintPayload,
@@ -139,6 +140,8 @@ const api: ElectronAPI = {
 
   ulanziListProfiles: (): Promise<UlanziProfilesView> =>
     ipcRenderer.invoke('ulanzi:list-profiles'),
+  notificationsCliInfo: (): Promise<NotificationsCliInfo> =>
+    ipcRenderer.invoke('notifications:cli-info'),
 
   // Context-menu target: `shell.showItemInFolder(absolutePath)` on main.
   revealInFolder: (absolutePath: string): Promise<void> =>

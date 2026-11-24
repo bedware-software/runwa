@@ -10,7 +10,7 @@ import {
   stopKeyboardRemap,
   validateKeyboardRemap
 } from './native'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { settingsStore } from '../../settings-store'
 import { openPathAsUser } from '../../elevation'
 import { launchModuleFromRemap } from '../../hotkey-manager'
@@ -143,7 +143,7 @@ class KeyboardRemapService {
    */
   reloadFromCommand(): KeyboardRemapRulesView {
     const view = this.reload()
-    desktopHintWindow.show({
+    notifications.show({
       source: DESKTOP_HINT_SOURCE,
       message: view.error
         ? hintMessage(view.error)

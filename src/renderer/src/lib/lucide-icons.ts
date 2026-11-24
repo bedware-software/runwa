@@ -1,6 +1,7 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/triangle-alert.js'
 import AppWindow from 'lucide-react/dist/esm/icons/app-window.js'
 import ArrowUpDown from 'lucide-react/dist/esm/icons/arrow-up-down.js'
+import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import Book from 'lucide-react/dist/esm/icons/book.js'
 import BookOpen from 'lucide-react/dist/esm/icons/book-open.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
@@ -50,6 +51,7 @@ import type { LucideIcon } from 'lucide-react'
 
 const ICONS_BY_HINT = {
   'app-window': AppWindow,
+  bell: Bell,
   book: Book,
   'book-open': BookOpen,
   'check-circle-2': CheckCircle2,

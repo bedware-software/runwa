@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 
 /**
  * Power-command driver behind the palette's OS group — shut down,
@@ -163,7 +163,7 @@ export function runPowerCommand(
 
   const fail = (detail: unknown): void => {
     console.warn(`[command-palette] ${command} failed:`, detail)
-    desktopHintWindow.show({
+    notifications.show({
       source: DESKTOP_HINT_SOURCE,
       message: `${LABELS[command]} failed`,
       durationMs: ERROR_HINT_DURATION_MS

@@ -4,7 +4,7 @@ import {
   simulatePaste,
   uiohookBridge
 } from '../groq-stt/uiohook-bridge'
-import { desktopHintWindow } from '../../desktop-hint-window'
+import { notifications } from '../notifications/service'
 import { keycodeToChar } from './keymap'
 import {
   parseHotstringRules,
@@ -103,7 +103,7 @@ class HotstringService {
     this.unsubscribe = null
     this.buffer = ''
     this.started = false
-    desktopHintWindow.hide(DESKTOP_HINT_SOURCE)
+    notifications.hide(DESKTOP_HINT_SOURCE)
   }
 
   /**
@@ -217,7 +217,7 @@ class HotstringService {
       // that drops synth keystrokes). Show the Desktop Hint so they know
       // the clipboard is now armed, and hold the clipboard contents
       // long enough for them to switch focus and use the platform shortcut.
-      desktopHintWindow.show({
+      notifications.show({
         source: DESKTOP_HINT_SOURCE,
         message: `Press ${PASTE_SHORTCUT} to paste`,
         durationMs: MANUAL_PASTE_HINT_DURATION_MS
