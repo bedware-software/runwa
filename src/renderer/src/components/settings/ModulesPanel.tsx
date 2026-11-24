@@ -104,7 +104,7 @@ export function ModulePanel({ moduleId }: Props) {
     <div className="flex flex-col gap-4 max-w-2xl">
       {locked && (
         <Notice
-          tone="warning"
+          tone="neutral"
           title={`${module.name} is turned off`}
           side={
             <Button size="sm" onClick={() => void setEnabled(module.id, true)}>

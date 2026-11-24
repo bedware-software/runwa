@@ -15,7 +15,8 @@ import type { DesktopHintPayload } from '@shared/types'
 // The window is a fixed, click-through, transparent box; the surface sits at
 // the edge of it that faces the screen edge and grows inward (a title and a
 // long message need the height). The renderer keeps SURFACE_INSET of
-// transparent room around the surface so its shadow is not clipped.
+// transparent room around the surface: the "tag" look's title sticks out 7px
+// above the top edge, and nothing may be cut off by the window.
 const WIDTH = 360
 const HEIGHT = 280
 /** Gap between the window and the work-area edge it is placed against. */
@@ -46,6 +47,7 @@ class DesktopHintWindow {
    */
   private muted = false
   private position: NonNullable<DesktopHintPayload['position']> = 'bottom-center'
+  private look: NonNullable<DesktopHintPayload['look']> = 'plate'
 
   init(): void {
     if (this.window && !this.window.isDestroyed()) return
@@ -169,9 +171,13 @@ class DesktopHintWindow {
     }
   }
 
-  setPosition(position: NonNullable<DesktopHintPayload['position']>): void {
-    if (position === this.position) return
+  setPresentation(
+    position: NonNullable<DesktopHintPayload['position']>,
+    look: NonNullable<DesktopHintPayload['look']>
+  ): void {
+    if (position === this.position && look === this.look) return
     this.position = position
+    this.look = look
     // Move whatever is on screen right away.
     if (this.currentSource) this.showNewestOrHide()
   }
@@ -214,7 +220,8 @@ class DesktopHintWindow {
     this.currentSource = payload.source
     win.webContents.send('desktop-hint:payload', {
       ...payload,
-      position: this.position
+      position: this.position,
+      look: this.look
     })
 
     // Follow the pointer to the display the user is actively looking at.

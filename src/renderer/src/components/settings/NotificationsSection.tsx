@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Button, InputField, Label, SectionTitle } from '@bedware/ui'
 import type { NotificationsCliInfo } from '@shared/notifications'
 import { Check, Clipboard } from '@/lib/lucide-icons'
-import { useModuleLocked } from './module-lock'
 
 /**
  * "From the console" block of the Notifications module: where the
@@ -12,7 +11,6 @@ import { useModuleLocked } from './module-lock'
  */
 export function NotificationsSection() {
   const [info, setInfo] = useState<NotificationsCliInfo | null>(null)
-  const locked = useModuleLocked()
 
   useEffect(() => {
     let cancelled = false
@@ -51,12 +49,10 @@ export function NotificationsSection() {
         label="Example"
         description="Paste into your shell. Add the folder to PATH, or make an alias, to call it by name."
         value={info?.example ?? ''}
-        locked={locked}
       />
       <CopyLine
         label="Command"
         value={info?.commandPath ?? ''}
-        locked={locked}
       />
     </div>
   )
@@ -65,13 +61,11 @@ export function NotificationsSection() {
 function CopyLine({
   label,
   description,
-  value,
-  locked
+  value
 }: {
   label: string
   description?: string
   value: string
-  locked: boolean
 }) {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
@@ -92,7 +86,6 @@ function CopyLine({
           size="sm"
           mono
           readOnly
-          disabled={locked}
           value={value}
           aria-label={label}
           onFocus={(e) => e.currentTarget.select()}

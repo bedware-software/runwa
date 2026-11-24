@@ -3,10 +3,12 @@ import path from 'path'
 import type { ModuleManifest } from '@shared/types'
 import {
   DEFAULT_NOTIFICATION_DURATION_MS,
+  DEFAULT_NOTIFICATION_LOOK,
   DEFAULT_NOTIFICATION_POSITION,
   NOTIFICATION_DURATIONS_MS,
   NOTIFICATIONS_DURATION_KEY,
   NOTIFICATIONS_ID,
+  NOTIFICATIONS_LOOK_KEY,
   NOTIFICATIONS_POSITION_KEY,
   NOTIFICATIONS_SYSTEM_KEY,
   NOTIFICATIONS_TEST_ACTION,
@@ -35,6 +37,20 @@ const MANIFEST: ModuleManifest = {
   defaultEnabled: true,
   supportsDirectLaunch: false,
   configFields: [
+    {
+      type: 'radio',
+      key: NOTIFICATIONS_LOOK_KEY,
+      label: 'Look',
+      description:
+        'Plate is a coloured plate: yellow, red for an error, green for success. Bar and Tag are dark panels with the tone on the left edge or on a title tag. Line is a quiet dark strip. The Test button below shows the chosen one.',
+      defaultValue: DEFAULT_NOTIFICATION_LOOK,
+      options: [
+        { value: 'plate', label: 'Plate' },
+        { value: 'bar', label: 'Bar' },
+        { value: 'tag', label: 'Tag' },
+        { value: 'line', label: 'Line' }
+      ]
+    },
     {
       type: 'radio',
       key: NOTIFICATIONS_POSITION_KEY,

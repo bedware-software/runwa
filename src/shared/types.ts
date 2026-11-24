@@ -306,6 +306,11 @@ export interface DesktopHintPayload {
   tone?: 'neutral' | 'error' | 'success'
   durationMs?: number
   /**
+   * Which of the design system's Toast looks to draw. Like `position`, filled
+   * in by the window from the Notifications module's settings.
+   */
+  look?: 'plate' | 'bar' | 'tag' | 'line'
+  /**
    * Where on the screen the surface sits. Filled in by the window from the
    * Notifications module's setting; callers don't set it.
    */

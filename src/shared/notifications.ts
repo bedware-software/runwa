@@ -7,6 +7,7 @@ import type { ModuleConfigValue } from './types'
  */
 export const NOTIFICATIONS_ID = 'notifications'
 
+export const NOTIFICATIONS_LOOK_KEY = 'look'
 export const NOTIFICATIONS_POSITION_KEY = 'position'
 export const NOTIFICATIONS_DURATION_KEY = 'defaultDuration'
 export const NOTIFICATIONS_SYSTEM_KEY = 'systemNotifications'
@@ -22,6 +23,11 @@ export const NOTIFICATION_POSITIONS = [
 ] as const
 export type NotificationPosition = (typeof NOTIFICATION_POSITIONS)[number]
 export const DEFAULT_NOTIFICATION_POSITION: NotificationPosition = 'bottom-center'
+
+/** The design system's four Toast looks; the owner's default is the plate. */
+export const NOTIFICATION_LOOKS = ['plate', 'bar', 'tag', 'line'] as const
+export type NotificationLook = (typeof NOTIFICATION_LOOKS)[number]
+export const DEFAULT_NOTIFICATION_LOOK: NotificationLook = 'plate'
 
 /** Stored as strings because module config radios hold strings. */
 export const NOTIFICATION_DURATIONS_MS = [2000, 3000, 4000, 6000, 10000] as const
@@ -40,6 +46,7 @@ export const NOTIFICATION_MIN_DURATION_MS = 1000
 export const NOTIFICATION_MAX_DURATION_MS = 30000
 
 export interface NotificationsConfig {
+  look: NotificationLook
   position: NotificationPosition
   defaultDurationMs: number
   systemNotifications: SystemNotificationsTarget
@@ -48,9 +55,13 @@ export interface NotificationsConfig {
 export function readNotificationsConfig(
   stored: Record<string, ModuleConfigValue> | undefined
 ): NotificationsConfig {
+  const look = stored?.[NOTIFICATIONS_LOOK_KEY]
   const position = stored?.[NOTIFICATIONS_POSITION_KEY]
   const duration = Number(stored?.[NOTIFICATIONS_DURATION_KEY])
   return {
+    look: (NOTIFICATION_LOOKS as readonly unknown[]).includes(look)
+      ? (look as NotificationLook)
+      : DEFAULT_NOTIFICATION_LOOK,
     position: (NOTIFICATION_POSITIONS as readonly unknown[]).includes(position)
       ? (position as NotificationPosition)
       : DEFAULT_NOTIFICATION_POSITION,

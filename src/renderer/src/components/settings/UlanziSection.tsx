@@ -15,7 +15,6 @@ import {
 import { RefreshCw, Trash2 } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
-import { useModuleLocked } from './module-lock'
 
 const DISPLAY_LABELS: Record<Exclude<UlanziProfileDisplay, 'auto'>, string> = {
   brief: 'Brief',
@@ -173,7 +172,6 @@ interface ProfileRowProps {
 
 function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
   const [label, setLabel] = useState(rule.label)
-  const locked = useModuleLocked()
   // Adopt saved values (another window, a reset) without fighting typing:
   // the draft only commits on blur / Enter.
   useEffect(() => {
@@ -208,7 +206,6 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
         type="text"
         size="sm"
         value={label}
-        disabled={locked}
         placeholder={row.name}
         onChange={(event) => setLabel(event.target.value)}
         onBlur={commitLabel}

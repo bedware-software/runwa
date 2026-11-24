@@ -3,7 +3,6 @@ import { Button, Checkbox, InputField, Label, Segmented, Textarea } from '@bedwa
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { optionalLucideIconFromHint } from '@/lib/lucide-icons'
-import { useModuleLocked } from './module-lock'
 
 interface Props {
   field: ModuleConfigField
@@ -92,7 +91,6 @@ interface TextFieldProps {
 function TextConfigField({ field, value, onChange }: TextFieldProps) {
   const [draft, setDraft] = useState(value)
   const [revealed, setRevealed] = useState(false)
-  const locked = useModuleLocked()
 
   // Adopt server updates when they don't match the in-flight draft — covers
   // external changes (another window, file edit) without clobbering typing.
@@ -126,7 +124,6 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
             type={inputType}
             size="sm"
             mono
-            disabled={locked}
             value={draft}
             placeholder={field.placeholder}
             onChange={(e) => setDraft(e.target.value)}

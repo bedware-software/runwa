@@ -11,7 +11,7 @@ import { settingsStore } from '../../settings-store'
 import { NotificationInbox } from './inbox'
 
 /** What a module passes to `notifications.show`. */
-export type NotificationRequest = Omit<DesktopHintPayload, 'position'>
+export type NotificationRequest = Omit<DesktopHintPayload, 'position' | 'look'>
 
 /** A message that used to go straight to the OS notification centre. */
 export interface SystemNotification {
@@ -123,7 +123,7 @@ class NotificationsService {
     this.enabled = this.started && (moduleSettings?.enabled ?? true)
     this.config = readNotificationsConfig(moduleSettings?.config)
 
-    desktopHintWindow.setPosition(this.config.position)
+    desktopHintWindow.setPresentation(this.config.position, this.config.look)
     desktopHintWindow.setMuted(!this.enabled)
     // Requests from the console are only read while the module is on, so
     // nothing queues up to appear all at once later.

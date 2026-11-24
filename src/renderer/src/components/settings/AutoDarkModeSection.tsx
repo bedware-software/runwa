@@ -16,7 +16,6 @@ import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settings-store'
 import { Toggle } from '@/components/ui/Toggle'
-import { useModuleLocked } from './module-lock'
 
 const MODES: Array<{
   value: AutoDarkModeMode
@@ -198,7 +197,6 @@ function TimeRow({
   describedBy?: string
   onChange: (value: string) => void
 }) {
-  const locked = useModuleLocked()
   return (
     <PanelRow title={label}>
       <InputField
@@ -206,7 +204,7 @@ function TimeRow({
         type="time"
         size="sm"
         value={value}
-        disabled={disabled || locked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         step={60}
         invalid={invalid}
@@ -231,12 +229,10 @@ function ColorRow({
   describedBy?: string
   onChange: (value: string) => void
 }) {
-  const locked = useModuleLocked()
   return (
     <PanelRow title={label}>
       <ColorField
         size="sm"
-        disabled={locked}
         aria-label={label}
         value={value}
         onChange={(next) => onChange(next.toUpperCase())}

@@ -194,23 +194,19 @@ function ToggleRow({
   disabledHint,
   onChange
 }: ToggleRowProps) {
-  // The design system's panel row, written out by class: PanelRow takes
-  // `title` as its heading, and this row needs the native tooltip.
   return (
-    <div
-      className={cn('bw-row', disabled && 'opacity-60')}
-      title={disabled ? disabledHint : undefined}
+    <PanelRow
+      title={title}
+      description={description}
+      tip={disabled ? disabledHint : undefined}
+      className={cn(disabled && 'opacity-60')}
     >
-      <div className="flex-1 min-w-0">
-        <span className="bw-row__title">{title}</span>
-        <span className="bw-row__desc">{description}</span>
-      </div>
       <Switch
         checked={checked}
         onChange={onChange}
         label={title}
         disabled={disabled}
       />
-    </div>
+    </PanelRow>
   )
 }
