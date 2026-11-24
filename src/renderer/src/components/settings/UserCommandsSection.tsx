@@ -482,10 +482,8 @@ export function UserCommandsSection() {
               return (
                 <PanelRow
                   key={command.id}
-                  className={cn(
-                    'items-start gap-3 group',
-                    isEditing && 'bg-accent/40'
-                  )}
+                  selected={isEditing}
+                  className="items-start gap-3 group"
                 >
                   <Icon
                     size={15}

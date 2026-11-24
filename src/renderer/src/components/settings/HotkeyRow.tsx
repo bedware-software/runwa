@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, PanelRow } from '@bedware/ui'
+import { Badge, LinkButton, PanelRow } from '@bedware/ui'
 import { HotkeyRecorder } from './HotkeyRecorder'
 import { Hotkey } from '../ui/Hotkey'
 
@@ -93,13 +93,12 @@ function ModuleIdBadge({ moduleId }: { moduleId: string }) {
       .catch(() => {})
   }
   return (
-    <button
-      type="button"
+    <LinkButton
+      mono
       onClick={copy}
       title={`Use in keyboard-rules.yaml as \`${snippet}\` — click to copy`}
-      className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground hover:text-foreground transition-colors"
     >
       {copied ? 'copied' : snippet}
-    </button>
+    </LinkButton>
   )
 }
