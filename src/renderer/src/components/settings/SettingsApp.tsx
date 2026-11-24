@@ -55,6 +55,42 @@ export function SettingsApp() {
     return unsub
   }, [])
 
+  // Esc closes the window, as in Vimperium's Settings. Anything that has its
+  // own use for Esc gets it first: the design system's dialogs and open
+  // Select list and the hotkey recorder all stop the event, so it never
+  // reaches this bubble-phase listener (the DOM checks are a second guard).
+  // In a text field the first Esc only leaves the field — which commits its
+  // draft — so a half-typed form isn't thrown away by one keypress.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || e.repeat) return
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]'
+        )
+      ) {
+        return
+      }
+      const active = document.activeElement
+      if (
+        active instanceof HTMLElement &&
+        (active instanceof HTMLTextAreaElement ||
+          active.isContentEditable ||
+          (active instanceof HTMLInputElement &&
+            !['checkbox', 'radio', 'button', 'range', 'color'].includes(active.type)))
+      ) {
+        e.preventDefault()
+        active.blur()
+        return
+      }
+      e.preventDefault()
+      window.close()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   if (!isHydrated) {
     return (
       <div className="h-full bg-card text-muted-foreground flex flex-col">
