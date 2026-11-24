@@ -201,6 +201,7 @@ function TimeRow({
     <PanelRow title={label}>
       <InputField
         aria-label={label}
+        data-vim-item={`adm:time:${label}`}
         type="time"
         size="sm"
         value={value}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { HotkeyButton, IconButton } from '@bedware/ui'
 import { RotateCcw, X } from '@/lib/lucide-icons'
 import { keyEventToAccelerator } from '@/lib/hotkey'
@@ -16,21 +16,8 @@ interface Props {
  * the Electron Accelerator string on first valid chord, cancels on Escape,
  * clears on Backspace/Delete.
  */
-/** True while a recorder is listening: every key is the recorder's then, not the Vim keys'. */
-let recordingCount = 0
-export function isHotkeyRecording(): boolean {
-  return recordingCount > 0
-}
-
 export function HotkeyRecorder({ value, onChange, defaultValue }: Props) {
   const [recording, setRecording] = useState(false)
-  useEffect(() => {
-    if (!recording) return
-    recordingCount += 1
-    return () => {
-      recordingCount -= 1
-    }
-  }, [recording])
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   const startRecording = (): void => {

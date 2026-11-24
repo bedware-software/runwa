@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   VimFormContext,
   VimFormHintBar,
   VimFormKeysHelp,
   VimFormLabels,
-  isTypingElement,
   useVimFormKeys,
   vimFormKeymap
 } from '@bedware/ui/vim-form'
@@ -14,7 +13,6 @@ import { SettingsTitleBar } from './SettingsTitleBar'
 import { GeneralPanel } from './GeneralPanel'
 import { AboutPanel } from './AboutPanel'
 import { ModulePanel } from './ModulesPanel'
-import { isHotkeyRecording } from './HotkeyRecorder'
 
 /**
  * The design system's form keys, minus what Settings has no use for: there is
@@ -80,20 +78,9 @@ export function SettingsApp() {
   // J / K change section, every control wears a letter label, a text field is
   // INSERT mode and everything else COMMAND.
   //
-  // Esc closes the window — but from a text field the first Esc only leaves
-  // the field (the owner's rule; the package's own would close at once). The
-  // package calls `onEscape` for both, so this listener, registered ahead of
-  // the package's, notes where the Esc was pressed.
-  const escFromField = useRef(false)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        escFromField.current = isTypingElement(document.activeElement)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [])
+  // Esc closes the window; from a text field the first Esc only leaves the
+  // field (`escapeLeavesField`). An open dialog and a shortcut being
+  // recorded keep every key — the package sees them in the document.
 
   const vim = useVimFormKeys({
     keymap: KEYMAP,
@@ -108,18 +95,8 @@ export function SettingsApp() {
       setTab(order[(Math.max(0, at) + step) % order.length])
       return true
     },
-    onEscape: () => {
-      if (escFromField.current) {
-        escFromField.current = false
-        return
-      }
-      window.close()
-    },
-    // A shortcut being recorded and an open dialog take every key themselves,
-    // Esc included: the recorder cancels on it, the dialog closes on it.
-    passThrough: () =>
-      isHotkeyRecording() ||
-      document.querySelector('[role="alertdialog"], [role="dialog"]') !== null
+    onEscape: () => window.close(),
+    escapeLeavesField: true
   })
 
   if (!isHydrated) {
@@ -152,6 +129,7 @@ export function SettingsApp() {
           keymap={vim.keymap}
           mode={vim.mode}
           firstLabel={vim.labels[0]}
+          escapeLeavesField
         />
         {vim.helpOpen && (
           <VimFormKeysHelp
