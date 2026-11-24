@@ -74,7 +74,7 @@ export function AutoDarkModeSection() {
           title="Mode"
           description="Toggle Theme always enters Manual mode so a schedule cannot immediately undo your choice."
         />
-        <ChoiceCards
+        <ChoiceCards data-vim-item="adm:mode"
           label="Mode"
           value={config.mode}
           options={MODES.map((item) => ({
@@ -132,7 +132,7 @@ export function AutoDarkModeSection() {
             title="Desktop background"
             description="Use a solid color that follows the active light or dark theme."
           >
-            <Toggle
+            <Toggle vimItem="adm:background"
               checked={config.manageWindowsBackground}
               onChange={(checked) =>
                 patch({
@@ -231,7 +231,7 @@ function ColorRow({
 }) {
   return (
     <PanelRow title={label}>
-      <ColorField
+      <ColorField data-vim-item={`adm:color:${label}`}
         size="sm"
         aria-label={label}
         value={value}

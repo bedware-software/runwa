@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, IconButton, InputField, Notice, Panel, PanelRow, SectionTitle, Select } from '@bedware/ui'
+import { Button, IconButton, InputField, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
+import { VimSelect } from '@bedware/ui/vim-form'
 import type { UlanziProfileSummary } from '@shared/types'
 import {
   ULANZI_ID,
@@ -114,7 +115,7 @@ export function UlanziSection() {
           </>
         }
         side={
-          <Button
+          <Button data-vim-item="ulanzi:refresh"
             variant="ghost"
             onClick={() => void load()}
             title="Read the profile list from Ulanzi Studio again"
@@ -130,7 +131,7 @@ export function UlanziSection() {
           <Notice
             flush
             role="alert"
-            side={<Button size="sm" onClick={() => void load()}>Retry</Button>}
+            side={<Button data-vim-item="ulanzi:retry" size="sm" onClick={() => void load()}>Retry</Button>}
           >
             {loadError}
           </Notice>
@@ -202,7 +203,7 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
           {describeApp(row.profile)}
         </div>
       </div>
-      <InputField
+      <InputField data-vim-item={`ulanzi:label:${row.name}`}
         type="text"
         size="sm"
         value={label}
@@ -217,7 +218,8 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
         autoComplete="off"
         boxClassName="w-40"
       />
-      <Select<UlanziProfileDisplay>
+      <VimSelect<UlanziProfileDisplay>
+        vimItem={`ulanzi:display:${row.name}`}
         value={rule.display}
         onChange={(display) => onPatch({ display })}
         label={`Hint behaviour for ${row.name}`}
@@ -230,7 +232,7 @@ function ProfileRow({ row, rule, onPatch, onRemove }: ProfileRowProps) {
         className="w-36 shrink-0"
       />
       {!row.profile && (
-        <IconButton
+        <IconButton data-vim-item={`ulanzi:forget:${row.name}`} data-vim-danger=""
           danger
           onClick={onRemove}
           label={`Forget settings for ${row.name}`}

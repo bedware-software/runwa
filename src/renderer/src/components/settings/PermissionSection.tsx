@@ -73,7 +73,7 @@ export function PermissionSection({ heading, description, rows }: Props) {
                 <Badge tone={granted ? 'accent' : 'error'}>
                   {granted ? 'Granted' : 'Not granted'}
                 </Badge>
-                <Button onClick={() => void handleAction(row.name, granted)}>
+                <Button data-vim-item={`perm:${row.name}`} onClick={() => void handleAction(row.name, granted)}>
                   {granted ? 'Open' : 'Grant'}
                 </Button>
               </div>

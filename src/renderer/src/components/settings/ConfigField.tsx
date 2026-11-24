@@ -24,7 +24,7 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
         <div className="flex-1 min-w-0">
           <Label description={field.description}>{field.label}</Label>
         </div>
-        <Button
+        <Button data-vim-item={`field:${field.key}`}
           onClick={() => onAction?.(field.key)}
           icon={ActionIcon && <ActionIcon size={12} strokeWidth={2} />}
           className="shrink-0"
@@ -45,7 +45,7 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
     const isReadOnly = field.readOnly === true
     const checked = isReadOnly ? Boolean(field.defaultValue) : Boolean(effective)
     return (
-      <Checkbox
+      <Checkbox data-vim-item={`field:${field.key}`}
         checked={checked}
         disabled={isReadOnly}
         onChange={(next) => onChange(next)}
@@ -68,7 +68,7 @@ export function ConfigField({ field, value, onChange, onAction }: Props) {
   return (
     <div>
       <Label description={field.description}>{field.label}</Label>
-      <Segmented
+      <Segmented data-vim-item={`field:${field.key}`}
         label={field.label}
         value={current}
         options={field.options}
@@ -109,7 +109,7 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
       <Label description={field.description}>{field.label}</Label>
       <div className={cn('flex gap-2', field.multiline ? 'items-start' : 'items-center')}>
         {field.multiline ? (
-          <Textarea
+          <Textarea data-vim-item={`field:${field.key}`}
             mono
             value={draft}
             placeholder={field.placeholder}
@@ -120,7 +120,7 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
             className="flex-1"
           />
         ) : (
-          <InputField
+          <InputField data-vim-item={`field:${field.key}`}
             type={inputType}
             size="sm"
             mono
@@ -141,7 +141,7 @@ function TextConfigField({ field, value, onChange }: TextFieldProps) {
           />
         )}
         {field.secret && (
-          <Button onClick={() => setRevealed((v) => !v)}>
+          <Button data-vim-item={`field:${field.key}:reveal`} onClick={() => setRevealed((v) => !v)}>
             {revealed ? 'Hide' : 'Show'}
           </Button>
         )}

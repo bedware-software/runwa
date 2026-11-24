@@ -70,10 +70,10 @@ export function KeyboardRemapSection() {
             boxClassName="flex-1"
             className="text-xs truncate"
           />
-          <Button onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
+          <Button data-vim-item="remap:edit" onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
             Edit
           </Button>
-          <Button
+          <Button data-vim-item="remap:reload"
             onClick={() => void onReload()}
             disabled={reloading}
             icon={<RefreshCw size={12} className={cn(reloading && 'animate-spin')} />}

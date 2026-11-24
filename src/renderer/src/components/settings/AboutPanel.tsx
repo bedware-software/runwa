@@ -45,7 +45,7 @@ export function AboutPanel() {
               Settings folder
             </div>
             {info?.userDataPath ? (
-              <LinkButton
+              <LinkButton data-vim-item="about:folder"
                 mono
                 onClick={() =>
                   void window.electronAPI.revealInFolder(info.userDataPath)
@@ -111,7 +111,7 @@ function UpdateSection() {
       />
       <Panel>
         <PanelRow title={label} description={description} className="items-start">
-          <Button
+          <Button data-vim-item="about:update"
             variant={action === 'install' ? 'primary' : 'secondary'}
             onClick={action === 'install' ? onInstall : onCheck}
             disabled={busy}

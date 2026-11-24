@@ -92,7 +92,7 @@ function CopyLine({
           boxClassName="flex-1"
           className="text-xs truncate"
         />
-        <Button
+        <Button data-vim-item={`notify:copy:${label}`}
           onClick={copy}
           disabled={!value}
           icon={copied ? <Check size={12} /> : <Clipboard size={12} />}

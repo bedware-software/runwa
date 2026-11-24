@@ -29,6 +29,26 @@ const KEYBOARD_MODULE_IDS = new Set(['keyboard-remap', 'hotstrings'])
  */
 const OTHER_OVERRIDE_IDS = new Set(['flashcards'])
 
+const isSearchGroup = (m: ModuleMeta): boolean =>
+  m.kind === 'search' && !OTHER_OVERRIDE_IDS.has(m.id)
+const isKeyboardGroup = (m: ModuleMeta): boolean =>
+  m.kind !== 'search' && KEYBOARD_MODULE_IDS.has(m.id)
+
+/**
+ * Every tab in the order the sidebar lists them, top to bottom — what the
+ * Vim keys' next / previous section walk through.
+ */
+export function settingsTabOrder(modules: ModuleMeta[]): SettingsTab[] {
+  const tab = (m: ModuleMeta): SettingsTab => `module:${m.id}`
+  return [
+    'general',
+    ...modules.filter(isSearchGroup).map(tab),
+    ...modules.filter(isKeyboardGroup).map(tab),
+    ...modules.filter((m) => !isSearchGroup(m) && !isKeyboardGroup(m)).map(tab),
+    'about'
+  ]
+}
+
 interface Props {
   current: SettingsTab
   onChange: (tab: SettingsTab) => void
@@ -45,7 +65,7 @@ export function Sidebar({ current, onChange }: Props) {
   return (
     <aside className="w-56 bg-card border-r border-border p-3 flex flex-col shrink-0">
       <Nav>
-        <NavItem
+        <NavItem data-vim-item="nav:general" data-vim-nowalk=""
           icon={<SlidersHorizontal size={16} />}
           current={current === 'general'}
           onClick={() => onChange('general')}
@@ -69,29 +89,21 @@ export function Sidebar({ current, onChange }: Props) {
           */}
           <ModuleGroup
             label="Searches"
-            modules={modules.filter(
-              (m) => m.kind === 'search' && !OTHER_OVERRIDE_IDS.has(m.id)
-            )}
+            modules={modules.filter(isSearchGroup)}
             current={current}
             onChange={onChange}
             onToggle={(id, v) => void setEnabled(id, v)}
           />
           <ModuleGroup
             label="Keyboard"
-            modules={modules.filter(
-              (m) => m.kind !== 'search' && KEYBOARD_MODULE_IDS.has(m.id)
-            )}
+            modules={modules.filter(isKeyboardGroup)}
             current={current}
             onChange={onChange}
             onToggle={(id, v) => void setEnabled(id, v)}
           />
           <ModuleGroup
             label="Other"
-            modules={modules.filter(
-              (m) =>
-                (m.kind !== 'search' && !KEYBOARD_MODULE_IDS.has(m.id)) ||
-                (m.kind === 'search' && OTHER_OVERRIDE_IDS.has(m.id))
-            )}
+            modules={modules.filter((m) => !isSearchGroup(m) && !isKeyboardGroup(m))}
             current={current}
             onChange={onChange}
             onToggle={(id, v) => void setEnabled(id, v)}
@@ -100,7 +112,7 @@ export function Sidebar({ current, onChange }: Props) {
       )}
 
       <Nav className="mt-auto pt-3 border-t border-border">
-        <NavItem
+        <NavItem data-vim-item="nav:about" data-vim-nowalk=""
           icon={<Info size={16} />}
           current={current === 'about'}
           onClick={() => onChange('about')}
@@ -128,7 +140,7 @@ function ModuleGroup({ label, modules, current, onChange, onToggle }: ModuleGrou
       {modules.map((m) => {
         const Icon = iconFromHint(m.icon)
         return (
-          <NavItem
+          <NavItem data-vim-item={`nav:module:${m.id}`} data-vim-nowalk=""
             key={m.id}
             icon={<Icon size={14} />}
             current={current === `module:${m.id}`}

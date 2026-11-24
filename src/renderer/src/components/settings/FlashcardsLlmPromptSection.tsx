@@ -113,7 +113,7 @@ export function FlashcardsLlmPromptSection() {
             boxClassName="flex-1"
             className="text-xs truncate"
           />
-          <Button
+          <Button data-vim-item="fc:116"
             onClick={() => void onCopy()}
             // Reset "Copied" → "Copy" on the natural end of the
             // interaction: pointer leaves the button, or the button
@@ -127,10 +127,10 @@ export function FlashcardsLlmPromptSection() {
           >
             {copied ? 'Copied' : 'Copy'}
           </Button>
-          <Button onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
+          <Button data-vim-item="fc:130" onClick={onEdit} icon={<Pencil size={12} />} className="shrink-0">
             Edit
           </Button>
-          <Button
+          <Button data-vim-item="fc:133"
             onClick={() => setResetConfirmOpen(true)}
             title="Overwrite the file with the shipped default prompt."
             icon={<RotateCcw size={12} />}
@@ -209,7 +209,7 @@ function DecksFolderSection() {
           boxClassName="flex-1 min-w-0"
           className="text-xs truncate"
         />
-        <Button
+        <Button data-vim-item="fc:212"
           onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_OPEN_DECKS)}
           title="Open the folder in Finder / Explorer."
           icon={<FolderOpen size={12} />}
@@ -217,14 +217,14 @@ function DecksFolderSection() {
         >
           Open
         </Button>
-        <Button
+        <Button data-vim-item="fc:220"
           onClick={() => void onChoose()}
           icon={<FolderPen size={12} />}
           className="shrink-0"
         >
           Change…
         </Button>
-        <Button
+        <Button data-vim-item="fc:227"
           onClick={() => void window.electronAPI.modulesAction(MODULE_ID, ACTION_RELOAD_DECKS)}
           title="Re-read every deck file. Files reload on their own when their mtime changes; this is for tools that preserve mtimes."
           icon={<RefreshCw size={12} />}
@@ -238,7 +238,7 @@ function DecksFolderSection() {
           <span className="truncate">
             Default: <span className="font-mono">{view.defaultFolder}</span>
           </span>
-          <LinkButton onClick={() => void onUseDefault()} className="shrink-0">
+          <LinkButton data-vim-item="fc:241" onClick={() => void onUseDefault()} className="shrink-0">
             Use default
           </LinkButton>
         </div>

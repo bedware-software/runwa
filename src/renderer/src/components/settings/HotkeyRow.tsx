@@ -93,7 +93,7 @@ function ModuleIdBadge({ moduleId }: { moduleId: string }) {
       .catch(() => {})
   }
   return (
-    <LinkButton
+    <LinkButton data-vim-item="hotkey:copy-id"
       mono
       onClick={copy}
       title={`Use in keyboard-rules.yaml as \`${snippet}\` — click to copy`}

@@ -93,7 +93,7 @@ export function FullscreenBypassSection() {
             <Notice
               flush
               role="alert"
-              side={<Button size="sm" onClick={() => void load()}>Retry</Button>}
+              side={<Button data-vim-item="bypass:retry" size="sm" onClick={() => void load()}>Retry</Button>}
             >
               {loadError}
             </Notice>
@@ -108,12 +108,12 @@ export function FullscreenBypassSection() {
           </PanelRow>
         ) : (
           processes.map((processName) => (
-            <PanelRow key={processName} className="gap-3">
+            <PanelRow data-vim-item={`bypass:${processName}`} data-vim-kind="row" key={processName} className="gap-3">
               <Keyboard size={15} className="shrink-0 text-muted-foreground" />
               <code className="flex-1 min-w-0 text-xs text-foreground font-mono truncate">
                 {processName}
               </code>
-              <IconButton
+              <IconButton data-vim-cell="remove"
                 danger
                 disabled={removing !== null}
                 onClick={() => void remove(processName)}

@@ -6,7 +6,8 @@ import {
   useState,
   type FormEvent
 } from 'react'
-import { Button, ConfirmDialog, Field, HelpText, IconButton, InputField, Kbd, Label, Notice, Panel, PanelRow, SectionTitle, Select } from '@bedware/ui'
+import { Button, ConfirmDialog, Field, HelpText, IconButton, InputField, Kbd, Label, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
+import { VimSelect } from '@bedware/ui/vim-form'
 import type {
   RunningAppSummary,
   UserCommand,
@@ -272,7 +273,7 @@ export function UserCommandsSection() {
             title={editingId ? 'Edit command' : 'Add command'}
             side={
               editingId && (
-                <Button
+                <Button data-vim-item="uc:275"
                   variant="ghost"
                   size="sm"
                   onClick={cancelEditing}
@@ -286,7 +287,7 @@ export function UserCommandsSection() {
 
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
             <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-2">
-              <Field
+              <Field data-vim-item="uc:name"
                 label="Name"
                 type="text"
                 value={draft.name}
@@ -295,7 +296,7 @@ export function UserCommandsSection() {
                 placeholder="e.g. Open project"
                 autoComplete="off"
               />
-              <Field
+              <Field data-vim-item="uc:alias"
                 label="Alias"
                 type="text"
                 mono
@@ -307,7 +308,7 @@ export function UserCommandsSection() {
                 autoComplete="off"
               />
             </div>
-            <Field
+            <Field data-vim-item="uc:action"
               label={draft.kind === 'keystroke' ? 'Keystroke' : 'Action'}
               type="text"
               mono
@@ -327,7 +328,8 @@ export function UserCommandsSection() {
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] gap-3">
             <div>
               <Label>Type</Label>
-              <Select<UserCommandKind>
+              <VimSelect<UserCommandKind>
+                vimItem="uc:kind"
                 label="Type"
                 value={draft.kind}
                 onChange={(kind) => patchDraft({ kind })}
@@ -340,7 +342,7 @@ export function UserCommandsSection() {
             </div>
 
             <div>
-              <Field
+              <Field data-vim-item="uc:scope"
                 label="Applies to"
                 type="text"
                 list="user-command-running-apps"
@@ -361,7 +363,7 @@ export function UserCommandsSection() {
 
           <div className="flex items-center justify-between gap-3">
             <HelpText error={!!error}>{error ?? hint}</HelpText>
-            <Button
+            <Button data-vim-item="uc:364"
               type="submit"
               variant="primary"
               disabled={!canSubmit}
@@ -416,7 +418,7 @@ export function UserCommandsSection() {
             boxClassName="flex-1"
             className="text-xs truncate"
           />
-          <Button
+          <Button data-vim-item="uc:open-file"
             onClick={() => void window.electronAPI.userCommandsOpenFile()}
             icon={<Pencil size={12} />}
             className="shrink-0"
@@ -447,7 +449,7 @@ export function UserCommandsSection() {
               <Notice
                 flush
                 role="alert"
-                side={<Button size="sm" onClick={() => void loadCommands()}>Retry</Button>}
+                side={<Button data-vim-item="uc:retry" size="sm" onClick={() => void loadCommands()}>Retry</Button>}
               >
                 {loadError}
               </Notice>
@@ -480,7 +482,7 @@ export function UserCommandsSection() {
               const alias = command.alias
               const isEditing = editingId === command.id
               return (
-                <PanelRow
+                <PanelRow data-vim-item={`uc:row:${command.id}`} data-vim-kind="row"
                   key={command.id}
                   selected={isEditing}
                   className="items-start gap-3 group"
@@ -508,7 +510,7 @@ export function UserCommandsSection() {
                       {command.action}
                     </code>
                   </div>
-                  <IconButton
+                  <IconButton data-vim-cell="edit"
                     pressed={isEditing}
                     onClick={() => (isEditing ? cancelEditing() : startEditing(command))}
                     label={`Edit ${command.name}`}
@@ -517,7 +519,7 @@ export function UserCommandsSection() {
                   >
                     <Pencil size={14} />
                   </IconButton>
-                  <IconButton
+                  <IconButton data-vim-cell="remove"
                     danger
                     disabled={removing}
                     onClick={() => setPendingRemoval(command)}

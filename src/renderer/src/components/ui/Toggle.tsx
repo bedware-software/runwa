@@ -7,6 +7,8 @@ interface Props {
   /** `sm` is the 36×20 switch for rows, `md` the 44×24 one that heads a section. */
   size?: 'sm' | 'md'
   disabled?: boolean
+  /** Its `data-vim-item`: the control's name for the Settings Vim keys. */
+  vimItem?: string
 }
 
 /**
@@ -14,7 +16,7 @@ interface Props {
  * it never takes focus on a pointer press (the palette's SearchInput keeps
  * it), and its click doesn't bubble to a clickable row around it.
  */
-export function Toggle({ checked, onChange, ariaLabel, size = 'sm', disabled }: Props) {
+export function Toggle({ checked, onChange, ariaLabel, size = 'sm', disabled, vimItem }: Props) {
   return (
     <Switch
       checked={checked}
@@ -22,6 +24,7 @@ export function Toggle({ checked, onChange, ariaLabel, size = 'sm', disabled }: 
       label={ariaLabel ?? ''}
       size={size}
       disabled={disabled}
+      data-vim-item={vimItem}
       onMouseDown={(e) => e.preventDefault()}
       // The Switch runs this before toggling and toggles regardless.
       onClick={(e) => e.stopPropagation()}

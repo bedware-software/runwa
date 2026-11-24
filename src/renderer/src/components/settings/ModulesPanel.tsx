@@ -107,7 +107,7 @@ export function ModulePanel({ moduleId }: Props) {
           tone="neutral"
           title={`${module.name} is turned off`}
           side={
-            <Button size="sm" onClick={() => void setEnabled(module.id, true)}>
+            <Button data-vim-item="module:turn-on" size="sm" onClick={() => void setEnabled(module.id, true)}>
               Turn on
             </Button>
           }
@@ -298,7 +298,7 @@ function ConfigGroup({ label, fields, values, onPatch, onAction }: ConfigGroupPr
   return (
     <Panel className="flex flex-col gap-3 p-3">
       {hasCheckboxes ? (
-        <Checkbox
+        <Checkbox data-vim-item={`group:${label}`}
           checked={mixed ? 'mixed' : allOn}
           disabled={masterReadOnly}
           onChange={toggleAll}

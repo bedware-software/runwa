@@ -45,7 +45,7 @@ export function GeneralPanel() {
           title="Theme"
           description="Choose how runwa looks. System follows your OS preference."
         />
-        <Segmented
+        <Segmented data-vim-item="general:theme"
           label="Theme"
           value={theme}
           options={THEMES}
@@ -83,7 +83,7 @@ export function GeneralPanel() {
             title="Wipe all data"
             description="Permanently deletes the entire runwa application directory, including all settings, hotkeys, module configuration, keyboard remap rules, and caches. The app will relaunch as if freshly installed. This action cannot be undone."
           >
-            <Button
+            <Button data-vim-item="general:wipe" data-vim-danger=""
               variant="danger"
               onClick={() => setWipeConfirmOpen(true)}
               icon={<Trash2 size={12} />}
@@ -201,7 +201,7 @@ function ToggleRow({
       tip={disabled ? disabledHint : undefined}
       className={cn(disabled && 'opacity-60')}
     >
-      <Switch
+      <Switch data-vim-item={`general:${title}`}
         checked={checked}
         onChange={onChange}
         label={title}

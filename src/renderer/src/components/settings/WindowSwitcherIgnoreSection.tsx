@@ -126,7 +126,7 @@ export function WindowSwitcherIgnoreSection() {
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
           <SectionTitle level={2} flush title="Add rule" />
           <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
-            <Field
+            <Field data-vim-item="ws:title"
               label="Window title"
               type="text"
               value={title}
@@ -136,7 +136,7 @@ export function WindowSwitcherIgnoreSection() {
               spellCheck={false}
               autoComplete="off"
             />
-            <Field
+            <Field data-vim-item="ws:exe"
               label="Executable"
               type="text"
               mono
@@ -153,7 +153,7 @@ export function WindowSwitcherIgnoreSection() {
             <HelpText error={!!error}>
               {error ?? 'A rule needs at least one of the two fields.'}
             </HelpText>
-            <Button
+            <Button data-vim-item="ws:add"
               type="submit"
               variant="primary"
               disabled={!canSubmit}
@@ -187,7 +187,7 @@ export function WindowSwitcherIgnoreSection() {
               <Notice
                 flush
                 role="alert"
-                side={<Button size="sm" onClick={() => void loadRules()}>Retry</Button>}
+                side={<Button data-vim-item="ws:retry" size="sm" onClick={() => void loadRules()}>Retry</Button>}
               >
                 {loadError}
               </Notice>
@@ -202,7 +202,7 @@ export function WindowSwitcherIgnoreSection() {
             </PanelRow>
           ) : (
             rules.map((rule) => (
-              <PanelRow key={rule.id} className="items-start gap-3">
+              <PanelRow data-vim-item={`ws:row:${rule.id}`} data-vim-kind="row" key={rule.id} className="items-start gap-3">
                 <EyeOff size={15} className="mt-0.5 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-foreground truncate">
@@ -212,7 +212,7 @@ export function WindowSwitcherIgnoreSection() {
                     title: {rule.title || '*'} · exe: {rule.processName || '*'}
                   </code>
                 </div>
-                <IconButton
+                <IconButton data-vim-cell="remove"
                   danger
                   disabled={removing}
                   onClick={() => setPendingRemoval(rule)}
