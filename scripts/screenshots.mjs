@@ -10,7 +10,12 @@
 // rights, and no window on the screen — the browser is headless.
 //
 // Output: release/screenshots-preview/*.png (the folder is git-ignored).
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+// Every frame the README's Feature tour links is taken in both themes: the
+// dark one as <frame>.png, the light one as <frame>-light.png. The README
+// shows the dark one from docs/screenshots/<frame>.png; bedware.software
+// shows the light one from docs/screenshots/light/<frame>.png in its light
+// theme.
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -58,14 +63,27 @@ function rendererFile(url) {
 }
 
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+// The site's curated frames are the ones linked in the README.
+const readme = readFileSync(join(root, 'README.md'), 'utf8')
+const tour = new Set(
+  [...readme.matchAll(/!\[[^\]]*\]\(docs\/screenshots\/([\w-]+)\.png\)/g)].map(([, name]) => name)
+)
 const browser = await chromium.launch({ headless: true })
 const taken = []
 
 /**
  * One frame: a fresh page of the given size with the stand-in API installed,
- * `drive` brings it to the state to capture.
+ * `drive` brings it to the state to capture. A tour frame is taken again in
+ * the light theme, as the site shows it.
  */
-async function frame(name, { size, hash, theme = 'dark', settings = {}, transparent = false }, drive) {
+async function frame(name, options, drive) {
+  await shoot(name, options, drive)
+  if (tour.has(name) && (options.theme ?? 'dark') === 'dark') {
+    await shoot(`${name}-light`, { ...options, theme: 'light' }, drive)
+  }
+}
+
+async function shoot(name, { size, hash, theme = 'dark', platform, settings = {}, transparent = false }, drive) {
   const context = await browser.newContext({
     viewport: size,
     deviceScaleFactor: SCALE,
@@ -97,7 +115,7 @@ async function frame(name, { size, hash, theme = 'dark', settings = {}, transpar
   await page.addInitScript(installStub, {
     manifests,
     settings: settingsFrom(manifests, { theme, ...settings }),
-    ...fixtures({ version })
+    ...fixtures({ version, platform })
   })
   await page.goto(`${origin}/index.html#${hash}`)
   const clip = (await drive(page)) ?? undefined
@@ -149,14 +167,10 @@ const manifests = await readManifests(workDir)
 console.log(`Runwa ${version} → ${outDir}`)
 
 // Palette
-await frame('palette-app-search', { size: PALETTE, hash: 'palette' }, palette('app-search', 'co'))
+// App Search as on a Mac: real apps, their own icons (fixtures.mjs MAC_APPS).
+await frame('palette-app-search', { size: PALETTE, hash: 'palette', platform: 'mac' }, palette('app-search', 'r'))
 await frame('palette-window-switcher', { size: PALETTE, hash: 'palette' }, palette('window-switcher'))
 await frame('palette-command-palette', { size: PALETTE, hash: 'palette' }, palette('command-palette'))
-await frame(
-  'palette-app-search-light',
-  { size: PALETTE, hash: 'palette', theme: 'light' },
-  palette('app-search', 'co')
-)
 
 // Settings
 const off = { disabled: ['groq-stt'] }
@@ -206,16 +220,6 @@ for (const lightBackground of ['paper', 'soft', 'steel', 'stone']) {
     settingsPage()
   )
 }
-await frame(
-  'palette-command-palette-light',
-  { size: PALETTE, hash: 'palette', theme: 'light' },
-  palette('command-palette')
-)
-await frame(
-  'palette-window-switcher-light',
-  { size: PALETTE, hash: 'palette', theme: 'light' },
-  palette('window-switcher')
-)
 await frame('settings-about', { size: SETTINGS, hash: 'settings?tab=about', settings: off }, settingsPage())
 await frame(
   'settings-vim-keys',
@@ -254,4 +258,26 @@ rmSync(workDir, { recursive: true, force: true })
 
 const failed = taken.filter((t) => t.problems.length)
 console.log(`${taken.length} frames, ${failed.length} with page errors`)
-process.exit(failed.length ? 1 : 0)
+if (failed.length) process.exit(1)
+
+// Check the complete list before copying so a renamed frame cannot leave the
+// tour half updated.
+for (const name of tour) {
+  for (const file of [name, `${name}-light`]) {
+    if (!taken.some((frame) => frame.name === file)) throw new Error(`Missing README frame: ${file}`)
+  }
+}
+// The dark frame where the README links it, the light one under light/.
+const docsDir = join(root, 'docs', 'screenshots')
+const lightDir = join(docsDir, 'light')
+mkdirSync(lightDir, { recursive: true })
+// A frame the tour no longer links goes, so a rename leaves nothing behind.
+for (const dir of [docsDir, lightDir]) {
+  for (const file of readdirSync(dir)) {
+    if (file.endsWith('.png') && !tour.has(file.slice(0, -4))) rmSync(join(dir, file))
+  }
+}
+for (const name of tour) {
+  copyFileSync(join(outDir, `${name}.png`), join(docsDir, `${name}.png`))
+  copyFileSync(join(outDir, `${name}-light.png`), join(lightDir, `${name}.png`))
+}

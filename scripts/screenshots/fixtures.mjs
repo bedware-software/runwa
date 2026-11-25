@@ -1,5 +1,8 @@
-// Invented sample data for the screenshots. Nothing here comes from a real
-// machine: the apps, windows, paths, commands and the user "alex" are made up.
+// Sample data for the screenshots. Mostly invented: the Windows apps,
+// windows, paths, commands and the user "alex" are made up. The exception is
+// App Search on macOS (MAC_APPS): real apps at their real paths, with their
+// own icons converted from the bundles' .icns into icons/*.png.
+import { readFileSync } from 'node:fs'
 
 /** A flat square tile with a letter — stands in for an app's own icon. */
 function tile(letter, colour) {
@@ -24,6 +27,37 @@ const APPS = [
 ]
 
 const HOME = 'C:\\Users\\alex'
+
+const icon = (file) =>
+  `data:image/png;base64,${readFileSync(new URL(`icons/${file}.png`, import.meta.url)).toString('base64')}`
+
+// App Search on macOS as it answers "r": the order fuzzyScore gives
+// (src/main/fuzzy-match.ts — word starts first, equal scores in the order the
+// enumerator walks /Applications, /System/Applications and then Finder).
+// Notes does not match and drops out once the query is typed.
+const MAC_APPS = [
+  ['Runwa', '/Applications/Runwa.app', 'runwa'],
+  ['Reminders', '/System/Applications/Reminders.app', 'reminders'],
+  ['Dropbox', '/Applications/Dropbox.app', 'dropbox'],
+  ['Safari', '/Applications/Safari.app', 'safari'],
+  ['Telegram', '/Applications/Telegram.app', 'telegram'],
+  ['Vimperium', '/Applications/Vimperium.app', 'vimperium'],
+  ['Calendar', '/System/Applications/Calendar.app', 'calendar'],
+  ['Notes', '/System/Applications/Notes.app', 'notes'],
+  ['Terminal', '/System/Applications/Utilities/Terminal.app', 'terminal'],
+  ['Finder', '/System/Library/CoreServices/Finder.app', 'finder']
+]
+
+const macAppItems = MAC_APPS.map(([name, path, file]) => ({
+  id: `app:${path}`,
+  moduleId: 'app-search',
+  title: name,
+  subtitle: path,
+  iconHint: icon(file),
+  revealPath: path,
+  actionKind: 'launch-app',
+  action: {}
+}))
 
 const appItems = APPS.map(([name, letter, colour], i) => ({
   id: `start-menu:${name}`,
@@ -104,17 +138,20 @@ const commandItems = [
   command('themes-on-schedule', 'Themes on schedule', 'Resume automatic light and dark theme changes.', 'clock', 'Themes')
 ]
 
-export function fixtures({ version }) {
+/** `platform: 'mac'` for a frame of the macOS build; Windows otherwise. */
+export function fixtures({ version, platform = 'windows' }) {
+  const mac = platform === 'mac'
   return {
+    navigatorPlatform: mac ? 'MacIntel' : 'Win32',
     appInfo: {
       isPackaged: true,
-      platform: 'win32',
+      platform: mac ? 'darwin' : 'win32',
       version,
       name: 'Runwa',
-      userDataPath: `${HOME}\\AppData\\Roaming\\Runwa`
+      userDataPath: mac ? '/Users/alex/Library/Application Support/Runwa' : `${HOME}\\AppData\\Roaming\\Runwa`
     },
     searches: {
-      'app-search': appItems,
+      'app-search': mac ? macAppItems : appItems,
       'window-switcher': windowItems,
       'command-palette': commandItems
     },

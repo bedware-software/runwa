@@ -1,0 +1,27 @@
+name: Refresh bedware.software
+on:
+  push:
+    branches: [main]
+    paths: [README.md, 'docs/screenshots/**']
+  workflow_run:
+    workflows: ['Build distributables']
+    types: [completed]
+  release:
+    types: [published]
+permissions: {}
+jobs:
+  rebuild:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request site build
+        env:
+          DEPLOY_URL: ${{ secrets.COOLIFY_SITE_DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.COOLIFY_SITE_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$DEPLOY_TOKEN" ]; then
+            echo "::notice::Site deployment is not configured."
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 30 --output /dev/null \
+            --header "Authorization: Bearer $DEPLOY_TOKEN" "$DEPLOY_URL"

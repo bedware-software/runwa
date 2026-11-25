@@ -1,15 +1,50 @@
 # Runwa
 
-A keyboard-driven command palette launcher for Windows and macOS, inspired by [PowerToys Command Palette](https://learn.microsoft.com/en-us/windows/powertoys/command-palette/overview). Each feature is a module with its own global hotkey, settings page and on/off switch.
+A keyboard launcher for switching windows, finding apps and running commands on Windows and macOS. Inspired by [PowerToys Command Palette](https://learn.microsoft.com/en-us/windows/powertoys/command-palette/overview), Runwa gives each module its own global hotkey, settings page and on/off switch.
 
-![Window Switcher](docs/window-walker.png)
+## Highlights
 
-<details>
-<summary>More screenshots</summary>
+- Press a dedicated shortcut to open the tool you need, wherever you are on the desktop.
+- Type an alias to launch an app or run a command as soon as the name matches.
+- Keep shortcuts consistent across Windows and macOS, with separate overrides for each platform.
 
-![Settings](docs/settings.png)
+## Feature tour
 
-</details>
+### Window Switcher
+
+Jump to a window by title or app name. Press the shortcut twice to return to the previous window, even when both belong to the same app.
+
+![Window Switcher showing recent windows and their number keys](docs/screenshots/palette-window-switcher.png)
+
+### App Search
+
+Type part of an app name or its initials and press Enter to launch it. Give an app a short alias to open it directly.
+
+![App Search listing installed Mac apps that match the letter r](docs/screenshots/palette-app-search.png)
+
+### Keyboard Remap
+
+Tap Caps Lock for Escape or hold it for Control. The same rules file can turn Space into a layer for arrows, window actions and module shortcuts.
+
+![Keyboard Remap settings with tap and hold rules for Caps Lock and Space](docs/screenshots/settings-keyboard-remap.png)
+
+### Command Palette
+
+Look up built-in commands and your own actions in one list. Maximize the active window, change the theme or jump straight to a module’s settings.
+
+![Command Palette with system commands and actions](docs/screenshots/palette-command-palette.png)
+
+### User Commands
+
+Bind a shell action or a sequence of keystrokes to a name. Limit a command to one app so the palette offers it when that app has focus.
+
+![User Commands settings with named shell and keystroke actions and their app scopes](docs/screenshots/settings-user-commands.png)
+
+### Flashcards
+
+Keep multiple-choice decks in Markdown. Open a deck in the palette to review due cards with spaced repetition, or practise the entire deck.
+
+![Flashcards settings for Markdown decks and review preferences](docs/screenshots/settings-flashcards.png)
 
 ## Command palette
 
@@ -265,7 +300,7 @@ npm run dev
 
 - Requires a Rust toolchain for the `native/` crate.
 - `npm run typecheck` runs the TypeScript check.
-- `npm run screenshots` builds the renderer and takes pictures of the palette, Settings and the notification strip into `release/screenshots-preview/`. It opens the built renderer in headless Chromium (Playwright) with sample data in place of the app's backend; Runwa itself is not started and no window appears.
+- `npm run screenshots` builds the renderer and takes pictures of the palette, Settings and the notification strip into `release/screenshots-preview/`. It opens the built renderer in headless Chromium (Playwright) with sample data in place of the app's backend; Runwa itself is not started and no window appears. After a successful run, the script also refreshes the frames linked under Feature tour in `docs/screenshots/` (dark) and their light-theme twins in `docs/screenshots/light/`. Commit those images with this README. bedware.software reads the introduction, Highlights bullets and Feature tour entries on its next build.
 - A development run is named "Runwa Dev" and keeps its data in a separate folder, so it can run next to an installed copy.
 
 ## Building

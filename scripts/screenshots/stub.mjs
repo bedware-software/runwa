@@ -5,10 +5,11 @@
 // Kept self-contained: Playwright serialises this function into the page.
 export function installStub(data) {
   // The renderer picks platform-specific rows by navigator.platform; the
-  // frames show the Windows build wherever they are taken.
-  Object.defineProperty(navigator, 'platform', { get: () => 'Win32' })
+  // frames show the build fixtures.mjs names (Windows unless a frame asks
+  // for macOS), wherever they are taken.
+  const { manifests, appInfo, searches, replies, navigatorPlatform } = data
+  Object.defineProperty(navigator, 'platform', { get: () => navigatorPlatform })
 
-  const { manifests, appInfo, searches, replies } = data
   let settings = data.settings
   const listeners = {}
 
