@@ -43,17 +43,19 @@ export function HotkeyRow({
 }: Props) {
   return (
     <PanelRow>
-      <div className="flex-1 min-w-0">
+      {/* Stacked, not side by side: the `open_module:` line and the recorded
+          chord each get the full width of the block. */}
+      <div className="flex-1 min-w-0 flex flex-col items-start gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground">{title}</span>
           <Badge tone={scope === 'Global' ? 'accent' : 'neutral'}>{scope}</Badge>
-          {moduleId && <ModuleIdBadge moduleId={moduleId} />}
         </div>
-        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
+        {moduleId && <ModuleIdBadge moduleId={moduleId} />}
+        <div className="text-xs text-muted-foreground">{description}</div>
         {remapTriggers && remapTriggers.length > 0 && (
           <div
-            className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs"
-            title="An open_module rule in keyboard-rules.yaml opens this module. The hotkey on the right keeps working too."
+            className="flex flex-wrap items-center gap-1.5 text-xs"
+            title="An open_module rule in keyboard-rules.yaml opens this module. The hotkey below keeps working too."
           >
             <Badge tone="warning">Overridden by remapper</Badge>
             {remapTriggers.map((t) => {
@@ -69,8 +71,8 @@ export function HotkeyRow({
             })}
           </div>
         )}
+        <HotkeyRecorder value={value} defaultValue={defaultValue} onChange={onChange} />
       </div>
-      <HotkeyRecorder value={value} defaultValue={defaultValue} onChange={onChange} />
     </PanelRow>
   )
 }
