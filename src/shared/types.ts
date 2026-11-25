@@ -280,6 +280,14 @@ export interface ExecuteResult {
 export type Theme = 'light' | 'dark' | 'system'
 
 /**
+ * Background of the light theme. `white` is the design system's light theme
+ * as it comes; the others are its brightness steps (`data-theme-variant`
+ * light-paper, light-soft, light-steel, light-stone).
+ */
+export const LIGHT_BACKGROUNDS = ['white', 'paper', 'soft', 'steel', 'stone'] as const
+export type LightBackground = (typeof LIGHT_BACKGROUNDS)[number]
+
+/**
  * Optional leading artwork for the shared, focusless Desktop Hint overlay.
  * Keep this list deliberately small: these values cross the preload boundary
  * and are rendered by a fixed icon map rather than accepting arbitrary HTML.
@@ -480,6 +488,8 @@ export interface PalettePosition {
 
 export interface Settings {
   theme: Theme
+  /** Background of the light theme; has no effect while the theme on screen is dark. */
+  lightBackground: LightBackground
   /**
    * The first nine palette results are always labelled with `1`–`9`
    * keycaps and can be run directly by number. This flag only picks the
@@ -529,6 +539,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
+  lightBackground: 'white',
   quickLaunchDigitsRequireAlt: false,
   paletteSwitchToEnglish: true,
   startAtLogin: false,

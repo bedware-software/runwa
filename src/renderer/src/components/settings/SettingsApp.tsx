@@ -8,6 +8,7 @@ import {
   vimFormKeymap
 } from '@bedware/ui/vim-form'
 import { useSettingsStore } from '@/store/settings-store'
+import { applyTheme } from '@/lib/theme'
 import { Sidebar, settingsTabOrder, type SettingsTab } from './Sidebar'
 import { SettingsTitleBar } from './SettingsTitleBar'
 import { GeneralPanel } from './GeneralPanel'
@@ -43,6 +44,7 @@ export function SettingsApp() {
   const hydrate = useSettingsStore((s) => s.hydrate)
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
+  const lightBackground = useSettingsStore((s) => s.settings?.lightBackground ?? 'white')
   const isHydrated = useSettingsStore((s) => s.isHydrated)
   const modules = useSettingsStore((s) => s.modules)
   // The form's root holds the sidebar and the page; the page is what scrolls.
@@ -54,8 +56,8 @@ export function SettingsApp() {
   }, [hydrate])
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [theme])
+    applyTheme(theme, lightBackground)
+  }, [theme, lightBackground])
 
   useEffect(() => {
     const unsub = window.electronAPI.onSettingsChanged((settings) => {

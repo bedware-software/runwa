@@ -4,6 +4,7 @@ import type {
   ModuleConfigValue,
   ModuleId,
   ModuleMeta,
+  LightBackground,
   Settings,
   Theme
 } from '@shared/types'
@@ -16,6 +17,7 @@ interface SettingsState {
 
   hydrate: () => Promise<void>
   setTheme: (theme: Theme) => Promise<void>
+  setLightBackground: (lightBackground: LightBackground) => Promise<void>
   setQuickLaunchDigitsRequireAlt: (enabled: boolean) => Promise<void>
   setPaletteSwitchToEnglish: (enabled: boolean) => Promise<void>
   setStartAtLogin: (enabled: boolean) => Promise<void>
@@ -62,6 +64,13 @@ export const useSettingsStore = create<SettingsState>()(
 
     setTheme: async (theme: Theme) => {
       const updated = await window.electronAPI.settingsSet({ theme })
+      set((s) => {
+        s.settings = updated
+      })
+    },
+
+    setLightBackground: async (lightBackground: LightBackground) => {
+      const updated = await window.electronAPI.settingsSet({ lightBackground })
       set((s) => {
         s.settings = updated
       })

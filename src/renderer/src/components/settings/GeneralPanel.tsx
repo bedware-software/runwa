@@ -1,8 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Button, ConfirmDialog, Panel, PanelRow, SectionTitle, Segmented, Switch } from '@bedware/ui'
+import {
+  Button,
+  ConfirmDialog,
+  Label,
+  Panel,
+  PanelRow,
+  SectionTitle,
+  Segmented,
+  Switch
+} from '@bedware/ui'
 import { Trash2 } from '@/lib/lucide-icons'
 import { useSettingsStore } from '@/store/settings-store'
-import { DEFAULT_SETTINGS, type AppInfo, type Theme } from '@shared/types'
+import {
+  DEFAULT_SETTINGS,
+  type AppInfo,
+  type LightBackground,
+  type Theme
+} from '@shared/types'
 import { cn } from '@/lib/utils'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
@@ -11,7 +25,19 @@ const THEMES: Array<{ value: Theme; label: string }> = [
   { value: 'light', label: 'Light' }
 ]
 
+const LIGHT_BACKGROUNDS: Array<{ value: LightBackground; label: string }> = [
+  { value: 'white', label: 'White' },
+  { value: 'paper', label: 'Paper' },
+  { value: 'soft', label: 'Paper soft' },
+  { value: 'steel', label: 'Steel' },
+  { value: 'stone', label: 'Stone' }
+]
+
 export function GeneralPanel() {
+  const lightBackground = useSettingsStore(
+    (s) => s.settings?.lightBackground ?? DEFAULT_SETTINGS.lightBackground
+  )
+  const setLightBackground = useSettingsStore((s) => s.setLightBackground)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
   const setTheme = useSettingsStore((s) => s.setTheme)
   const quickLaunchDigitsRequireAlt = useSettingsStore(
@@ -51,6 +77,17 @@ export function GeneralPanel() {
           options={THEMES}
           onChange={(value) => void setTheme(value)}
         />
+        <div className="mt-4">
+          <Label description="Background of the light theme: white, warm paper in two shades, cool steel or grey stone. Used whenever the theme on screen is light, also when System follows a light OS.">
+            Light background
+          </Label>
+          <Segmented data-vim-item="general:light-background"
+            label="Light background"
+            value={lightBackground}
+            options={LIGHT_BACKGROUNDS}
+            onChange={(value) => void setLightBackground(value)}
+          />
+        </div>
       </section>
 
       <section>

@@ -194,11 +194,19 @@ runwa-notify --text "Finished in 74 s" [--title "Build"] [--duration 4000]
 
 A separate window with a sidebar: General, the modules grouped as Searches, Keyboard and Other, and About. It opens from the tray menu, from *Open settings* in Command Palette, or by launching Runwa while it is already running.
 
-- **General.** Theme (System, Dark, Light); palette options (`Alt`+digit to run a result, switch to English on open); *Start at login*; *Run as administrator* (Windows); *Wipe all data*, which deletes all Runwa data and relaunches the app.
+- **General.** Theme (System, Dark, Light) and, for the light theme, its background: White (the default), Paper, Paper soft, Steel or Stone; palette options (`Alt`+digit to run a result, switch to English on open); *Start at login*; *Run as administrator* (Windows); *Wipe all data*, which deletes all Runwa data and relaunches the app.
 - **Module pages.** Each module has an on/off switch in the sidebar and a page with its direct-launch hotkey (record, clear, reset to default) and its options.
 - **Switched-off modules.** The page of a module that is off is shown locked: a notice with a *Turn on* button, and the settings below readable but not editable.
 - **About.** App version, bedware UI version, a link to the settings folder, and the update status with a *Check for updates* / *Install now* button.
 - macOS permission status is shown on the pages of the modules that need it.
+
+### Themes
+
+Runwa has a dark and a light theme from the bedware design system and can follow the OS.
+
+- *System* follows the OS appearance, *Dark* and *Light* pin it. The notification strip always follows the OS.
+- The light theme is white. Its background can be changed to warm paper (two shades), cool steel or grey stone; the choice applies to the palette, Settings and the notification strip whenever the theme on screen is light, including *System* on a light OS.
+- Selected and active elements are yellow plates with black text in both themes.
 
 ### Vim keys
 

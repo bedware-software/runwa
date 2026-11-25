@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client'
 import './lib/electron'
 import './globals.css'
+import { applyThemeFromSettings } from './lib/theme'
 import { PaletteApp } from './components/palette/PaletteApp'
 import { SettingsApp } from './components/settings/SettingsApp'
 import { RecorderApp } from './components/recorder/RecorderApp'
@@ -33,7 +34,7 @@ if (view === 'desktop-hint') {
   window.electronAPI
     .settingsGet()
     .then((s) => {
-      document.documentElement.setAttribute('data-theme', s.theme)
+      applyThemeFromSettings(s)
     })
     .catch(() => {
       // fall back to the `data-theme="system"` default already on <html>

@@ -3,6 +3,7 @@ import { Toast } from '@bedware/ui'
 import type { DesktopHintPayload } from '@shared/types'
 import { Clipboard, Mic } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
+import { applyThemeFromSettings } from '@/lib/theme'
 
 /**
  * Renderer for the Notifications strip (the shared, always-on-top Desktop
@@ -24,7 +25,18 @@ export function DesktopHintApp() {
       return
     }
 
-    const offPayload = api.onPayload(setPayload)
+    const offPayload = api.onPayload((next) => {
+      setPayload(next)
+      // The strip follows the OS appearance, with the light background chosen
+      // in Settings. Read as each notification arrives: this window gets no
+      // settings broadcasts of its own.
+      if (next) {
+        void window.electronAPI
+          .settingsGet()
+          .then((settings) => applyThemeFromSettings(settings, 'system'))
+          .catch(() => {})
+      }
+    })
     api.signalReady()
 
     return () => {

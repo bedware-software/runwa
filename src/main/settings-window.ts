@@ -1,7 +1,13 @@
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import path from 'path'
 import { settingsStore } from './settings-store'
-import type { Settings, SettingsTabId, Theme } from '@shared/types'
+import {
+  DEFAULT_SETTINGS,
+  type LightBackground,
+  type Settings,
+  type SettingsTabId,
+  type Theme
+} from '@shared/types'
 
 const iconPath = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.png')
@@ -17,14 +23,24 @@ const isMac = process.platform === 'darwin'
  * background closely enough that the seam at the overlay edge isn't visible.
  * A 1–2 pixel delta gets absorbed by the `border-b` under the toolbar.
  */
-const CHROME_COLORS: Record<'light' | 'dark', { bg: string; fg: string }> = {
-  dark: { bg: '#0e0d0c', fg: '#f4f1e8' },
-  light: { bg: '#faf8f2', fg: '#1d1b18' }
+const DARK_CHROME = { bg: '#0e0d0c', fg: '#f4f1e8' }
+/** One per light background (the design system's light theme and its steps). */
+const LIGHT_CHROME: Record<LightBackground, { bg: string; fg: string }> = {
+  white: { bg: '#f5f5f3', fg: '#1a1a18' },
+  paper: { bg: '#faf8f2', fg: '#1d1b18' },
+  soft: { bg: '#f4f1e8', fg: '#1a1a18' },
+  steel: { bg: '#edf0f4', fg: '#171a1f' },
+  stone: { bg: '#cfd1d4', fg: '#111111' }
 }
 
-function resolveTheme(theme: Theme): 'light' | 'dark' {
-  if (theme === 'system') return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-  return theme
+function chromeColors(settings: Settings): { bg: string; fg: string } {
+  const dark =
+    settings.theme === 'system' ? nativeTheme.shouldUseDarkColors : settings.theme === 'dark'
+  if (dark) return DARK_CHROME
+  return (
+    LIGHT_CHROME[settings.lightBackground ?? DEFAULT_SETTINGS.lightBackground] ??
+    LIGHT_CHROME.white
+  )
 }
 
 class SettingsWindow {
@@ -44,8 +60,7 @@ class SettingsWindow {
     }
 
     const settings = settingsStore.get()
-    const effective = resolveTheme(settings.theme)
-    const colors = CHROME_COLORS[effective]
+    const colors = chromeColors(settings)
 
     this.window = new BrowserWindow({
       width: 960,
@@ -87,9 +102,9 @@ class SettingsWindow {
     // settings window is open. Windows/Linux only — macOS draws the traffic
     // lights itself and doesn't need re-tinting.
     if (!isMac) {
-      const applyChromeTheme = (theme: Theme): void => {
+      const applyChromeTheme = (next: Settings): void => {
         if (!this.window || this.window.isDestroyed()) return
-        const nextColors = CHROME_COLORS[resolveTheme(theme)]
+        const nextColors = chromeColors(next)
         this.window.setTitleBarOverlay({
           color: nextColors.bg,
           symbolColor: nextColors.fg,
@@ -98,13 +113,13 @@ class SettingsWindow {
         this.window.setBackgroundColor(nextColors.bg)
       }
       const handler = (next: Settings): void => {
-        applyChromeTheme(next.theme)
+        applyChromeTheme(next)
       }
       const nativeThemeHandler = (): void => {
         // When Runwa follows System, Auto Dark Mode changes the OS without
         // mutating Settings.theme. Listen to nativeTheme as well so the
         // Windows title-bar overlay follows that live appearance change.
-        applyChromeTheme(settingsStore.get().theme)
+        applyChromeTheme(settingsStore.get())
       }
       settingsStore.on('change', handler)
       nativeTheme.on('updated', nativeThemeHandler)

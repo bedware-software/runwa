@@ -23,6 +23,7 @@ import { QuizView } from './QuizView'
 import { IS_MAC } from '@/lib/platform'
 import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
 import { CURRENT_OS } from '@/lib/platform'
+import { applyTheme } from '@/lib/theme'
 
 /** The fullscreen remap bypass is implemented in the Windows hook only. */
 const SUPPORTS_FULLSCREEN_BYPASS = CURRENT_OS === 'windows'
@@ -84,6 +85,7 @@ export function PaletteApp() {
   const applyServerSettings = useSettingsStore((s) => s.applyServerSettings)
   const modules = useSettingsStore((s) => s.modules)
   const theme = useSettingsStore((s) => s.settings?.theme ?? 'system')
+  const lightBackground = useSettingsStore((s) => s.settings?.lightBackground ?? 'white')
   // Quick-launch-by-number is always on; this flag only flips the chord.
   // false = plain digit runs the row, Alt+digit types the digit into the
   // search box. true = the reverse.
@@ -392,8 +394,8 @@ export function PaletteApp() {
 
   // Theme → data-theme attribute
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [theme])
+    applyTheme(theme, lightBackground)
+  }, [theme, lightBackground])
 
   // palette:show event from main (activation or direct-launch hotkey)
   useEffect(() => {
