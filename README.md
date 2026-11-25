@@ -324,6 +324,7 @@ npm run release -- --dry-run # show what would be tagged, change nothing
 
 - The version is not chosen by hand: a pre-commit hook bumps the patch version on every commit.
 - The commit must already be pushed to `origin/main`, and its tag must not exist yet.
+- Before tagging, the script runs `npm run screenshots`. If the Feature tour images in `docs/screenshots/` (either theme) changed, it commits only those files, pushes `main` and tags that commit. A dry run takes no screenshots.
 
 ### Local install loop
 

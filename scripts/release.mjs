@@ -13,10 +13,15 @@
 // The tag goes on the commit, not on the working tree: uncommitted changes are not part of
 // the release and only get a warning. The commit must already be on origin/main, so what is
 // released is exactly what is pushed.
+//
+// Before tagging, the Feature tour is shot again (npm run screenshots). If docs/screenshots/
+// changed (either theme), those files alone are committed and pushed to main, and the tag
+// goes on that commit with the version the hook gave it. A dry run shoots nothing.
 
 import { execFileSync } from 'node:child_process'
 
 const dryRun = process.argv.includes('--dry-run')
+const SHOTS = 'docs/screenshots'
 
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -41,7 +46,7 @@ if (branch !== 'main') fail(`on branch "${branch}", releases are cut from main`)
 console.log('Fetching origin...')
 git('fetch', '--quiet', '--tags', 'origin', 'main')
 
-const head = git('rev-parse', 'HEAD')
+let head = git('rev-parse', 'HEAD')
 const remote = git('rev-parse', 'origin/main')
 if (head !== remote) {
   const ahead = git('rev-list', '--count', 'origin/main..HEAD')
@@ -50,6 +55,35 @@ if (head !== remote) {
     `main and origin/main differ (${ahead} commit(s) not pushed, ${behind} not pulled). ` +
       'Push or pull first, then run this again.'
   )
+}
+
+if (dryRun) {
+  console.log(`Dry run: the screenshots are not taken; a change in ${SHOTS}/ would be committed first.`)
+} else {
+  // Only the screenshots go into this commit, so nothing may be staged already.
+  if (git('diff', '--cached', '--name-only')) fail('changes are staged. Commit or unstage them first.')
+  console.log('Taking the Feature tour screenshots...')
+  try {
+    execFileSync('npm', ['run', 'screenshots'], { stdio: 'inherit' })
+  } catch {
+    fail('the screenshots failed, nothing tagged')
+  }
+  if (git('status', '--porcelain', '--', SHOTS)) {
+    git('add', '-A', '--', SHOTS)
+    git('commit', '--quiet', '-m', 'Feature tour screenshots for the release (dark and light)')
+    try {
+      git('push', '--quiet', 'origin', 'HEAD:main')
+    } catch (error) {
+      fail(
+        `the screenshots are committed but could not be pushed: ${String(error.stderr || error.message).trim()}. ` +
+          'Push main, then run this again.'
+      )
+    }
+    console.log(`Screenshots committed and pushed: ${git('log', '-1', '--format=%h')}`)
+    head = git('rev-parse', 'HEAD')
+  } else {
+    console.log('Screenshots unchanged.')
+  }
 }
 
 // The version of the commit, not of the working tree.
@@ -78,7 +112,7 @@ if (git('status', '--porcelain')) {
 console.log('')
 
 if (dryRun) {
-  console.log('Dry run: nothing tagged, nothing pushed.')
+  console.log('Dry run: nothing shot, committed, tagged or pushed.')
   process.exit(0)
 }
 
