@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, ConfirmDialog, InputField, Label, LinkButton } from '@bedware/ui'
+import { Button, ConfirmDialog, InputField, Label, LinkButton, SectionTitle } from '@bedware/ui'
 import {
   Check,
   Clipboard,
@@ -256,7 +256,7 @@ function DecksFolderSection() {
 function HowReviewWorksSection() {
   return (
     <div className="pt-4 mt-2 border-t border-border flex flex-col gap-3">
-      <Label>How review works</Label>
+      <SectionTitle flush title="How review works" />
 
       <Subsection title="Spaced repetition (SM-2)">
         Each card carries an interval (days until next review) and an
@@ -416,7 +416,7 @@ function Subsection({
 }) {
   return (
     <div>
-      <div className="text-xs font-semibold text-foreground/90 mb-1">{title}</div>
+      <SectionTitle level={2} title={title} />
       <div className="text-xs text-muted-foreground leading-5">{children}</div>
     </div>
   )

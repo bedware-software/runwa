@@ -100,7 +100,6 @@ export function UlanziSection() {
   return (
     <div className="flex flex-col gap-2">
       <SectionTitle
-        level={2}
         flush
         title="Profiles"
         description={

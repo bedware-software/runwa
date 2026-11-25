@@ -106,7 +106,6 @@ export function WindowSwitcherIgnoreSection() {
   return (
     <div className="flex flex-col gap-5">
       <SectionTitle
-        level={2}
         flush
         title="Ignored windows"
         description={

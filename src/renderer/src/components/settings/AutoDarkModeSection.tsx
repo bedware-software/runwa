@@ -89,11 +89,12 @@ export function AutoDarkModeSection() {
         />
       </section>
 
-      <Panel className={cn(!supported && 'opacity-55')}>
-        <PanelRow
+      <section>
+        <SectionTitle
           title="Schedule"
           description="Uses your computer's local time. Changes take effect while Runwa is running and are reconciled after wake."
         />
+      <Panel className={cn(!supported && 'opacity-55')}>
         <TimeRow
           label="Light theme starts"
           value={config.lightTime}
@@ -125,6 +126,7 @@ export function AutoDarkModeSection() {
           </Notice>
         )}
       </Panel>
+      </section>
 
       {CURRENT_OS === 'windows' && (
         <Panel>

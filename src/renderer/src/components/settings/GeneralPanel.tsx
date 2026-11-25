@@ -5,6 +5,7 @@ import {
   Label,
   Panel,
   PanelRow,
+  PageHeader,
   SectionTitle,
   Segmented,
   Switch
@@ -18,6 +19,7 @@ import {
   type Theme
 } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { settingsPageNumber } from './Sidebar'
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: 'system', label: 'System' },
@@ -56,6 +58,7 @@ export function GeneralPanel() {
     (s) => s.setPaletteSwitchToEnglish
   )
 
+  const modules = useSettingsStore((s) => s.modules)
   const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false)
 
   const handleWipeAllData = (): void => {
@@ -65,7 +68,13 @@ export function GeneralPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-8 max-w-xl">
+    <div className="flex flex-col gap-4 max-w-xl">
+      <PageHeader
+        number={settingsPageNumber('general', modules)}
+        title="General"
+        description="How Runwa looks, how the palette behaves and how it starts with your system."
+      />
+      <div className="flex flex-col gap-8">
       <section>
         <SectionTitle
           title="Theme"
@@ -141,6 +150,7 @@ export function GeneralPanel() {
         onConfirm={handleWipeAllData}
         onCancel={() => setWipeConfirmOpen(false)}
       />
+      </div>
     </div>
   )
 }

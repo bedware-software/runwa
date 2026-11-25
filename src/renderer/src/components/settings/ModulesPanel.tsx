@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Button, Checkbox, Notice, Panel, SectionTitle } from '@bedware/ui'
+import { Button, Checkbox, Notice, PageHeader, Panel, SectionTitle } from '@bedware/ui'
 import type { ModuleConfigField, ModuleConfigValue } from '@shared/types'
 import { KEYBOARD_REMAP_ID } from '@shared/keyboard-remap'
 import { useSettingsStore } from '@/store/settings-store'
 import { CURRENT_OS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { HotkeyRow } from './HotkeyRow'
+import { settingsPageNumber } from './Sidebar'
 import { ConfigField } from './ConfigField'
 import { KeyboardRemapSection } from './KeyboardRemapSection'
 import { FlashcardsLlmPromptSection } from './FlashcardsLlmPromptSection'
@@ -78,11 +79,9 @@ function osMatches(os: string): boolean {
 }
 
 /**
- * Right-pane content for a single module. The sidebar already shows the
- * module's icon, name, description, and enabled-toggle — so the pane
- * opens directly into hotkeys / config / per-module sections. Dropping
- * the header avoids the visual duplication and lets the actionable
- * controls start at the top.
+ * Right-pane content for a single module: the page header (its number in
+ * the sidebar, name and description from the manifest), then hotkeys,
+ * config and per-module sections.
  *
  * A module that is switched off shows the same page, locked: a notice with
  * a "Turn on" button on top, and everything below it readable but not
@@ -90,7 +89,8 @@ function osMatches(os: string): boolean {
  * file paths, parsed rules — so showing them starts nothing in the module.
  */
 export function ModulePanel({ moduleId }: Props) {
-  const module = useSettingsStore((s) => s.modules.find((m) => m.id === moduleId))
+  const modules = useSettingsStore((s) => s.modules)
+  const module = modules.find((m) => m.id === moduleId)
   const setHotkey = useSettingsStore((s) => s.setModuleHotkey)
   const setConfig = useSettingsStore((s) => s.setModuleConfig)
   const setEnabled = useSettingsStore((s) => s.setModuleEnabled)
@@ -102,6 +102,12 @@ export function ModulePanel({ moduleId }: Props) {
 
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
+      <PageHeader
+        number={settingsPageNumber(`module:${module.id}`, modules)}
+        title={module.name}
+        description={module.description}
+      />
+
       {locked && (
         <Notice
           tone="neutral"

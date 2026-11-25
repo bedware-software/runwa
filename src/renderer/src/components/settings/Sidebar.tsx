@@ -49,6 +49,15 @@ export function settingsTabOrder(modules: ModuleMeta[]): SettingsTab[] {
   ]
 }
 
+/**
+ * A page's place in the sidebar as two digits ("01", "02", …) — the number on
+ * its PageHeader. Counted from the same list the sidebar is drawn from.
+ */
+export function settingsPageNumber(tab: SettingsTab, modules: ModuleMeta[]): string {
+  const at = settingsTabOrder(modules).indexOf(tab)
+  return String(at + 1).padStart(2, '0')
+}
+
 interface Props {
   current: SettingsTab
   onChange: (tab: SettingsTab) => void

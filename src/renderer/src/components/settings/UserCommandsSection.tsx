@@ -14,8 +14,6 @@ import type {
   UserCommandKind
 } from '@shared/types'
 import {
-  AppWindow,
-  Globe,
   Keyboard,
   Pencil,
   Plus,
@@ -253,9 +251,6 @@ export function UserCommandsSection() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <p className="m-0 text-sm text-foreground">
-          Run scripts, launch apps, or press a shortcut from Command Palette.
-        </p>
         <p className="m-0 text-xs leading-relaxed text-muted-foreground">
           Shell actions run in the background through {SHELL_LABEL}, from your
           home folder, with Runwa&apos;s permissions. Output is not shown.
@@ -268,7 +263,6 @@ export function UserCommandsSection() {
       {commands !== null && (
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
           <SectionTitle
-            level={2}
             flush
             title={editingId ? 'Edit command' : 'Add command'}
             side={
@@ -430,7 +424,6 @@ export function UserCommandsSection() {
 
       <div className="flex flex-col gap-2">
         <SectionTitle
-          level={2}
           flush
           title="Commands"
           side={
@@ -466,16 +459,18 @@ export function UserCommandsSection() {
           ) : (
             groups.map((group) => (
               <Fragment key={group.key}>
-                <PanelRow className="justify-start gap-1.5 py-1.5 bg-secondary/50 text-[11px] font-medium text-muted-foreground">
-                  {group.scope ? (
-                    <AppWindow size={11} className="shrink-0" />
-                  ) : (
-                    <Globe size={11} className="shrink-0" />
-                  )}
-                  <span className="truncate text-foreground">
-                    {group.scope || 'All apps'}
-                  </span>
-                  <span className="shrink-0">· {group.commands.length}</span>
+                <PanelRow className="py-2">
+                  <SectionTitle
+                    level={2}
+                    flush
+                    className="flex-1 min-w-0"
+                    title={group.scope || 'All apps'}
+                    side={
+                      <span className="text-[11px] text-muted-foreground">
+                        {group.commands.length}
+                      </span>
+                    }
+                  />
                 </PanelRow>
                 {group.commands.map((command) => {
               const Icon = command.kind === 'keystroke' ? Keyboard : Terminal

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, LinkButton, Panel, PanelRow, SectionTitle } from '@bedware/ui'
+import { Button, LinkButton, PageHeader, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import { Download, RefreshCw } from '@/lib/lucide-icons'
 import type { AppInfo, UpdateStatus } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { useSettingsStore } from '@/store/settings-store'
+import { settingsPageNumber } from './Sidebar'
 
 /**
  * The "About" pane — app identity (name + version) plus the auto-update
@@ -11,6 +13,7 @@ import { cn } from '@/lib/utils'
  * the same surface.
  */
 export function AboutPanel() {
+  const modules = useSettingsStore((s) => s.modules)
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -23,14 +26,17 @@ export function AboutPanel() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-8 max-w-xl">
+    <div className="flex flex-col gap-4 max-w-xl">
+      <PageHeader
+        number={settingsPageNumber('about', modules)}
+        title="About"
+        description="The installed version, where Runwa keeps its data, and updates."
+      />
+      <div className="flex flex-col gap-8">
       <section>
-        <SectionTitle
-          title={info?.name ?? '…'}
-          description="A cross-platform command palette launcher."
-        />
+        <SectionTitle title="Version" />
         <Panel>
-          <PanelRow title="Version">
+          <PanelRow title={info?.name ?? '…'}>
             <div className="text-sm text-muted-foreground tabular-nums">
               {info ? `v${info.version}` : '…'}
             </div>
@@ -40,10 +46,7 @@ export function AboutPanel() {
               v{__BEDWARE_UI_VERSION__}
             </div>
           </PanelRow>
-          <PanelRow>
-            <div className="text-sm font-medium text-foreground shrink-0">
-              Settings folder
-            </div>
+          <PanelRow title="Settings folder">
             {info?.userDataPath ? (
               <LinkButton data-vim-item="about:folder"
                 mono
@@ -63,6 +66,7 @@ export function AboutPanel() {
       </section>
 
       <UpdateSection />
+      </div>
     </div>
   )
 }

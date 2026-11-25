@@ -69,7 +69,6 @@ export function FullscreenBypassSection() {
   return (
     <div className="flex flex-col gap-2">
       <SectionTitle
-        level={2}
         flush
         title="Disabled in fullscreen"
         description="These apps get the raw keyboard while a window of theirs covers the screen — no layers, no tap-vs-hold. Windowed, they behave normally. Add one from the palette: Ctrl+K on a window, then “Disable remapping in fullscreen”."

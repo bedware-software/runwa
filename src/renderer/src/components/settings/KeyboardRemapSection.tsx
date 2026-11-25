@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, InputField, Label, Notice, Panel, PanelRow } from '@bedware/ui'
+import { Badge, Button, InputField, Label, Notice, Panel, PanelRow, SectionTitle } from '@bedware/ui'
 import { Pencil, RefreshCw } from '@/lib/lucide-icons'
 import type { KeyboardRemapRulesView, KeyboardRemapTriggerView } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -114,7 +114,7 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
   if (view.error) {
     return (
       <div>
-        <Label>Hotkeys</Label>
+        <SectionTitle title="Hotkeys" />
         <Notice
           role="alert"
           title={
@@ -134,7 +134,7 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
   if (view.triggers.length === 0) {
     return (
       <div>
-        <Label>Hotkeys</Label>
+        <SectionTitle title="Hotkeys" />
         <div className="text-xs text-muted-foreground">
           No triggers defined. Edit the file to add bindings.
         </div>
@@ -144,11 +144,11 @@ function RulesList({ view }: { view: KeyboardRemapRulesView | null }) {
 
   return (
     <div>
-      <Label>Hotkeys</Label>
+      <SectionTitle title="Hotkeys" />
       <Panel>
         {view.triggers.map((t) => (
           <PanelRow key={t.name} className="flex-col items-stretch gap-2">
-            <div className="text-xs font-semibold text-foreground">{t.name}</div>
+            <SectionTitle level={2} flush title={t.name} />
             <div className="flex flex-col gap-1 text-xs">
               <LabeledRow label="Tap">
                 {t.onTap ? (

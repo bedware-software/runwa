@@ -28,7 +28,6 @@ export function NotificationsSection() {
   return (
     <div className="flex flex-col gap-3">
       <SectionTitle
-        level={2}
         flush
         title="From the console"
         description={
