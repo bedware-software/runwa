@@ -4,6 +4,9 @@ icon: resources/icon.png
 directories:
   output: release
   buildResources: build
+# Writes app-update.yml into a `--dir` mac build, which electron-builder
+# leaves without one. See scripts/mac-after-pack.mjs.
+afterPack: scripts/mac-after-pack.mjs
 # Re-sign the .app bundle right after electron-builder's default ad-hoc
 # sign and BEFORE the .dmg / .zip are packaged. Without this hook the
 # artifacts uploaded to GitHub freeze the pre-restamp signature
