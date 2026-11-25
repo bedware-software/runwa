@@ -784,6 +784,7 @@ export function PaletteApp() {
               ref={inputRef}
               value={query}
               onChange={setQuery}
+              mode={activeMod ? <Badge>{activeMod.name}</Badge> : undefined}
               placeholder={
                 activeMod
                   ? `Search ${activeMod.name.toLowerCase()}…`
@@ -841,7 +842,6 @@ export function PaletteApp() {
                 />
               </div>
             )}
-            {activeMod && <Badge className="shrink-0">{activeMod.name}</Badge>}
           </div>
 
           <ResultsList
