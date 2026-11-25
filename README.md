@@ -265,6 +265,7 @@ npm run dev
 
 - Requires a Rust toolchain for the `native/` crate.
 - `npm run typecheck` runs the TypeScript check.
+- `npm run screenshots` builds the renderer and takes pictures of the palette, Settings and the notification strip into `release/screenshots-preview/`. It opens the built renderer in headless Chromium (Playwright) with sample data in place of the app's backend; Runwa itself is not started and no window appears.
 - A development run is named "Runwa Dev" and keeps its data in a separate folder, so it can run next to an installed copy.
 
 ## Building
