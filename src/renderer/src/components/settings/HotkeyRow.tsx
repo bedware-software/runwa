@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, LinkButton, PanelRow } from '@bedware/ui'
+import { Badge, LinkButton, PanelRow, Tag } from '@bedware/ui'
 import { HotkeyRecorder } from './HotkeyRecorder'
 import { Hotkey } from '../ui/Hotkey'
 
@@ -43,14 +43,21 @@ export function HotkeyRow({
 }: Props) {
   return (
     <PanelRow>
-      {/* Stacked, not side by side: the `open_module:` line and the recorded
-          chord each get the full width of the block. */}
+      {/* Stacked: title row, description, then the recorder underneath. */}
       <div className="flex-1 min-w-0 flex flex-col items-start gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-foreground">{title}</span>
-          <Badge tone={scope === 'Global' ? 'accent' : 'neutral'}>{scope}</Badge>
+        {/* The `open_module:` line sits at the right edge; on a narrow window
+            it wraps under the title and stays at the right. */}
+        <div className="self-stretch flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">{title}</span>
+            {scope === 'Global' ? <Tag straight>{scope}</Tag> : <Badge>{scope}</Badge>}
+          </div>
+          {moduleId && (
+            <span className="ml-auto max-w-full">
+              <ModuleIdBadge moduleId={moduleId} />
+            </span>
+          )}
         </div>
-        {moduleId && <ModuleIdBadge moduleId={moduleId} />}
         <div className="text-xs text-muted-foreground">{description}</div>
         {remapTriggers && remapTriggers.length > 0 && (
           <div
