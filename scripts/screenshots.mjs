@@ -167,9 +167,10 @@ const manifests = await readManifests(workDir)
 console.log(`Runwa ${version} → ${outDir}`)
 
 // Palette
-// App Search as on a Mac: real apps, their own icons (fixtures.mjs MAC_APPS).
+// App Search and Window Switcher as on a Mac: real apps, their own icons
+// (fixtures.mjs MAC_APPS, MAC_WINDOWS).
 await frame('palette-app-search', { size: PALETTE, hash: 'palette', platform: 'mac' }, palette('app-search', 'r'))
-await frame('palette-window-switcher', { size: PALETTE, hash: 'palette' }, palette('window-switcher'))
+await frame('palette-window-switcher', { size: PALETTE, hash: 'palette', platform: 'mac' }, palette('window-switcher'))
 await frame('palette-command-palette', { size: PALETTE, hash: 'palette' }, palette('command-palette'))
 
 // Settings

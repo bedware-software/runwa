@@ -1,7 +1,8 @@
-// Sample data for the screenshots. Mostly invented: the Windows apps,
-// windows, paths, commands and the user "alex" are made up. The exception is
-// App Search on macOS (MAC_APPS): real apps at their real paths, with their
-// own icons converted from the bundles' .icns into icons/*.png.
+// Sample data for the screenshots. The Windows apps, windows, paths and the
+// user "alex" are made up. App Search and Window Switcher on macOS (MAC_APPS,
+// MAC_WINDOWS) are real apps at their real paths with their own icons,
+// converted from the bundles' .icns into icons/*.png; window titles are
+// neutral. User commands are scoped to a real app (IntelliJ IDEA, idea64.exe).
 import { readFileSync } from 'node:fs'
 
 /** A flat square tile with a letter — stands in for an app's own icon. */
@@ -47,6 +48,28 @@ const MAC_APPS = [
   ['Terminal', '/System/Applications/Utilities/Terminal.app', 'terminal'],
   ['Finder', '/System/Library/CoreServices/Finder.app', 'finder']
 ]
+
+// Window Switcher on macOS: most recent first; the subtitle is the owning
+// app's name, as the CGWindow list reports it (native/src/macos.rs).
+const MAC_WINDOWS = [
+  ['bedware.software', 'Vimperium', 'vimperium'],
+  ['runwa — -zsh — 120×36', 'Terminal', 'terminal'],
+  ['Notes', 'Notes', 'notes'],
+  ['Telegram', 'Telegram', 'telegram'],
+  ['Downloads', 'Finder', 'finder'],
+  ['Calendar', 'Calendar', 'calendar'],
+  ['Start Page', 'Safari', 'safari']
+]
+
+const macWindowItems = MAC_WINDOWS.map(([title, app, file], i) => ({
+  id: `window:${i}`,
+  moduleId: 'window-switcher',
+  title,
+  subtitle: app,
+  iconHint: icon(file),
+  actionKind: 'focus-window',
+  action: {}
+}))
 
 const macAppItems = MAC_APPS.map(([name, path, file]) => ({
   id: `app:${path}`,
@@ -130,7 +153,7 @@ const commandItems = [
     subtitle: 'Ctrl+Alt+L',
     iconHint: 'keyboard',
     group: 'User Commands',
-    badge: 'Copper Editor',
+    badge: 'idea64.exe',
     actionKind: 'run-user-command',
     action: {}
   },
@@ -152,7 +175,7 @@ export function fixtures({ version, platform = 'windows' }) {
     },
     searches: {
       'app-search': mac ? macAppItems : appItems,
-      'window-switcher': windowItems,
+      'window-switcher': mac ? macWindowItems : windowItems,
       'command-palette': commandItems
     },
     replies: {
@@ -161,14 +184,14 @@ export function fixtures({ version, platform = 'windows' }) {
       userCommandsList: [
         { id: 'build', name: 'Build the site', kind: 'shell', action: 'npm run build', appScope: '', alias: 'b' },
         { id: 'logs', name: 'Open the logs folder', kind: 'shell', action: `explorer "${HOME}\\Documents\\logs"`, appScope: '' },
-        { id: 'reformat', name: 'Reformat file', kind: 'keystroke', action: 'Ctrl+Alt+L', appScope: 'coppereditor.exe', alias: 'f' },
-        { id: 'zen', name: 'Zen mode', kind: 'keystroke', action: 'Ctrl+K, Z', appScope: 'coppereditor.exe' }
+        { id: 'reformat', name: 'Reformat file', kind: 'keystroke', action: 'Ctrl+Alt+L', appScope: 'idea64.exe', alias: 'f' },
+        { id: 'tool-windows', name: 'Hide tool windows', kind: 'keystroke', action: 'Ctrl+Shift+F12', appScope: 'idea64.exe' }
       ],
       userCommandsFilePath: `${HOME}\\AppData\\Roaming\\Runwa\\user-commands.json`,
-      userCommandsListRunningApps: WINDOWS.map(([, exe]) => ({ name: exe })),
+      userCommandsListRunningApps: ['idea64.exe', 'Vimperium.exe', 'Telegram.exe', 'WindowsTerminal.exe', 'explorer.exe'].map((name) => ({ name })),
       windowSwitcherListIgnoreRules: [
         { id: 'r1', title: '', processName: 'widgets.exe' },
-        { id: 'r2', title: 'Picture in picture', processName: 'cometbrowser.exe' }
+        { id: 'r2', title: 'Picture in picture', processName: 'Vimperium.exe' }
       ],
       keyboardRemapListFullscreenBypass: ['orbitgame.exe'],
       keyboardRemapGetRules: {
@@ -194,8 +217,8 @@ export function fixtures({ version, platform = 'windows' }) {
         installed: true,
         profiles: [
           { name: 'Default', app: 'default' },
-          { name: 'Editor', app: 'coppereditor.exe' },
-          { name: 'Browser', app: 'cometbrowser.exe' },
+          { name: 'Editor', app: 'idea64.exe' },
+          { name: 'Browser', app: 'Vimperium.exe' },
           { name: 'Dictation', app: null }
         ]
       },
