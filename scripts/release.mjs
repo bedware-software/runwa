@@ -70,7 +70,9 @@ if (dryRun) {
   }
   if (git('status', '--porcelain', '--', SHOTS)) {
     git('add', '-A', '--', SHOTS)
-    git('commit', '--quiet', '-m', 'Feature tour screenshots for the release (dark and light)')
+    // The "[release] " prefix makes refresh-site.yml skip this push: the build of the tag
+    // refreshes the site, so it never shows the new images with the old version.
+    git('commit', '--quiet', '-m', '[release] Feature tour screenshots (dark and light)')
     try {
       git('push', '--quiet', 'origin', 'HEAD:main')
     } catch (error) {

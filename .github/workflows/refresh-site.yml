@@ -1,4 +1,9 @@
 name: Refresh bedware.software
+# Each event rebuilds the site once:
+# - a push to main that changes the README or the screenshots;
+# - a version: after a successful "Build distributables" run from a tag push. No `release`
+#   trigger: build.yml publishes the release with GITHUB_TOKEN, which starts no workflows.
+# - a manual run.
 on:
   push:
     branches: [main]
@@ -6,13 +11,18 @@ on:
   workflow_run:
     workflows: ['Build distributables']
     types: [completed]
-  release:
-    types: [published]
   workflow_dispatch:
 permissions: {}
 jobs:
   rebuild:
-    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # build.yml runs on a push only for a `v*` tag, so event 'push' means a version.
+    # scripts/release.mjs commits the retaken screenshots as "[release] ..." just before
+    # the tag; that push is skipped, the build of the tag refreshes the site with the new
+    # version and images together.
+    if: >-
+      (github.event_name == 'push' && !startsWith(github.event.head_commit.message, '[release] '))
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Request site build
