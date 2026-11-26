@@ -8,6 +8,7 @@ on:
     types: [completed]
   release:
     types: [published]
+  workflow_dispatch:
 permissions: {}
 jobs:
   rebuild:
@@ -23,5 +24,6 @@ jobs:
             echo "::notice::Site deployment is not configured."
             exit 0
           fi
-          curl --fail --silent --show-error --max-time 30 --output /dev/null \
+          # Coolify accepts a deploy request only as POST (a GET gets 405).
+          curl --fail --silent --show-error --max-time 30 --output /dev/null --request POST \
             --header "Authorization: Bearer $DEPLOY_TOKEN" "$DEPLOY_URL"
