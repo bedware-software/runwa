@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'path'
 import type { DesktopHintPayload } from '@shared/types'
+import { removeWindowBorder } from './modules/window-switcher/native'
 
 /**
  * Shared, focusless desktop overlay for short status and mode-change hints.
@@ -77,6 +78,7 @@ class DesktopHintWindow {
         nodeIntegration: false
       }
     })
+    removeWindowBorder(this.window)
 
     this.window.setAlwaysOnTop(true, 'screen-saver')
     if (process.platform === 'darwin') {

@@ -13,7 +13,8 @@ import {
   focusWindow as nativeFocus,
   forceForegroundWindow,
   getForegroundWindow,
-  isWindowOnCurrentDesktop
+  isWindowOnCurrentDesktop,
+  removeWindowBorder
 } from './modules/window-switcher/native'
 import { setInputLanguage } from './modules/keyboard-remap/native'
 import { focusContext } from './focus-context'
@@ -269,6 +270,7 @@ class PaletteWindow {
         nodeIntegration: false
       }
     })
+    removeWindowBorder(this.window)
 
     // macOS Spaces affinity: a BrowserWindow is anchored to the Space where
     // it was created, so calling `show()` from a different Space swaps the

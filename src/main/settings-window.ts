@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import path from 'path'
 import { settingsStore } from './settings-store'
+import { removeWindowBorder } from './modules/window-switcher/native'
 import {
   DEFAULT_SETTINGS,
   type LightBackground,
@@ -89,6 +90,7 @@ class SettingsWindow {
         nodeIntegration: false
       }
     })
+    removeWindowBorder(this.window)
 
     if (!isMac) {
       this.window.setMenuBarVisibility(false)

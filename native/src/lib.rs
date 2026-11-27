@@ -229,6 +229,23 @@ pub fn set_desktop_change_callback(callback: napi::JsFunction) -> napi::Result<(
     }
 }
 
+/// Drop the 1px accent-colored border DWM paints around our own windows when
+/// "Show accent color on title bars and window borders" is on (Windows 11
+/// 22000+; older builds ignore the attribute). Shadow, rounded corners and
+/// Snap stay. No-op on other platforms.
+#[napi]
+pub fn remove_window_border(id: String) -> napi::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::remove_window_border(&id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        Ok(())
+    }
+}
+
 #[napi]
 pub fn is_window_on_current_desktop(id: String) -> napi::Result<bool> {
     #[cfg(target_os = "windows")]

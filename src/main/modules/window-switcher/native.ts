@@ -50,6 +50,7 @@ interface NativeAddon {
   setDesktopChangeCallback(cb: (zeroBasedDesktop: number) => void): void
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
+  removeWindowBorder?(id: string): void
   getWindowIcon(id: string): NativeWindowIcon | null
   getFileIcon(path: string, iconIndex?: number): NativeWindowIcon | null
   isAccessibilityTrusted(): boolean
@@ -184,6 +185,22 @@ export function focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostRes
 
 export function describeWindow(id: string): NativeWindow | null {
   return loadAddon().describeWindow(id)
+}
+
+/**
+ * Remove the 1px accent-colored border DWM paints around one of our own
+ * windows when "Show accent color on title bars and window borders" is on
+ * (DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE). Windows-only; never throws — a
+ * missing border fix must not break window creation.
+ */
+export function removeWindowBorder(win: Electron.BrowserWindow): void {
+  if (process.platform !== 'win32' || win.isDestroyed()) return
+  try {
+    const id = win.getNativeWindowHandle().readBigUInt64LE(0).toString()
+    loadAddon().removeWindowBorder?.(id)
+  } catch (err) {
+    console.warn('[native] removeWindowBorder failed:', err)
+  }
 }
 
 /**

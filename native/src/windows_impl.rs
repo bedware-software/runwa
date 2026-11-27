@@ -5,7 +5,10 @@ use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, BOOL, COLORREF, HANDLE, HWND, LPARAM, RECT, TRUE, WIN32_ERROR, WPARAM,
 };
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL};
+use windows::Win32::Graphics::Dwm::{
+    DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CLOAKED,
+    DWM_CLOAKED_SHELL,
+};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetObjectW,
     MonitorFromWindow, ReleaseDC, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
@@ -1013,6 +1016,29 @@ fn clamp_icon_dims(width: u32, height: u32, max_dim: u32) -> (u32, u32) {
 /// Returns `true` when we can't determine desktop membership (missing VDM,
 /// query error, invalid HWND) — we'd rather attempt the focus and risk a
 /// desktop jump than silently drop the restore in cases that might be fine.
+/// `DWMWA_COLOR_NONE` — no border at all (the windows crate has no constant).
+const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
+
+/// Set `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` on one of our own windows so
+/// DWM stops painting the accent-colored 1px border. Pre-22000 builds reject
+/// the attribute; that is swallowed (nothing to remove there).
+pub fn remove_window_border(id: &str) -> napi::Result<()> {
+    let hwnd_val: isize = id
+        .parse()
+        .map_err(|_| napi::Error::from_reason(format!("invalid window id: {id}")))?;
+    let hwnd = HWND(hwnd_val as *mut _);
+    let color: u32 = DWMWA_COLOR_NONE;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const u32 as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+    Ok(())
+}
+
 pub fn is_window_on_current_desktop(id: &str) -> napi::Result<bool> {
     let hwnd_val: isize = id
         .parse()
