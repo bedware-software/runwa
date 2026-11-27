@@ -59,7 +59,8 @@ import {
   isAccessibilityTrusted,
   isScreenRecordingGranted,
   requestAccessibilityPermission,
-  requestScreenRecordingPermission
+  requestScreenRecordingPermission,
+  setWindowBorderColor
 } from '../modules/window-switcher/native'
 
 /**
@@ -881,6 +882,13 @@ async function wipeContents(dir) {
   })
   ipcMain.on('palette:endMove', () => {
     paletteWindow.endMove()
+  })
+
+  // A renderer reports its window's frame color (resolved from the theme) so
+  // the DWM border can take it — see setWindowBorderColor. Windows only.
+  ipcMain.on('window:border-color', (e, hex: unknown) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (win) setWindowBorderColor(win, typeof hex === 'string' ? hex : null)
   })
 }
 

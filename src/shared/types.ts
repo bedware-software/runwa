@@ -911,6 +911,8 @@ export interface ElectronAPI {
   paletteStartMove: () => void
   paletteMoveBy: (dx: number, dy: number) => void
   paletteEndMove: () => void
+  /** Windows: the DWM border color for this window (`#rrggbb`), `null` for none. */
+  setWindowBorderColor: (hex: string | null) => void
 
   // Keyboard remap — module-specific surface for the settings panel.
   keyboardRemapGetRules: () => Promise<KeyboardRemapRulesView>

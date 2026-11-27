@@ -9,6 +9,7 @@ import {
 } from '@bedware/ui/vim-form'
 import { useSettingsStore } from '@/store/settings-store'
 import { applyTheme } from '@/lib/theme'
+import { syncWindowBorder } from '@/lib/window-border'
 import { Sidebar, settingsTabOrder, type SettingsTab } from './Sidebar'
 import { SettingsTitleBar } from './SettingsTitleBar'
 import { GeneralPanel } from './GeneralPanel'
@@ -58,6 +59,10 @@ export function SettingsApp() {
   useEffect(() => {
     applyTheme(theme, lightBackground)
   }, [theme, lightBackground])
+
+  // Windows: DWM's window border in the theme's frame color (no CSS frame
+  // here — the window edge is the frame).
+  useEffect(() => syncWindowBorder('border border-border bg-card'), [])
 
   useEffect(() => {
     const unsub = window.electronAPI.onSettingsChanged((settings) => {

@@ -50,7 +50,7 @@ interface NativeAddon {
   setDesktopChangeCallback(cb: (zeroBasedDesktop: number) => void): void
   focusTopmostOnCurrentDesktop(excludeId: string): FocusTopmostResult
   describeWindow(id: string): NativeWindow | null
-  removeWindowBorder?(id: string): void
+  setWindowBorderColor?(id: string, color: number): void
   getWindowIcon(id: string): NativeWindowIcon | null
   getFileIcon(path: string, iconIndex?: number): NativeWindowIcon | null
   isAccessibilityTrusted(): boolean
@@ -189,46 +189,78 @@ export function describeWindow(id: string): NativeWindow | null {
 
 const WM_SETTINGCHANGE = 0x001a
 const WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320
-const borderlessWindows = new WeakSet<Electron.BrowserWindow>()
+const DWMWA_COLOR_NONE = 0xfffffffe
+/** Windows whose border we manage → the COLORREF to keep on them. */
+const borderColors = new WeakMap<Electron.BrowserWindow, number>()
 
-function applyNoBorder(win: Electron.BrowserWindow): void {
+function applyBorder(win: Electron.BrowserWindow): void {
   if (win.isDestroyed()) return
   try {
     const id = win.getNativeWindowHandle().readBigUInt64LE(0).toString()
-    loadAddon().removeWindowBorder?.(id)
+    loadAddon().setWindowBorderColor?.(id, borderColors.get(win) ?? DWMWA_COLOR_NONE)
   } catch (err) {
-    console.warn('[native] removeWindowBorder failed:', err)
+    console.warn('[native] setWindowBorderColor failed:', err)
   }
 }
 
+/** `#rrggbb` → COLORREF (0x00BBGGRR), or `null` for anything else. */
+function hexToColorRef(hex: string): number | null {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
+  if (!m) return null
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16))
+  return ((b << 16) | (g << 8) | r) >>> 0
+}
+
 /**
- * Remove the 1px accent-colored border DWM paints around one of our own
- * windows when "Show accent color on title bars and window borders" is on
- * (DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE). Windows-only; never throws — a
- * missing border fix must not break window creation.
+ * Take over the 1px border DWM paints around one of our own windows.
+ * Starts as DWMWA_COLOR_NONE (no accent-colored line when "Show accent color
+ * on title bars and window borders" is on); `setWindowBorderColor` then gives
+ * it the window's own frame color. Windows-only; never throws — a border
+ * glitch must not break window creation.
+ *
+ * Why a real color and not NONE for framed popups: NONE leaves the window's
+ * 1px non-client strip (left, right, bottom — Chromium extends the client
+ * area over the top only) showing the system's light frame grey #F3F3F3,
+ * which sits beside the CSS frame as a double line. A colored DWM border
+ * fills that strip; the renderer drops its own CSS frame on Windows so the
+ * DWM line is the only one, with DWM's rounded corners.
  *
  * Setting it once is not enough: Electron (41) itself writes
  * DWMWA_BORDER_COLOR in `UpdateWindowAccentColor` on every activation change
  * and on WM_DWMCOLORIZATIONCOLORCHANGED / WM_SETTINGCHANGE — the system
  * accent while active, DWMWA_COLOR_DEFAULT otherwise (`accentColor: false`
- * only picks DEFAULT, which is the accent again). So we re-apply NONE after
+ * only picks DEFAULT, which is the accent again). So we re-apply ours after
  * each of those. The JS focus/blur events fire *before* Electron's update in
  * the same native call, hence `setImmediate`.
  */
 export function removeWindowBorder(win: Electron.BrowserWindow): void {
   if (process.platform !== 'win32' || win.isDestroyed()) return
-  applyNoBorder(win)
-  if (borderlessWindows.has(win)) return
-  borderlessWindows.add(win)
+  if (borderColors.has(win)) {
+    applyBorder(win)
+    return
+  }
+  borderColors.set(win, DWMWA_COLOR_NONE)
+  applyBorder(win)
 
   const reapply = (): void => {
-    setImmediate(() => applyNoBorder(win))
+    setImmediate(() => applyBorder(win))
   }
   win.on('focus', reapply)
   win.on('blur', reapply)
   win.on('show', reapply)
   win.hookWindowMessage(WM_DWMCOLORIZATIONCOLORCHANGED, reapply)
   win.hookWindowMessage(WM_SETTINGCHANGE, reapply)
+}
+
+/**
+ * Give a window taken over by `removeWindowBorder` a DWM border in `hex`
+ * (`#rrggbb`, the theme's frame color resolved by its renderer); anything
+ * else goes back to no border. Ignored for windows not taken over.
+ */
+export function setWindowBorderColor(win: Electron.BrowserWindow, hex: string | null): void {
+  if (process.platform !== 'win32' || win.isDestroyed() || !borderColors.has(win)) return
+  borderColors.set(win, (hex ? hexToColorRef(hex) : null) ?? DWMWA_COLOR_NONE)
+  applyBorder(win)
 }
 
 /**

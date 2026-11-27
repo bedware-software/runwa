@@ -24,6 +24,13 @@ import { IS_MAC } from '@/lib/platform'
 import type { PaletteItem, WindowIgnoreScope } from '@shared/types'
 import { CURRENT_OS } from '@/lib/platform'
 import { applyTheme } from '@/lib/theme'
+import { IS_WINDOWS_FRAME, syncWindowBorder } from '@/lib/window-border'
+
+/**
+ * The palette's frame. On Windows DWM draws it (see window-border.ts) in the
+ * color of these classes, so the CSS frame and rounding are dropped there.
+ */
+const FRAME_CLASSES = 'border border-border bg-popover'
 
 /** The fullscreen remap bypass is implemented in the Windows hook only. */
 const SUPPORTS_FULLSCREEN_BYPASS = CURRENT_OS === 'windows'
@@ -396,6 +403,8 @@ export function PaletteApp() {
   useEffect(() => {
     applyTheme(theme, lightBackground)
   }, [theme, lightBackground])
+
+  useEffect(() => syncWindowBorder(FRAME_CLASSES), [])
 
   // palette:show event from main (activation or direct-launch hotkey)
   useEffect(() => {
@@ -774,7 +783,7 @@ export function PaletteApp() {
     <div
       ref={rootRef}
       tabIndex={-1}
-      className="relative h-full bg-popover text-popover-foreground flex flex-col rounded-md border border-border overflow-hidden focus:outline-none"
+      className={`relative h-full bg-popover text-popover-foreground flex flex-col overflow-hidden focus:outline-none ${IS_WINDOWS_FRAME ? '' : 'rounded-md border border-border'}`}
       onKeyDown={onKeyDown}
     >
       {quiz ? (

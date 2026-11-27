@@ -165,6 +165,10 @@ const api: ElectronAPI = {
     ipcRenderer.send('palette:endMove')
   },
 
+  setWindowBorderColor: (hex: string | null): void => {
+    ipcRenderer.send('window:border-color', hex)
+  },
+
   // Keyboard remap — module-specific surface for the settings panel
   keyboardRemapGetRules: (): Promise<KeyboardRemapRulesView> =>
     ipcRenderer.invoke('keyboard-remap:getRules'),
