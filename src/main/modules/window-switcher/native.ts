@@ -187,20 +187,48 @@ export function describeWindow(id: string): NativeWindow | null {
   return loadAddon().describeWindow(id)
 }
 
-/**
- * Remove the 1px accent-colored border DWM paints around one of our own
- * windows when "Show accent color on title bars and window borders" is on
- * (DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE). Windows-only; never throws — a
- * missing border fix must not break window creation.
- */
-export function removeWindowBorder(win: Electron.BrowserWindow): void {
-  if (process.platform !== 'win32' || win.isDestroyed()) return
+const WM_SETTINGCHANGE = 0x001a
+const WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320
+const borderlessWindows = new WeakSet<Electron.BrowserWindow>()
+
+function applyNoBorder(win: Electron.BrowserWindow): void {
+  if (win.isDestroyed()) return
   try {
     const id = win.getNativeWindowHandle().readBigUInt64LE(0).toString()
     loadAddon().removeWindowBorder?.(id)
   } catch (err) {
     console.warn('[native] removeWindowBorder failed:', err)
   }
+}
+
+/**
+ * Remove the 1px accent-colored border DWM paints around one of our own
+ * windows when "Show accent color on title bars and window borders" is on
+ * (DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE). Windows-only; never throws — a
+ * missing border fix must not break window creation.
+ *
+ * Setting it once is not enough: Electron (41) itself writes
+ * DWMWA_BORDER_COLOR in `UpdateWindowAccentColor` on every activation change
+ * and on WM_DWMCOLORIZATIONCOLORCHANGED / WM_SETTINGCHANGE — the system
+ * accent while active, DWMWA_COLOR_DEFAULT otherwise (`accentColor: false`
+ * only picks DEFAULT, which is the accent again). So we re-apply NONE after
+ * each of those. The JS focus/blur events fire *before* Electron's update in
+ * the same native call, hence `setImmediate`.
+ */
+export function removeWindowBorder(win: Electron.BrowserWindow): void {
+  if (process.platform !== 'win32' || win.isDestroyed()) return
+  applyNoBorder(win)
+  if (borderlessWindows.has(win)) return
+  borderlessWindows.add(win)
+
+  const reapply = (): void => {
+    setImmediate(() => applyNoBorder(win))
+  }
+  win.on('focus', reapply)
+  win.on('blur', reapply)
+  win.on('show', reapply)
+  win.hookWindowMessage(WM_DWMCOLORIZATIONCOLORCHANGED, reapply)
+  win.hookWindowMessage(WM_SETTINGCHANGE, reapply)
 }
 
 /**
